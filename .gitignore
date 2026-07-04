@@ -146,3 +146,17 @@ $RECYCLE.BIN/
 
 # Mac crap
 .DS_Store
+
+# .NET
+*.userprefs
+*.DotSettings.user
+project.lock.json
+project.fragment.lock.json
+artifacts/
+**/bin/
+**/obj/
+*.nupkg
+*.snupkg
+.mono/
+content-source/sprites/
+content-source/*.bmp

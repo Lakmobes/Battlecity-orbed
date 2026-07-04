@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>BattleCity.Shared</RootNamespace>
+    <AssemblyName>BattleCity.Shared</AssemblyName>
+  </PropertyGroup>
+
+</Project>

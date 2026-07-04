@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>BattleCity.Core</RootNamespace>
+    <AssemblyName>BattleCity.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Arch" Version="2.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BattleCity.Shared\BattleCity.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

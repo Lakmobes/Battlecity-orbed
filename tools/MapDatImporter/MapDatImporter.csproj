@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>BattleCity.Tools.MapDatImporter</RootNamespace>
+    <AssemblyName>MapDatImporter</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BattleCity.Core\BattleCity.Core.csproj" />
+  </ItemGroup>
+
+</Project>
