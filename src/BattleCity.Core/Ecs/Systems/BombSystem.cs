@@ -94,6 +94,7 @@ public static class BombSystem
         audio?.Play(SoundId.Explode, center);
 
         ChainDetonateItems(world, blastAnchorX, blastAnchorY, exploded, audio, hooks);
+        DamagePlacedItems(world, blastAnchorX, blastAnchorY, exploded, audio, hooks);
         DamageBuildings(world, blastAnchorX, blastAnchorY, audio);
         DamageTanks(world, center, GameConstants.TileSize * 2f, audio, bomb.CityId, hooks);
     }
@@ -136,6 +137,54 @@ public static class BombSystem
         }
     }
 
+    private static void DamagePlacedItems(
+        World world,
+        int blastAnchorX,
+        int blastAnchorY,
+        List<Entity> exploded,
+        SimulationAudioBuffer? audio,
+        BombSimulationHooks hooks)
+    {
+        var toDestroy = new List<Entity>();
+
+        world.Query(
+            in BombQuery,
+            (Entity entity, ref PlacedItemRef item, ref Transform2D transform) =>
+            {
+                if (exploded.Contains(entity) || !ItemHealth.IsDamageable(item.Type))
+                {
+                    return;
+                }
+
+                if (Math.Abs(item.GridX + 1 - blastAnchorX) >= 2
+                    || Math.Abs(item.GridY + 1 - blastAnchorY) >= 2)
+                {
+                    return;
+                }
+
+                var center = new Vector2(
+                    transform.Position.X + GameConstants.TileSize / 2f,
+                    transform.Position.Y + GameConstants.TileSize / 2f);
+                GameplayEntityFactory.CreateExplosion(world, ExplosionKind.Large, center);
+                audio?.Play(SoundId.Explode, center);
+
+                if (world.Has<NetworkItemRef>(entity))
+                {
+                    hooks.ReportItemRemoved?.Invoke(world.Get<NetworkItemRef>(entity).ItemId);
+                }
+
+                toDestroy.Add(entity);
+            });
+
+        foreach (var entity in toDestroy)
+        {
+            if (world.IsAlive(entity))
+            {
+                world.Destroy(entity);
+            }
+        }
+    }
+
     private static void DamageBuildings(
         World world,
         int blastAnchorX,
@@ -149,6 +198,12 @@ public static class BombSystem
             in buildingQuery,
             (Entity entity, ref BuildingRef building, ref BuildingState state, ref Transform2D transform) =>
             {
+                // Command centers are immune to bombs.
+                if (BuildingCatalog.IsCommandCenter(building.TypeCode))
+                {
+                    return;
+                }
+
                 if (Math.Abs(building.GridAnchorX - blastAnchorX) >= 3
                     || Math.Abs(building.GridAnchorY - blastAnchorY) >= 3)
                 {

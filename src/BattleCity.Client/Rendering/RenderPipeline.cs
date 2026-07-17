@@ -46,7 +46,7 @@ public sealed class RenderPipeline
     {
         var visible = context.Camera.VisibleWorldRect;
         _terrain.Draw(spriteBatch, context.TileMap, visible);
-        _entities.CollectDrawables(context.World, context.CityBuild, context.AnimationTime);
+        _entities.CollectDrawables(context.World, context.CityBuild, context.AnimationTime, context.ObserverCityId);
         _entities.DrawBuildings(spriteBatch);
         _buildingOverlays.Draw(spriteBatch, context.World, context.CityBuild);
         _buildPreview.Draw(spriteBatch, in context);
@@ -57,7 +57,12 @@ public sealed class RenderPipeline
     {
         if (context.ShowMiniMap)
         {
-            _miniMap.Draw(spriteBatch, context.TileMap, context.FocusWorldPosition, context.CityCenterWorldPosition);
+            _miniMap.Draw(
+                spriteBatch,
+                context.TileMap,
+                context.World,
+                context.FocusWorldPosition,
+                context.CityCenterWorldPosition);
         }
 
         if (context.PlayerRespawnSeconds.HasValue)

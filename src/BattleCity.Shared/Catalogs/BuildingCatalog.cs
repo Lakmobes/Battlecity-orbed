@@ -165,9 +165,9 @@ public static class BuildingCatalog
     public static int GetFactoryMenuIndex(int treeIndex) => 3 + treeIndex * 2;
 
     /// <summary>
-    /// Factory bay tile where produced items appear.
-    /// Legacy uses <c>(anchorX - 1, anchorY - 2)</c> (north row); this rewrite drives on the
-    /// southern platform (<see cref="BattleCity.Core.Collision.BuildingCollision.GetDrivePlatformBounds"/>).
+    /// Factory bay tile where produced items appear (center of the driveable southern row).
+    /// Legacy used the northern row <c>(anchorX - 1, anchorY - 2)</c>; this rewrite keeps the
+    /// bottom third driveable to match the 3×2 structure / 1×1 bay art layout.
     /// </summary>
     public static (int GridX, int GridY) GetFactoryBayTile(int gridAnchorX, int gridAnchorY) =>
         (gridAnchorX - 1, gridAnchorY);

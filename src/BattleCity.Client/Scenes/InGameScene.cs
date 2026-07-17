@@ -82,14 +82,26 @@ public sealed class InGameScene : IScene
         _simulation.LoadCityLayout(_cityLayout);
         _simulation.SpawnDemoItems();
 
-        _cameraFocus = new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y);
+        var spawn = _simulation.TryGetCityBuild(0, out var homeBuild)
+                && CommandCenterLookup.TryGetRespawnPosition(
+                    _simulation.World,
+                    homeBuild.CommandCenterGridX,
+                    homeBuild.CommandCenterGridY,
+                    out var ccSpawn)
+            ? new NumericsVector2(ccSpawn.X, ccSpawn.Y)
+            : new NumericsVector2(_cityLayout.GetSpawnPosition().X, _cityLayout.GetSpawnPosition().Y);
 
-        var spawn = _cityLayout.GetSpawnPosition();
-        _simulation.CreatePlayerEntity(new NumericsVector2(spawn.X, spawn.Y));
-        _simulation.SpawnPracticeBots(new NumericsVector2(spawn.X, spawn.Y));
+        _cameraFocus = new Vector2(spawn.X + GameConstants.TileSize / 2f, spawn.Y + GameConstants.TileSize / 2f);
+        _simulation.CreatePlayerEntity(spawn);
+        _simulation.SpawnPracticeBots(spawn);
 
         _gameplayAudio = new GameplayAudioController(_context.Audio);
+        _camera.SetViewport(UiLayout.LogicalWidth, UiLayout.LogicalHeight);
+        _camera.WorldViewportWidth = UiLayout.WorldViewportWidth;
+        _camera.WorldViewportHeight = UiLayout.WorldViewportHeight;
+        _camera.Zoom = DisplaySettings.DefaultGameplayZoom;
         _cameraPanOffset = Vector2.Zero;
+        _camera.CenterOn(_cameraFocus);
         _chatLog.Append("Press Enter to chat.", ChatColorResolver.System);
         _loaded = true;
     }
@@ -330,9 +342,12 @@ public sealed class InGameScene : IScene
             cityBuild = build;
         }
 
-        var cityCenterWorldPosition = CommandCenterLookup.TryGetWorldPosition(
-                _simulation.World,
-                out var commandCenterPosition)
+        var cityCenterWorldPosition = _simulation.TryGetCityBuild(0, out var homeCity)
+                && CommandCenterLookup.TryGetWorldPosition(
+                    _simulation.World,
+                    homeCity.CommandCenterGridX,
+                    homeCity.CommandCenterGridY,
+                    out var commandCenterPosition)
             ? new Vector2(commandCenterPosition.X, commandCenterPosition.Y)
             : new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y);
 
@@ -408,6 +423,7 @@ public sealed class InGameScene : IScene
             ChatLines = _chatLog.Lines,
             IsChatting = _chatInput.IsActive,
             ChatDraft = _chatInput.Draft,
+            ObserverCityId = 0,
         };
     }
 
@@ -449,8 +465,8 @@ public sealed class InGameScene : IScene
             _cameraPanOffset.Y += panSpeed;
         }
 
-        _cameraPanOffset.X = Math.Clamp(_cameraPanOffset.X, -600f, 600f);
-        _cameraPanOffset.Y = Math.Clamp(_cameraPanOffset.Y, -600f, 600f);
+        _cameraPanOffset.X = Math.Clamp(_cameraPanOffset.X, -UiLayout.WorldViewportWidth * 0.5f, UiLayout.WorldViewportWidth * 0.5f);
+        _cameraPanOffset.Y = Math.Clamp(_cameraPanOffset.Y, -UiLayout.WorldViewportHeight * 0.5f, UiLayout.WorldViewportHeight * 0.5f);
     }
 
     private static TileMap LoadTileMap() => InGameWorldLoader.LoadTileMap();

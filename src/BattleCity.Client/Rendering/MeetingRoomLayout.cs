@@ -2,17 +2,24 @@ using Microsoft.Xna.Framework;
 
 namespace BattleCity.Client.Rendering;
 
-/// <summary>Layout for the online meeting room (800x600 logical).</summary>
+/// <summary>Layout for the online meeting room.</summary>
 public static class MeetingRoomLayout
 {
-    public const int RowHeight = 34;
-    public const int HeaderHeight = 24;
-    public const int PanelPadding = 10;
+    public const int RowHeight = 40;
+    public const int HeaderHeight = 28;
+    public const int PanelPadding = 14;
 
-    public static readonly Rectangle CitiesPanel = new(16, 56, 360, 468);
-    public static readonly Rectangle ChatPanel = new(384, 56, 400, 468);
-    public static readonly Rectangle RefreshButton = new(16, 536, 120, 28);
-    public static readonly Rectangle QuitHint = new(384, 536, 400, 28);
+    public static Rectangle CitiesPanel =>
+        new(24, 72, UiLayout.LogicalWidth / 2 - 36, UiLayout.LogicalHeight - 160);
+
+    public static Rectangle ChatPanel =>
+        new(UiLayout.LogicalWidth / 2 + 12, 72, UiLayout.LogicalWidth / 2 - 36, UiLayout.LogicalHeight - 160);
+
+    public static Rectangle RefreshButton =>
+        new(24, UiLayout.LogicalHeight - 72, 140, 32);
+
+    public static Rectangle QuitHint =>
+        new(UiLayout.LogicalWidth / 2 + 12, UiLayout.LogicalHeight - 72, UiLayout.LogicalWidth / 2 - 36, 32);
 
     public static int CityListTop => CitiesPanel.Y + PanelPadding + HeaderHeight;
 

@@ -29,10 +29,11 @@ public sealed class DeathOverlayRenderer
         }
 
         var seconds = Math.Max(0, (int)Math.Ceiling(respawnSecondsRemaining));
-        var centerX = UiLayout.WorldViewportWidth / 2;
+        var centerX = ModernHudLayout.ScreenCenterX;
+        var centerY = ModernHudLayout.ScreenCenterY;
 
-        DrawCenteredLine(spriteBatch, "You have been blown up!", centerX, 270, Color.White);
-        DrawCenteredLine(spriteBatch, $"You will respawn in: {seconds}", centerX, 285, Color.White);
+        DrawCenteredLine(spriteBatch, "You have been blown up!", centerX, centerY - 20, Color.White);
+        DrawCenteredLine(spriteBatch, $"You will respawn in: {seconds}", centerX, centerY + 4, Color.White);
     }
 
     private void DrawCenteredLine(SpriteBatch spriteBatch, string text, int centerX, int y, Color color)

@@ -41,14 +41,14 @@ public sealed class EntityRenderer
         _assets = assets;
     }
 
-    public void CollectDrawables(World world, CityBuildState? cityBuild = null, float animationTime = 0f)
+    public void CollectDrawables(World world, CityBuildState? cityBuild = null, float animationTime = 0f, int observerCityId = 0)
     {
-        CollectDrawablesInternal(world, cityBuild, animationTime);
+        CollectDrawablesInternal(world, cityBuild, animationTime, observerCityId);
     }
 
-    public void Draw(SpriteBatch spriteBatch, World world, CityBuildState? cityBuild = null, float animationTime = 0f)
+    public void Draw(SpriteBatch spriteBatch, World world, CityBuildState? cityBuild = null, float animationTime = 0f, int observerCityId = 0)
     {
-        CollectDrawablesInternal(world, cityBuild, animationTime);
+        CollectDrawablesInternal(world, cityBuild, animationTime, observerCityId);
         DrawBuildings(spriteBatch);
         DrawActors(spriteBatch);
     }
@@ -96,7 +96,7 @@ public sealed class EntityRenderer
         }
     }
 
-    private void CollectDrawablesInternal(World world, CityBuildState? cityBuild, float animationTime)
+    private void CollectDrawablesInternal(World world, CityBuildState? cityBuild, float animationTime, int observerCityId)
     {
         _buildingDrawList.Clear();
         _actorDrawList.Clear();
@@ -143,9 +143,16 @@ public sealed class EntityRenderer
                     }
                 }
 
+                var drawTransform = transform;
+                if (world.Has<PlacedItemRef>(entity))
+                {
+                    // Legacy CDrawing: tileY + 10 for non-turret items (turrets cancel via -10).
+                    drawTransform.Position += new System.Numerics.Vector2(0f, ItemSprites.WorldDrawOffsetY);
+                }
+
                 _actorDrawList.Add(new DrawableEntity(
-                    DrawableEntity.ComputeSortDepth(in transform, in sprite),
-                    transform,
+                    DrawableEntity.ComputeSortDepth(in drawTransform, in sprite),
+                    drawTransform,
                     sprite));
             });
 
@@ -153,7 +160,7 @@ public sealed class EntityRenderer
             in TurretQuery,
             (ref Transform2D transform, ref PlacedItemRef item, ref TurretState turret, ref SpriteRef sprite) =>
             {
-                if (!ShouldDrawTurret(in item, in turret))
+                if (!ShouldDrawTurret(in item, in turret, observerCityId))
                 {
                     return;
                 }
@@ -189,24 +196,25 @@ public sealed class EntityRenderer
     private void DrawBullet(SpriteBatch spriteBatch, Transform2D transform, SpriteRef sprite)
     {
         var texture = _assets.LoadTexture(sprite.TextureKey);
-        var source = new Rectangle(sprite.SourceX, sprite.SourceY, sprite.Width, sprite.Height);
-        var destination = new Rectangle(
-            (int)transform.Position.X,
-            (int)transform.Position.Y,
-            sprite.Width,
-            sprite.Height);
-
-        spriteBatch.Draw(texture, destination, source, Color.White);
+        var legacySource = new Rectangle(sprite.SourceX, sprite.SourceY, sprite.Width, sprite.Height);
+        WorldSpriteMetrics.DrawLegacySprite(
+            spriteBatch,
+            texture,
+            transform.Position.X,
+            transform.Position.Y,
+            legacySource,
+            Color.White);
     }
 
-    private static bool ShouldDrawTurret(in PlacedItemRef item, in TurretState turret)
+    private static bool ShouldDrawTurret(in PlacedItemRef item, in TurretState turret, int observerCityId)
     {
         if (!item.Active)
         {
             return false;
         }
 
-        if (item.Type == ItemType.Sleeper && !turret.HasTarget)
+        // Sleepers are always visible to the owning city; enemies only see them once woken.
+        if (item.Type == ItemType.Sleeper && !turret.HasTarget && item.CityId != observerCityId)
         {
             return false;
         }
@@ -221,39 +229,40 @@ public sealed class EntityRenderer
         TurretState turret)
     {
         var drawX = (int)transform.Position.X;
-        var drawY = (int)transform.Position.Y + TurretSprites.VerticalDrawOffset;
+        var drawY = (int)transform.Position.Y
+            + WorldSpriteMetrics.Scaled(TurretSprites.VerticalDrawOffset);
         var row = TurretSprites.GetSheetRow(item.Type);
         var baseTexture = _assets.LoadTexture(TurretSprites.BaseTextureKey);
         var headTexture = _assets.LoadTexture(TurretSprites.HeadTextureKey);
+        var spriteSize = TurretSprites.SpriteSize;
 
         var baseSource = new Rectangle(
-            turret.AnimationFrame * TurretSprites.SpriteSize,
-            row * TurretSprites.SpriteSize,
-            TurretSprites.SpriteSize,
-            TurretSprites.SpriteSize);
+            turret.AnimationFrame * spriteSize,
+            row * spriteSize,
+            spriteSize,
+            spriteSize);
         var headOrientation = TurretTargeting.AngleDegreesToHeadOrientation(turret.AimAngleDegrees);
         var headSource = new Rectangle(
-            headOrientation * TurretSprites.SpriteSize,
-            row * TurretSprites.SpriteSize,
-            TurretSprites.SpriteSize,
-            TurretSprites.SpriteSize);
+            headOrientation * spriteSize,
+            row * spriteSize,
+            spriteSize,
+            spriteSize);
 
-        var destination = new Rectangle(drawX, drawY, TurretSprites.SpriteSize, TurretSprites.SpriteSize);
-        spriteBatch.Draw(baseTexture, destination, baseSource, Color.White);
-        spriteBatch.Draw(headTexture, destination, headSource, Color.White);
+        WorldSpriteMetrics.DrawLegacySprite(spriteBatch, baseTexture, drawX, drawY, baseSource, Color.White);
+        WorldSpriteMetrics.DrawLegacySprite(spriteBatch, headTexture, drawX, drawY, headSource, Color.White);
     }
 
     private void DrawDrawable(SpriteBatch spriteBatch, Transform2D transform, SpriteRef sprite)
     {
         var texture = _assets.LoadTexture(sprite.TextureKey);
-        var source = new Rectangle(sprite.SourceX, sprite.SourceY, sprite.Width, sprite.Height);
-        var destination = new Rectangle(
-            (int)transform.Position.X,
-            (int)transform.Position.Y,
-            sprite.Width,
-            sprite.Height);
-
-        spriteBatch.Draw(texture, destination, source, Color.White);
+        var legacySource = new Rectangle(sprite.SourceX, sprite.SourceY, sprite.Width, sprite.Height);
+        WorldSpriteMetrics.DrawLegacySprite(
+            spriteBatch,
+            texture,
+            transform.Position.X,
+            transform.Position.Y,
+            legacySource,
+            Color.White);
     }
 
     private readonly record struct TurretDrawEntry(

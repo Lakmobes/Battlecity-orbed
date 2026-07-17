@@ -46,4 +46,7 @@ public sealed class RenderContext
     public IReadOnlyCollection<ChatLine>? ChatLines { get; init; }
     public bool IsChatting { get; init; }
     public string? ChatDraft { get; init; }
+
+    /// <summary>Local observer city for fog-of-war style item visibility (sleepers).</summary>
+    public int ObserverCityId { get; init; }
 }

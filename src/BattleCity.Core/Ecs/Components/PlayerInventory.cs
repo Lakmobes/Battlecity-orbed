@@ -13,10 +13,8 @@ public struct PlayerInventory
         ItemType.Plasma,
         ItemType.Mine,
         ItemType.Bomb,
-        ItemType.Cloak,
-        ItemType.MedKit,
-        ItemType.Rocket,
-        ItemType.Flare,
+        ItemType.Orb,
+        ItemType.Dfg,
     ];
 
     public int Cloak;
@@ -150,5 +148,16 @@ public struct PlayerInventory
                 return;
             }
         }
+    }
+
+    /// <summary>After depleting the selected placeable, move selection to the next stocked slot.</summary>
+    public void SelectNextAvailablePlaceable()
+    {
+        if (GetCount(SelectedItemType) > 0 && ItemCatalog.IsPlaceable(SelectedItemType))
+        {
+            return;
+        }
+
+        CycleSelection(1);
     }
 }

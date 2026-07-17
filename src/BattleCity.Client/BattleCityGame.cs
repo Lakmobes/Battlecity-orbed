@@ -27,10 +27,7 @@ public sealed class BattleCityGame : Game
         IsMouseVisible = true;
 
         Window.Title = GameInfo.Title;
-        _graphics.PreferredBackBufferWidth = DisplaySettings.PreferredWindowWidth;
-        _graphics.PreferredBackBufferHeight = DisplaySettings.PreferredWindowHeight;
-        _graphics.IsFullScreen = false;
-        _graphics.HardwareModeSwitch = false;
+        ApplyDisplayMode(startup: true);
     }
 
     protected override void LoadContent()
@@ -51,15 +48,7 @@ public sealed class BattleCityGame : Game
         if (WasPressed(keyboard, Keys.F11)
             || (keyboard.IsKeyDown(Keys.LeftAlt) && WasPressed(keyboard, Keys.Enter)))
         {
-            _graphics.IsFullScreen = !_graphics.IsFullScreen;
-            if (!_graphics.IsFullScreen)
-            {
-                _graphics.PreferredBackBufferWidth = DisplaySettings.PreferredWindowWidth;
-                _graphics.PreferredBackBufferHeight = DisplaySettings.PreferredWindowHeight;
-            }
-
-            _graphics.ApplyChanges();
-            RefreshPresentation();
+            ToggleFullScreen();
         }
 
         _previousKeyboard = keyboard;
@@ -116,6 +105,41 @@ public sealed class BattleCityGame : Game
         }
 
         base.Dispose(disposing);
+    }
+
+    private void ToggleFullScreen()
+    {
+        ApplyDisplayMode(startup: false, toggleFullscreen: true);
+        RefreshPresentation();
+    }
+
+    private void ApplyDisplayMode(bool startup, bool toggleFullscreen = false)
+    {
+        if (toggleFullscreen)
+        {
+            _graphics.IsFullScreen = !_graphics.IsFullScreen;
+        }
+        else if (startup)
+        {
+            _graphics.IsFullScreen = DisplaySettings.LaunchBorderlessFullscreen;
+        }
+
+        // Logical design is always 1920×1080. In borderless/fullscreen, size the back buffer
+        // to the monitor so the logical frame scales to fill the screen.
+        if (_graphics.IsFullScreen)
+        {
+            var displayMode = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
+            _graphics.PreferredBackBufferWidth = displayMode.Width;
+            _graphics.PreferredBackBufferHeight = displayMode.Height;
+        }
+        else
+        {
+            _graphics.PreferredBackBufferWidth = DisplaySettings.PreferredWindowWidth;
+            _graphics.PreferredBackBufferHeight = DisplaySettings.PreferredWindowHeight;
+        }
+
+        _graphics.HardwareModeSwitch = false;
+        _graphics.ApplyChanges();
     }
 
     private void RefreshPresentation()

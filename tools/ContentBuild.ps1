@@ -1,6 +1,7 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
-    [switch]$AllSprites
+    [switch]$AllSprites,
+    [switch]$GameSprites
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +13,8 @@ $audioOutput = Join-Path $RepoRoot "src\BattleCity.Client\Content\Audio"
 $bmpToPngProject = Join-Path $RepoRoot "tools\BmpToPng\BmpToPng.csproj"
 $mapImporterProject = Join-Path $RepoRoot "tools\MapDatImporter\MapDatImporter.csproj"
 $bmpToPngDll = Join-Path $RepoRoot "tools\BmpToPng\bin\Release\net8.0\BmpToPng.dll"
+$artAssetsProject = Join-Path $RepoRoot "tools\GenerateArtAssets\GenerateArtAssets.csproj"
+$artAssetsDll = Join-Path $RepoRoot "tools\GenerateArtAssets\bin\Release\net8.0\GenerateArtAssets.dll"
 $mapImporterDll = Join-Path $RepoRoot "tools\MapDatImporter\bin\Release\net8.0\MapDatImporter.dll"
 
 Write-Host "==> Converting terrain BMPs to PNG"
@@ -37,6 +40,14 @@ dotnet build $mapImporterProject -c Release | Out-Null
 dotnet exec $mapImporterDll -- `
     --input (Join-Path $legacyData "map.dat") `
     --output $mapOutput
+
+Write-Host "==> Generating HUD art"
+dotnet build $artAssetsProject -c Release | Out-Null
+$artArgs = @("exec", $artAssetsDll, "--", "--root", $RepoRoot)
+if ($GameSprites) {
+    $artArgs += "--game"
+}
+dotnet @artArgs
 
 Write-Host "==> Building MonoGame content"
 dotnet tool restore | Out-Null

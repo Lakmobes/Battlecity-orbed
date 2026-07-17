@@ -9,6 +9,9 @@ public static class ItemSprites
     public const int WorldSpriteSize = GameConstants.TileSize;
     public const int DroppedRowY = 42;
 
+    /// <summary>Legacy <c>CDrawing.cpp</c> item draw nudge (<c>tileY + 10</c>); turrets cancel this with -10.</summary>
+    public const int WorldDrawOffsetY = 10;
+
     public static (int SourceX, int SourceY) GetWorldSpriteOrigin(ItemType type, int animationFrame = 0)
     {
         if (type == ItemType.Orb)

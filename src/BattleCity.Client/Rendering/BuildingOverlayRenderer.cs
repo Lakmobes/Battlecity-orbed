@@ -15,8 +15,8 @@ namespace BattleCity.Client.Rendering;
 
 public sealed class BuildingOverlayRenderer
 {
-    private const int ItemIconSize = 32;
-    private const int NumberSize = 16;
+    private const int LegacyItemIconSize = 32;
+    private const int LegacyNumberSize = 16;
 
     private static readonly Arch.Core.QueryDescription BuildingQuery =
         new Arch.Core.QueryDescription().WithAll<Transform2D, BuildingRef, BuildingState>();
@@ -69,11 +69,14 @@ public sealed class BuildingOverlayRenderer
                 var displayPop = GetDisplayPopulation(typeCode, state.Population);
                 var (destX, destY, popSourceY) = GetPopulationDrawOffset(typeCode, transform.Position);
                 var sourceX = Math.Clamp(displayPop, 0, 49) * GameConstants.TileSize;
+                var legacySource = new Rectangle(sourceX, popSourceY, GameConstants.TileSize, GameConstants.TileSize);
 
-                spriteBatch.Draw(
+                WorldSpriteMetrics.DrawLegacySprite(
+                    spriteBatch,
                     population,
-                    new Rectangle(destX, destY, GameConstants.TileSize, GameConstants.TileSize),
-                    new Rectangle(sourceX, popSourceY, GameConstants.TileSize, GameConstants.TileSize),
+                    destX,
+                    destY,
+                    legacySource,
                     Color.White);
             });
     }
@@ -86,22 +89,25 @@ public sealed class BuildingOverlayRenderer
             : (14, 98);
 
         var (sourceX, sourceY) = ItemSprites.GetInventorySpriteOrigin((ItemType)buildingSubType);
+        var legacySource = new Rectangle(sourceX, sourceY, LegacyItemIconSize, LegacyItemIconSize);
 
-        spriteBatch.Draw(
+        WorldSpriteMetrics.DrawLegacySprite(
+            spriteBatch,
             items,
-            new Rectangle(tileX + offsetX, tileY + offsetY, ItemIconSize, ItemIconSize),
-            new Rectangle(sourceX, sourceY, ItemIconSize, ItemIconSize),
+            tileX + WorldSpriteMetrics.Scaled(offsetX),
+            tileY + WorldSpriteMetrics.Scaled(offsetY),
+            legacySource,
             Color.White);
     }
 
     private static void DrawFactoryStock(SpriteBatch spriteBatch, Texture2D numbers, int tileX, int tileY, int itemsLeft)
     {
-        DrawTwoDigitNumber(spriteBatch, numbers, tileX + 56, tileY + 84, itemsLeft);
+        DrawTwoDigitNumber(spriteBatch, numbers, tileX + WorldSpriteMetrics.Scaled(56), tileY + WorldSpriteMetrics.Scaled(84), itemsLeft);
     }
 
     private static void DrawResearchTimer(SpriteBatch spriteBatch, Texture2D numbers, int tileX, int tileY, int seconds)
     {
-        DrawTwoDigitNumber(spriteBatch, numbers, tileX + 56, tileY + 68, seconds);
+        DrawTwoDigitNumber(spriteBatch, numbers, tileX + WorldSpriteMetrics.Scaled(56), tileY + WorldSpriteMetrics.Scaled(68), seconds);
     }
 
     private static void DrawTwoDigitNumber(SpriteBatch spriteBatch, Texture2D numbers, int x, int y, int value)
@@ -109,17 +115,23 @@ public sealed class BuildingOverlayRenderer
         var clamped = Math.Clamp(value, 0, 99);
         var tens = clamped / 10;
         var ones = clamped % 10;
+        var digitSpacing = WorldSpriteMetrics.Scaled(16);
+        var legacyDigit = new Rectangle(0, 0, LegacyNumberSize, LegacyNumberSize);
 
-        spriteBatch.Draw(
+        WorldSpriteMetrics.DrawLegacySprite(
+            spriteBatch,
             numbers,
-            new Rectangle(x, y, NumberSize, NumberSize),
-            new Rectangle(tens * NumberSize, 0, NumberSize, NumberSize),
+            x,
+            y,
+            legacyDigit with { X = tens * LegacyNumberSize },
             Color.White);
 
-        spriteBatch.Draw(
+        WorldSpriteMetrics.DrawLegacySprite(
+            spriteBatch,
             numbers,
-            new Rectangle(x + 16, y, NumberSize, NumberSize),
-            new Rectangle(ones * NumberSize, 0, NumberSize, NumberSize),
+            x + digitSpacing,
+            y,
+            legacyDigit with { X = ones * LegacyNumberSize },
             Color.White);
     }
 
@@ -141,11 +153,11 @@ public sealed class BuildingOverlayRenderer
 
         return buildingType switch
         {
-            2 => (tileX + 96, tileY + 33, 0),
-            3 => (tileX + 92, tileY + 92, 0),
-            1 => (tileX + 96, tileY + 48, 0),
-            4 => (tileX + 96, tileY + 90, 0),
-            _ => (tileX + 96, tileY + 49, GameConstants.TileSize),
+            2 => (tileX + WorldSpriteMetrics.Scaled(96), tileY + WorldSpriteMetrics.Scaled(33), 0),
+            3 => (tileX + WorldSpriteMetrics.Scaled(92), tileY + WorldSpriteMetrics.Scaled(92), 0),
+            1 => (tileX + WorldSpriteMetrics.Scaled(96), tileY + WorldSpriteMetrics.Scaled(48), 0),
+            4 => (tileX + WorldSpriteMetrics.Scaled(96), tileY + WorldSpriteMetrics.Scaled(90), 0),
+            _ => (tileX + WorldSpriteMetrics.Scaled(96), tileY + WorldSpriteMetrics.Scaled(49), GameConstants.TileSize),
         };
     }
 }

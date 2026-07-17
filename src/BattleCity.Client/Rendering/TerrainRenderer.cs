@@ -10,8 +10,11 @@ namespace BattleCity.Client.Rendering;
 
 public sealed class TerrainRenderer
 {
-    private const int GroundSourceSize = 128;
-    private const int GroundDrawSize = 144;
+    private const int LegacyGroundSourceSize = 128;
+    private const int LegacyGroundDrawSize = 144;
+
+    private static int GroundSourceSize => WorldSpriteMetrics.Scaled(LegacyGroundSourceSize);
+    private static int GroundDrawSize => WorldSpriteMetrics.Scaled(LegacyGroundDrawSize);
 
     private readonly AssetService _assets;
 
@@ -67,12 +70,13 @@ public sealed class TerrainRenderer
 
                 var texture = terrain == TerrainTileType.Lava ? _assets.Lava : _assets.Rocks;
                 var autotileIndex = tileMap.AutotileIndices[tileX, tileY];
-                var destination = new Rectangle(
+                var destination = WorldSpriteMetrics.LegacyWorldDestination(
                     tileX * GameConstants.TileSize,
                     tileY * GameConstants.TileSize,
                     GameConstants.TileSize,
                     GameConstants.TileSize);
-                var source = new Rectangle(autotileIndex, 0, GameConstants.TileSize, GameConstants.TileSize);
+                var source = WorldSpriteMetrics.ScaleSource(
+                    new Rectangle(autotileIndex, 0, GameConstants.TileSize, GameConstants.TileSize));
 
                 spriteBatch.Draw(texture, destination, source, Color.White);
             }

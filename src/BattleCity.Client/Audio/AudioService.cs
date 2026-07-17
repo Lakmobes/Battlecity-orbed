@@ -43,10 +43,15 @@ public sealed class AudioService
     {
         foreach (SoundId sound in Enum.GetValues<SoundId>())
         {
-            var path = SoundCatalog.GetContentPath(sound);
+            if (TryLoadWav(sound, out var fromWav))
+            {
+                _effects[sound] = fromWav;
+                continue;
+            }
+
             try
             {
-                _effects[sound] = _content.Load<SoundEffect>(path);
+                _effects[sound] = _content.Load<SoundEffect>(SoundCatalog.GetContentPath(sound));
             }
             catch (ContentLoadException)
             {
@@ -121,6 +126,28 @@ public sealed class AudioService
         }
 
         _loops.Clear();
+    }
+
+    private bool TryLoadWav(SoundId sound, out SoundEffect effect)
+    {
+        effect = null!;
+        var fileName = SoundCatalog.GetLegacyFileName(sound);
+        var path = Path.Combine(AppContext.BaseDirectory, _content.RootDirectory, "Audio", fileName);
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var fileStream = File.OpenRead(path);
+            effect = SoundEffect.FromStream(fileStream);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static float ComputePan(float listenerX, float worldX)

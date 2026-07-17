@@ -7,6 +7,7 @@ using BattleCity.Core.Ecs;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Ecs.Systems;
 using BattleCity.Core.Maps;
+using BattleCity.Shared.Constants;
 
 using Xunit;
 
@@ -38,7 +39,7 @@ public class DeadTankCollisionTests
             },
             new BulletRef { Owner = shooter },
             new Damage { Value = 10 },
-            new Lifetime { RemainingSeconds = 1f });
+            new Lifetime { Remaining = 1f });
 
         BulletCollisionSystem.Resolve(simulation.World, simulation.TileMap);
 

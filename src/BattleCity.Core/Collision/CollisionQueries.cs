@@ -158,4 +158,29 @@ public static class CollisionQueries
 
         return blocked;
     }
+
+    /// <summary>True when <paramref name="bounds"/> overlaps another item collider (not buildings).</summary>
+    public static bool IntersectsItemCollider(World world, Entity self, AxisAlignedBox bounds)
+    {
+        var query = new QueryDescription().WithAll<Transform2D, Collider>();
+        var blocked = false;
+
+        world.Query(
+            in query,
+            (Entity other, ref Transform2D transform, ref Collider collider) =>
+            {
+                if (blocked || other == self || collider.Layer != CollisionLayer.Item)
+                {
+                    return;
+                }
+
+                var otherBounds = AxisAlignedBox.FromCollider(transform.Position, collider);
+                if (bounds.Intersects(otherBounds))
+                {
+                    blocked = true;
+                }
+            });
+
+        return blocked;
+    }
 }

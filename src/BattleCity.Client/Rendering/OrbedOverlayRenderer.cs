@@ -28,14 +28,14 @@ public sealed class OrbedOverlayRenderer
             return;
         }
 
-        var centerX = UiLayout.WorldViewportWidth / 2;
+        var centerX = ModernHudLayout.ScreenCenterX;
         var title = isVictim ? "CITY ORBED!" : "ORB STRIKE!";
         var titleColor = isVictim ? Color.Red : Color.Gold;
 
-        DrawCenteredLine(spriteBatch, title, centerX, 230, titleColor);
+        DrawCenteredLine(spriteBatch, title, centerX, ModernHudLayout.ScreenCenterY - 60, titleColor);
 
         var lines = message.Split('\n');
-        var y = 255;
+        var y = ModernHudLayout.ScreenCenterY - 30;
         foreach (var line in lines)
         {
             DrawCenteredLine(spriteBatch, line, centerX, y, Color.White);

@@ -63,6 +63,10 @@ public sealed class AssetService
     public Texture2D Health => LoadTexture(LegacySpriteNames.Health);
     public Texture2D BlackNumbers => LoadTexture(LegacySpriteNames.BlackNumbers);
     public Texture2D Items => LoadTexture(LegacySpriteNames.Items);
+    public Texture2D HudPanel => LoadTexture(HudSpriteNames.Panel);
+    public Texture2D HudSlot => LoadTexture(HudSpriteNames.Slot);
+    public Texture2D HudSlotSelected => LoadTexture(HudSpriteNames.SlotSelected);
+    public Texture2D HudCompassRing => LoadTexture(HudSpriteNames.CompassRing);
 
     public SpriteFont LoadFont(string contentPath)
     {

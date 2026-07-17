@@ -20,7 +20,12 @@ public static class ItemDropSystem
     private static readonly QueryDescription PlayerQuery =
         new QueryDescription().WithAll<InputControlled, InputCommand, Transform2D, TankFacing, TankLifeState, PlayerInventory, TankStatus>();
 
-    public static void Update(World world, SimulationAudioBuffer? audio = null, bool suppressNetworkedActions = false, CityBuildState? cityBuild = null)
+    public static void Update(
+        World world,
+        TileMap? tileMap = null,
+        SimulationAudioBuffer? audio = null,
+        bool suppressNetworkedActions = false,
+        CityBuildState? cityBuild = null)
     {
         world.Query(
             in PlayerQuery,
@@ -59,7 +64,7 @@ public static class ItemDropSystem
 
                 if (input.DropSelectedItemPressed)
                 {
-                    if (TryDropSelectedItem(world, entity, ref inventory, transform.Position, cityBuild))
+                    if (TryDropSelectedItem(world, entity, ref inventory, transform.Position, cityBuild, tileMap))
                     {
                         audio?.Play(SoundId.Click, transform.Position);
                     }
@@ -67,7 +72,7 @@ public static class ItemDropSystem
 
                 if (input.DropBombPressed && inventory.GetCount(ItemType.Bomb) > 0)
                 {
-                    if (TryDropItem(world, entity, transform.Position, ItemType.Bomb, active: true, cityBuild))
+                    if (TryDropItem(world, entity, transform.Position, ItemType.Bomb, active: true, cityBuild, tileMap))
                     {
                         inventory.TryConsume(ItemType.Bomb);
                         audio?.Play(SoundId.Click, transform.Position);
@@ -76,7 +81,7 @@ public static class ItemDropSystem
 
                 if (input.DropOrbPressed && inventory.GetCount(ItemType.Orb) > 0)
                 {
-                    if (TryDropItem(world, entity, transform.Position, ItemType.Orb, active: false, cityBuild))
+                    if (TryDropItem(world, entity, transform.Position, ItemType.Orb, active: false, cityBuild, tileMap))
                     {
                         inventory.TryConsume(ItemType.Orb);
                         audio?.Play(SoundId.Click, transform.Position);
@@ -109,20 +114,28 @@ public static class ItemDropSystem
         Entity owner,
         ref PlayerInventory inventory,
         Vector2 tankTopLeft,
-        CityBuildState? cityBuild)
+        CityBuildState? cityBuild,
+        TileMap? tileMap)
     {
+        if (!ItemCatalog.IsPlaceable(inventory.SelectedItemType))
+        {
+            return false;
+        }
+
         if (inventory.GetCount(inventory.SelectedItemType) <= 0)
         {
             return false;
         }
 
-        const bool active = true;
-        if (!TryDropItem(world, owner, tankTopLeft, inventory.SelectedItemType, active, cityBuild))
+        // Planted bombs stay until armed with B; other placeables activate immediately.
+        var active = inventory.SelectedItemType != ItemType.Bomb;
+        if (!TryDropItem(world, owner, tankTopLeft, inventory.SelectedItemType, active, cityBuild, tileMap))
         {
             return false;
         }
 
         inventory.TryConsume(inventory.SelectedItemType);
+        inventory.SelectNextAvailablePlaceable();
         return true;
     }
 
@@ -132,8 +145,18 @@ public static class ItemDropSystem
         Vector2 tankTopLeft,
         ItemType type,
         bool active,
-        CityBuildState? cityBuild) =>
-        ItemDropActions.TryDropForEntity(world, owner, tankTopLeft, type, active, out _, out _, cityBuild: cityBuild);
+        CityBuildState? cityBuild,
+        TileMap? tileMap) =>
+        ItemDropActions.TryDropForEntity(
+            world,
+            owner,
+            tankTopLeft,
+            type,
+            active,
+            out _,
+            out _,
+            cityBuild: cityBuild,
+            tileMap: tileMap);
 }
 
 public static class BulletCollisionSystem
@@ -180,16 +203,18 @@ public static class BulletCollisionSystem
                     return;
                 }
 
-                if (CollisionQueries.IntersectsBlockingCollider(world, bulletEntity, bounds))
+                // Buildings are handled by TryHitBuilding (population damage). Do not hard-kill
+                // bullets on building colliders — that blocked shots into items on factory bays.
+                if (TryHitBuilding(world, bulletEntity, bounds, hits, audio))
+                {
+                    return;
+                }
+
+                if (CollisionQueries.IntersectsItemCollider(world, bulletEntity, bounds))
                 {
                     hits.Add(bulletEntity);
                     GameplayEntityFactory.CreateExplosion(world, ExplosionKind.Small, impactPoint);
                     audio?.Play(SoundId.Explode, impactPoint);
-                    return;
-                }
-
-                if (TryHitBuilding(world, bulletEntity, bounds, hits, audio))
-                {
                     return;
                 }
 
@@ -297,14 +322,17 @@ public static class BulletCollisionSystem
             in itemQuery,
             (Entity entity, ref PlacedItemRef item, ref Transform2D transform, ref Health health) =>
             {
-                if (hit || !ItemHealth.IsDamageable(item.Type) || !item.Active)
+                if (hit || !ItemHealth.IsDamageable(item.Type))
                 {
                     return;
                 }
 
-                var itemBounds = world.Has<Collider>(entity)
-                    ? AxisAlignedBox.FromCollider(transform.Position, world.Get<Collider>(entity))
-                    : GameplayEntityFactory.GetLegacyItemBulletBounds(item.GridX, item.GridY);
+                // Full tile at the item's world position (walls use GridToWorldPosition, not legacy -48 offset).
+                var itemBounds = new AxisAlignedBox(
+                    transform.Position.X,
+                    transform.Position.Y,
+                    GameConstants.TileSize,
+                    GameConstants.TileSize);
 
                 if (!itemBounds.Intersects(bulletBounds))
                 {

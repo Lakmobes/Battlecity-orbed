@@ -86,9 +86,9 @@ public static class GameplayEntityFactory
         int cityId = 0,
         ushort networkItemId = 0)
     {
-        var position = IsTurretType(type)
-            ? LegacyItemWorldPosition(gridX, gridY)
-            : PlacedItemPlacement.GridToWorldPosition(gridX, gridY);
+        // All placeables sit on the tile grid (legacy itm->X/Y * 48). Turret muzzle flash
+        // uses a separate -24 formula in TurretTargeting — do not bake it into world position.
+        var position = PlacedItemPlacement.GridToWorldPosition(gridX, gridY);
         var (sourceX, sourceY) = ItemSprites.GetWorldSpriteOrigin(type);
         var blocksMovement = type >= ItemType.Wall;
         var fuseTimer = type == ItemType.Bomb && active
@@ -175,21 +175,6 @@ public static class GameplayEntityFactory
         ref var sprite = ref world.Get<SpriteRef>(entity);
         sprite.TextureKey = TurretSprites.BaseTextureKey;
     }
-
-    public static AxisAlignedBox GetLegacyItemBulletBounds(int gridX, int gridY)
-    {
-        var tileSize = GameConstants.TileSize;
-        return new AxisAlignedBox(
-            gridX * tileSize - tileSize,
-            gridY * tileSize - tileSize,
-            tileSize,
-            tileSize);
-    }
-
-    public static Vector2 LegacyItemWorldPosition(int gridX, int gridY) =>
-        new(
-            gridX * GameConstants.TileSize - 24,
-            gridY * GameConstants.TileSize - 24);
 
     private static bool IsTurretType(ItemType type) =>
         type is ItemType.Turret or ItemType.Sleeper or ItemType.Plasma;

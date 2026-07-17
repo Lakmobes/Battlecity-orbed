@@ -122,6 +122,7 @@ public class TurretAiTests
             new Transform2D { Position = position, PreviousPosition = position },
             new CityAffiliation { CityId = cityId },
             new Health { Current = GameConstants.MaxHealth, Max = GameConstants.MaxHealth },
+            new TankStatus(),
             new Collider
             {
                 OffsetX = GameConstants.PlayerCollisionInset,

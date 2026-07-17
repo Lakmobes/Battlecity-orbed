@@ -4,34 +4,17 @@ using BattleCity.Core.Ecs.Components;
 using BattleCity.Shared.Catalogs;
 
 using Microsoft.Xna.Framework;
-
 using Microsoft.Xna.Framework.Graphics;
-
-
 
 namespace BattleCity.Client.Rendering;
 
-
-
-/// <summary>In-game HUD and legacy 200 px right interface rail.</summary>
-
+/// <summary>In-game HUD: modern transparent overlay or legacy right interface rail.</summary>
 public sealed class UiRenderer
-
 {
-
-    private const int InterfaceTopHeight = 430;
-
-    private const int InterfaceBottomHeight = 170;
-
-    private const int TextPanelPadding = 8;
-
-    private static readonly Color TextColor = new(255, 255, 210);
-
+    private static readonly Color TopBarFill = new(8, 10, 24, 150);
+    private static readonly Color TextColor = new(235, 235, 245);
     private static readonly Color TextShadowColor = new(0, 0, 0, 200);
-
-    private static readonly Color TextPanelColor = new(8, 10, 24, 210);
-
-
+    private static readonly Color StatusPanelFill = new(8, 10, 24, 140);
 
     private readonly AssetService _assets;
     private readonly InventoryPanelRenderer _inventoryPanel;
@@ -55,70 +38,88 @@ public sealed class UiRenderer
         _buildMenu.LoadContent();
     }
 
-
-
     public void Draw(SpriteBatch spriteBatch, in RenderContext context)
-
     {
+        DrawModern(spriteBatch, in context);
+    }
 
-        var panelX = context.ScreenWidth - RenderConstants.UiPanelWidth;
-
-        DrawInterfacePanel(spriteBatch, panelX, context.ScreenHeight);
-
-        _underAttackPanel.Draw(spriteBatch, panelX, in context);
+    private void DrawModern(SpriteBatch spriteBatch, in RenderContext context)
+    {
+        var pixel = _assets.Pixel;
+        HudOverlayHelper.DrawPanel(spriteBatch, _assets, ModernHudLayout.TopBar, TopBarFill);
 
         if (context.PlayerInventory.HasValue)
         {
             _inventoryPanel.Draw(
                 spriteBatch,
-                panelX,
                 context.PlayerInventory.Value,
                 context.PlayerHealth,
                 context.PlayerMaxHealth);
         }
 
-        var textX = panelX + 12;
-        var y = InterfaceTopHeight + 12;
+        _underAttackPanel.Draw(spriteBatch, in context);
+        DrawStatusPanel(spriteBatch, in context);
 
-        var textLines = new List<string>
-
+        if (context.ShowBuildMenu && context.CityBuild is not null)
         {
+            _buildMenu.Draw(
+                spriteBatch,
+                (int)context.BuildMenuAnchor.X,
+                (int)context.BuildMenuAnchor.Y,
+                context.ScreenWidth,
+                context.ScreenHeight,
+                context.CityBuild);
+        }
+    }
 
-            context.PlayerDisplayName ?? "Player",
-
-            context.LoadedCityName ?? "Unknown City",
-
-            $"Buildings: {context.BuildingCount}",
-
-        };
-
-
-
-        if (context.PlayerHealth.HasValue && context.PlayerMaxHealth.HasValue)
-
+    private void DrawStatusPanel(SpriteBatch spriteBatch, in RenderContext context)
+    {
+        if (_font is null)
         {
-
-            if (!context.PlayerRespawnSeconds.HasValue)
-
-            {
-
-                textLines.Add($"HP: {context.PlayerHealth}/{context.PlayerMaxHealth}");
-
-            }
-
+            return;
         }
 
+        var textLines = BuildStatusLines(in context);
+        if (textLines.Count == 0)
+        {
+            return;
+        }
 
+        var panel = ModernHudLayout.StatusPanel(textLines.Count);
+        HudOverlayHelper.DrawPanel(spriteBatch, _assets, panel, StatusPanelFill);
+
+        var x = panel.X + ModernHudLayout.StatusPanelPadding;
+        var y = panel.Y + ModernHudLayout.StatusPanelPadding;
+        foreach (var line in textLines)
+        {
+            DrawLine(spriteBatch, x, ref y, line);
+        }
+    }
+
+    private List<string> BuildStatusLines(in RenderContext context)
+    {
+        var textLines = new List<string>
+        {
+            context.PlayerDisplayName ?? "Player",
+            context.LoadedCityName ?? "Unknown City",
+            $"Buildings: {context.BuildingCount}",
+        };
+
+        if (context.PlayerHealth.HasValue
+            && context.PlayerMaxHealth.HasValue
+            && !context.PlayerRespawnSeconds.HasValue)
+        {
+            textLines.Add($"HP: {context.PlayerHealth}/{context.PlayerMaxHealth}");
+        }
 
         if (context.PlayerInventory.HasValue)
         {
-            textLines.Add("D-drop  [ ]-cycle  B-bomb");
-            textLines.Add("Shift-laser  stop+Shift-rocket");
+            textLines.Add("D-drop placeables  [ ]-cycle");
+            textLines.Add("C-cloak  H-medkit  Shift-fire");
         }
 
-
-
         textLines.Add(context.ShowMiniMap ? "Minimap: ON (M)" : "Minimap: OFF (M)");
+        textLines.Add("F11 / Alt+Enter - fullscreen");
         textLines.Add("Build: right-click map");
 
         if (context.BuildModeSlot != 0)
@@ -135,166 +136,22 @@ public sealed class UiRenderer
         }
 
         textLines.Add("Esc - return to menu");
-
-
-
-        DrawTextPanel(spriteBatch, textX - TextPanelPadding, y - TextPanelPadding, textLines);
-
-
-
-        foreach (var line in textLines)
-
-        {
-
-            DrawLine(spriteBatch, textX, ref y, line);
-
-        }
-
-        if (context.ShowBuildMenu && context.CityBuild is not null)
-        {
-            _buildMenu.Draw(
-                spriteBatch,
-                (int)context.BuildMenuAnchor.X,
-                (int)context.BuildMenuAnchor.Y,
-                context.ScreenWidth,
-                context.ScreenHeight,
-                context.CityBuild);
-        }
-
+        return textLines;
     }
-
-
-
-    private void DrawTextPanel(SpriteBatch spriteBatch, int x, int y, IReadOnlyList<string> lines)
-
-    {
-
-        if (_font is null || lines.Count == 0)
-
-        {
-
-            return;
-
-        }
-
-
-
-        const int lineHeight = 20;
-
-        var maxWidth = 0f;
-
-        foreach (var line in lines)
-
-        {
-
-            maxWidth = Math.Max(maxWidth, _font.MeasureString(line).X * 0.95f);
-
-        }
-
-
-
-        var panelWidth = (int)maxWidth + TextPanelPadding * 2;
-
-        var panelHeight = lines.Count * lineHeight + TextPanelPadding * 2;
-
-        spriteBatch.Draw(_assets.Pixel, new Rectangle(x, y, panelWidth, panelHeight), TextPanelColor);
-
-    }
-
-
-
-    private void DrawInterfacePanel(SpriteBatch spriteBatch, int panelX, int screenHeight)
-
-    {
-
-        var pixel = _assets.Pixel;
-
-        var interfaceTop = _assets.LoadTexture(LegacySpriteNames.Interface);
-
-        var interfaceBottom = _assets.LoadTexture(LegacySpriteNames.InterfaceBottom);
-
-
-
-        if (interfaceTop != pixel)
-
-        {
-
-            spriteBatch.Draw(
-
-                interfaceTop,
-
-                new Rectangle(panelX, 0, RenderConstants.UiPanelWidth, InterfaceTopHeight),
-
-                Color.White);
-
-        }
-
-        else
-
-        {
-
-            spriteBatch.Draw(
-
-                pixel,
-
-                new Rectangle(panelX, 0, RenderConstants.UiPanelWidth, screenHeight),
-
-                new Color(32, 32, 48, 255));
-
-        }
-
-
-
-        if (interfaceBottom != pixel)
-
-        {
-
-            spriteBatch.Draw(
-
-                interfaceBottom,
-
-                new Rectangle(panelX, InterfaceTopHeight, RenderConstants.UiPanelWidth, InterfaceBottomHeight),
-
-                Color.White);
-
-        }
-
-
-
-        var separator = new Rectangle(panelX - 1, 0, 1, screenHeight);
-
-        spriteBatch.Draw(pixel, separator, new Color(80, 80, 100));
-
-    }
-
-
 
     private void DrawLine(SpriteBatch spriteBatch, int x, ref int y, string text)
-
     {
-
         if (_font is null)
-
         {
-
-            y += 20;
-
+            y += ModernHudLayout.StatusLineHeight;
             return;
-
         }
 
-
-
         var scale = new Vector2(0.95f, 0.95f);
-
         var position = new Vector2(x, y);
-
         spriteBatch.DrawString(_font, text, position + new Vector2(1f, 1f), TextShadowColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-
         spriteBatch.DrawString(_font, text, position, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-
-        y += 20;
-
+        y += ModernHudLayout.StatusLineHeight;
     }
 
     private static string GetBuildModeLabel(int buildModeSlot)
@@ -308,5 +165,3 @@ public sealed class UiRenderer
         return BuildingCatalog.MenuNames[menuIndex];
     }
 }
-
-

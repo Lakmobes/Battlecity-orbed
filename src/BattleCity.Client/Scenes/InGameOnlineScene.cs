@@ -123,7 +123,12 @@ public sealed class InGameOnlineScene : IScene
         _simulation.SpawnPracticeBots(new NumericsVector2(spawn.X, spawn.Y));
 
         _gameplayAudio = new GameplayAudioController(_context.Audio);
+        _camera.SetViewport(UiLayout.LogicalWidth, UiLayout.LogicalHeight);
+        _camera.WorldViewportWidth = UiLayout.WorldViewportWidth;
+        _camera.WorldViewportHeight = UiLayout.WorldViewportHeight;
+        _camera.Zoom = DisplaySettings.DefaultGameplayZoom;
         _cameraPanOffset = Vector2.Zero;
+        _camera.CenterOn(_cameraFocus);
         _chatLog.Append("Press Enter to chat.", ChatColorResolver.System);
         _loaded = true;
     }
@@ -757,11 +762,18 @@ public sealed class InGameOnlineScene : IScene
             TileMap = _tileMap,
             World = _simulation.World,
             FocusWorldPosition = _cameraFocus,
-            CityCenterWorldPosition = CommandCenterLookup.TryGetWorldPosition(
-                    _simulation.World,
-                    out var commandCenterPosition)
+            CityCenterWorldPosition = _simulation.TryGetCityBuild(_remotePlayers?.ObserverCityId ?? 0, out var homeCity)
+                    && CommandCenterLookup.TryGetWorldPosition(
+                        _simulation.World,
+                        homeCity.CommandCenterGridX,
+                        homeCity.CommandCenterGridY,
+                        out var commandCenterPosition)
                 ? new Vector2(commandCenterPosition.X, commandCenterPosition.Y)
-                : new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y),
+                : CommandCenterLookup.TryGetWorldPosition(
+                    _simulation.World,
+                    out var anyCommandCenter)
+                    ? new Vector2(anyCommandCenter.X, anyCommandCenter.Y)
+                    : new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y),
             ScreenWidth = _camera.ViewportWidth,
             ScreenHeight = _camera.ViewportHeight,
             ShowMiniMap = _showMiniMap,
@@ -793,6 +805,7 @@ public sealed class InGameOnlineScene : IScene
             ChatLines = _chatLog.Lines,
             IsChatting = _chatInput.IsActive,
             ChatDraft = _chatInput.Draft,
+            ObserverCityId = _remotePlayers?.ObserverCityId ?? 0,
         };
     }
 
@@ -968,8 +981,8 @@ public sealed class InGameOnlineScene : IScene
             _cameraPanOffset.Y += panSpeed;
         }
 
-        _cameraPanOffset.X = Math.Clamp(_cameraPanOffset.X, -600f, 600f);
-        _cameraPanOffset.Y = Math.Clamp(_cameraPanOffset.Y, -600f, 600f);
+        _cameraPanOffset.X = Math.Clamp(_cameraPanOffset.X, -UiLayout.WorldViewportWidth * 0.5f, UiLayout.WorldViewportWidth * 0.5f);
+        _cameraPanOffset.Y = Math.Clamp(_cameraPanOffset.Y, -UiLayout.WorldViewportHeight * 0.5f, UiLayout.WorldViewportHeight * 0.5f);
     }
 
     private UiRenderer CreateUiRenderer()

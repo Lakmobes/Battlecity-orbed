@@ -26,6 +26,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>Content\Data\%(Filename)%(Extension)</Link>
     </None>
+    <None Include="Content\Audio\*.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Content\Audio\%(Filename)%(Extension)</Link>
+    </None>
   </ItemGroup>
 
   <Target Name="RestoreDotnetTools" BeforeTargets="CollectPackageReferences">

@@ -113,9 +113,10 @@ public static class TurretTargeting
 
     public static Vector2 GetTurretWorldCenter(int gridX, int gridY) =>
         new(
-            gridX * GameConstants.TileSize - 24f + GameConstants.TileSize / 2f,
-            gridY * GameConstants.TileSize - 24f + GameConstants.TileSize / 2f);
+            gridX * GameConstants.TileSize + GameConstants.TileSize / 2f,
+            gridY * GameConstants.TileSize + GameConstants.TileSize / 2f);
 
+    /// <summary>Legacy muzzle flash origin from <c>CItem.cpp</c> (artist-tuned, not the sprite top-left).</summary>
     public static Vector2 GetTurretMuzzlePosition(int gridX, int gridY, int direction)
     {
         var legacyFacing = -direction + 32;

@@ -2,6 +2,7 @@ using System.Numerics;
 
 using Arch.Core;
 
+using BattleCity.Core.Ai;
 using BattleCity.Core.Collision;
 using BattleCity.Core.Ecs;
 using BattleCity.Core.Ecs.Components;
@@ -175,34 +176,76 @@ public class GameplayEntityTests
     }
 
     [Fact]
-    public void DroppingTurret_PlacesAheadOfTankWithoutBlockingMovement()
+    public void PlacedTurret_SitsOnTileGrid()
+    {
+        using var world = World.Create();
+        var turret = GameplayEntityFactory.CreatePlacedItem(world, ItemType.Turret, 10, 12);
+        ref var transform = ref world.Get<Transform2D>(turret);
+        Assert.Equal(new Vector2(10 * 48f, 12 * 48f), transform.Position);
+        Assert.Equal(new Vector2(10 * 48f + 24f, 12 * 48f + 24f), TurretTargeting.GetTurretWorldCenter(10, 12));
+    }
+
+    [Fact]
+    public void DroppingWall_PlacesOnTankTileAndNudgesTankLeft()
     {
         using var simulation = new GameSimulation();
         var tankTopLeft = new Vector2(10 * 48f, 10 * 48f);
         var player = simulation.CreatePlayerEntity(tankTopLeft);
-        ref var facing = ref simulation.World.Get<TankFacing>(player);
-        facing.Direction = InputSystem.ToSpriteFacing(0);
 
         Assert.True(ItemDropActions.TryDropForEntity(
             simulation.World,
             player,
             tankTopLeft,
-            ItemType.Turret,
+            ItemType.Wall,
             active: true,
             out var gridX,
-            out var gridY));
-        Assert.False(gridX == 10 && gridY == 10);
+            out var gridY,
+            tileMap: simulation.TileMap));
+        Assert.Equal(10, gridX);
+        Assert.Equal(10, gridY);
 
         ref var transform = ref simulation.World.Get<Transform2D>(player);
-        ref var collider = ref simulation.World.Get<Collider>(player);
-        transform.Position = tankTopLeft + new Vector2(6f, 0f);
-        var result = CollisionQueries.CheckPlayerCollision(
+        Assert.Equal(tankTopLeft + new Vector2(-48f, 0f), transform.Position);
+    }
+
+    [Fact]
+    public void DroppingWall_FailsWhenTileOccupied()
+    {
+        using var simulation = new GameSimulation();
+        var tankTopLeft = new Vector2(10 * 48f, 10 * 48f);
+        var player = simulation.CreatePlayerEntity(tankTopLeft);
+        GameplayEntityFactory.CreatePlacedItem(simulation.World, ItemType.Wall, 10, 10);
+
+        Assert.False(ItemDropActions.TryDropForEntity(
             simulation.World,
-            simulation.TileMap,
             player,
-            transform.Position,
-            collider);
-        Assert.Equal(PlayerCollisionResult.None, result);
+            tankTopLeft,
+            ItemType.Wall,
+            active: true,
+            out _,
+            out _,
+            tileMap: simulation.TileMap));
+    }
+
+    [Fact]
+    public void DroppingBomb_AllowedWhenTileOccupied()
+    {
+        using var simulation = new GameSimulation();
+        var tankTopLeft = new Vector2(10 * 48f, 10 * 48f);
+        var player = simulation.CreatePlayerEntity(tankTopLeft);
+        GameplayEntityFactory.CreatePlacedItem(simulation.World, ItemType.Wall, 10, 10);
+
+        Assert.True(ItemDropActions.TryDropForEntity(
+            simulation.World,
+            player,
+            tankTopLeft,
+            ItemType.Bomb,
+            active: false,
+            out var gridX,
+            out var gridY,
+            tileMap: simulation.TileMap));
+        Assert.Equal(10, gridX);
+        Assert.Equal(10, gridY);
     }
 
     [Fact]

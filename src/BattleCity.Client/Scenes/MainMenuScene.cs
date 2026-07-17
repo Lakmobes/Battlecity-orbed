@@ -32,7 +32,11 @@ public sealed class MainMenuScene : IScene
 
     public Matrix WorldViewMatrix => Matrix.Identity;
 
-    public void LoadContent() => _ui.LoadContent();
+    public void LoadContent()
+    {
+        _ui.LoadContent();
+        _input.Reset();
+    }
 
     public SceneTransition Update(GameTime gameTime, int screenWidth, int screenHeight)
     {
@@ -74,8 +78,9 @@ public sealed class MainMenuScene : IScene
 
         if (menuInput.CancelPressed)
         {
-            _context.Audio.Play(SoundId.Click);
-            return SceneTransition.Quit;
+            // Esc is used in-game to return here; ignore it on the menu so a held Esc
+            // does not immediately quit. Use the Quit menu item to exit.
+            return SceneTransition.None;
         }
 
         return SceneTransition.None;
@@ -95,7 +100,7 @@ public sealed class MainMenuScene : IScene
             RenderConstants.DefaultWindowHeight,
             MenuItems,
             _selectedIndex,
-            "Up/Down - select   Enter - confirm   Esc - quit");
+            "Up/Down - select   Enter - confirm");
     }
 
     public void Dispose()

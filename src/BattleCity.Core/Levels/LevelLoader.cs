@@ -4,8 +4,10 @@ using BattleCity.Core.Collision;
 using BattleCity.Core.Ecs;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Levels;
+using BattleCity.Core.Maps;
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Constants;
+using BattleCity.Shared.Data;
 
 namespace BattleCity.Core.Levels;
 
@@ -32,6 +34,50 @@ public static class LevelLoader
         SpawnBuilding(
             world,
             new CityBuildingPlacement(-1, gridAnchorX, gridAnchorY, BuildingCatalog.CommandCenterTypeCode));
+
+    /// <summary>
+    /// Spawns a command-center building on every map city-center tile cluster except the home CC.
+    /// Offline clients do not load other cities' .city files, but CCs should still be visible.
+    /// </summary>
+    public static void SpawnRemoteCommandCenters(
+        World world,
+        TileMap tileMap,
+        int homeGridAnchorX,
+        int homeGridAnchorY)
+    {
+        for (var y = 1; y < TileMap.Size - 1; y++)
+        {
+            for (var x = 1; x < TileMap.Size - 1; x++)
+            {
+                if (tileMap.Terrain[x, y] != TerrainTileType.CityCenter)
+                {
+                    continue;
+                }
+
+                // Top-left tile of a contiguous city-center region.
+                if (tileMap.Terrain[x - 1, y] == TerrainTileType.CityCenter
+                    || tileMap.Terrain[x, y - 1] == TerrainTileType.CityCenter)
+                {
+                    continue;
+                }
+
+                var gridAnchorX = x + GameConstants.BuildingCollisionOffset;
+                var gridAnchorY = y + GameConstants.BuildingCollisionOffset;
+                if (OverlapsFootprint(gridAnchorX, gridAnchorY, homeGridAnchorX, homeGridAnchorY))
+                {
+                    continue;
+                }
+
+                SpawnCommandCenter(world, gridAnchorX, gridAnchorY);
+            }
+        }
+    }
+
+    private static bool OverlapsFootprint(int gridAnchorX, int gridAnchorY, int otherGridX, int otherGridY) =>
+        gridAnchorX >= otherGridX - 2
+        && gridAnchorX <= otherGridX + 2
+        && gridAnchorY >= otherGridY - 2
+        && gridAnchorY <= otherGridY + 2;
 
     public static Entity SpawnBuilding(World world, CityBuildingPlacement building)
     {

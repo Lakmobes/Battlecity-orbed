@@ -10,7 +10,7 @@ public static class RenderConstants
 
     public const float MinZoom = 0.5f;
 
-    public const float MaxZoom = 2.0f;
+    public const float MaxZoom = 3f;
 
     public const float ZoomStep = 0.1f;
 

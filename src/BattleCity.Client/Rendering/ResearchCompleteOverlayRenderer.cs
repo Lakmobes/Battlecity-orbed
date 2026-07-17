@@ -28,8 +28,8 @@ public sealed class ResearchCompleteOverlayRenderer
             return;
         }
 
-        var centerX = UiLayout.WorldViewportWidth / 2;
-        DrawCenteredLine(spriteBatch, "RESEARCH COMPLETE!", centerX, 250, Color.Gold);
+        var centerX = ModernHudLayout.ScreenCenterX;
+        DrawCenteredLine(spriteBatch, "RESEARCH COMPLETE!", centerX, ModernHudLayout.ScreenCenterY - 40, Color.Gold);
 
         var lines = message.Split('\n');
         var y = 275;

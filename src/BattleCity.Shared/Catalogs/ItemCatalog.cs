@@ -41,4 +41,25 @@ public static class ItemCatalog
     ];
 
     public static string GetName(Data.ItemType type) => Names[(int)type];
+
+    /// <summary>
+    /// Items placed in the world (walls, turrets, mines, bombs, etc.).
+    /// Gear like missiles, medkits, cloak, and flares are used from inventory instead.
+    /// </summary>
+    public static bool IsPlaceable(Data.ItemType type) =>
+        type is Data.ItemType.Wall
+            or Data.ItemType.Turret
+            or Data.ItemType.Sleeper
+            or Data.ItemType.Plasma
+            or Data.ItemType.Mine
+            or Data.ItemType.Bomb
+            or Data.ItemType.Orb
+            or Data.ItemType.Dfg;
+
+    /// <summary>Owned equipment / ammo used via hotkeys or fire, not dropped on the ground.</summary>
+    public static bool IsGear(Data.ItemType type) =>
+        type is Data.ItemType.Cloak
+            or Data.ItemType.Rocket
+            or Data.ItemType.MedKit
+            or Data.ItemType.Flare;
 }

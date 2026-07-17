@@ -30,8 +30,9 @@ public sealed class Camera2D
     {
         get
         {
-            return Matrix.CreateScale(Zoom, Zoom, 1f)
-                * Matrix.CreateTranslation(-Position.X, -Position.Y, 0f);
+            // Row-vector convention (SpriteBatch): screen = world * translate * scale.
+            return Matrix.CreateTranslation(-Position.X, -Position.Y, 0f)
+                * Matrix.CreateScale(Zoom, Zoom, 1f);
         }
     }
 

@@ -52,11 +52,18 @@ public sealed class BuildPreviewRenderer
         var (sourceX, sourceY) = BuildingSprites.GetSourceOrigin(context.BuildPreviewTypeCode);
         var buildings = _assets.LoadTexture(BuildingSprites.TextureKey);
         var tintColor = context.BuildPreviewIsValid ? ValidTint : InvalidTint;
+        var legacySource = new Rectangle(
+            sourceX,
+            sourceY,
+            BuildingSprites.SpriteSize,
+            BuildingSprites.SpriteSize);
 
-        spriteBatch.Draw(
+        WorldSpriteMetrics.DrawLegacySprite(
+            spriteBatch,
             buildings,
-            new Rectangle(drawX, drawY, BuildingSprites.SpriteSize, BuildingSprites.SpriteSize),
-            new Rectangle(sourceX, sourceY, BuildingSprites.SpriteSize, BuildingSprites.SpriteSize),
+            drawX,
+            drawY,
+            legacySource,
             tintColor);
 
         if (BuildingCatalog.IsFactory(context.BuildPreviewTypeCode)
@@ -72,11 +79,14 @@ public sealed class BuildPreviewRenderer
         var (offsetX, offsetY) = BuildingCatalog.IsFactory(typeCode) ? (56, 52) : (14, 98);
         var (sourceX, sourceY) = ItemSprites.GetInventorySpriteOrigin((ItemType)buildingSubType);
         var items = _assets.Items;
+        var legacySource = new Rectangle(sourceX, sourceY, 32, 32);
 
-        spriteBatch.Draw(
+        WorldSpriteMetrics.DrawLegacySprite(
+            spriteBatch,
             items,
-            new Rectangle(tileX + offsetX, tileY + offsetY, 32, 32),
-            new Rectangle(sourceX, sourceY, 32, 32),
+            tileX + WorldSpriteMetrics.Scaled(offsetX),
+            tileY + WorldSpriteMetrics.Scaled(offsetY),
+            legacySource,
             tint);
     }
 }

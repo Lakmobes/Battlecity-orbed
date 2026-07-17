@@ -13,10 +13,23 @@ public readonly struct MenuInputState
 public sealed class MenuInputReader
 {
     private KeyboardState _previousKeyboard;
+    private bool _primed;
+
+    public void Reset()
+    {
+        _previousKeyboard = Keyboard.GetState();
+        _primed = true;
+    }
 
     public MenuInputState Poll()
     {
         var keyboard = Keyboard.GetState();
+        if (!_primed)
+        {
+            _previousKeyboard = keyboard;
+            _primed = true;
+        }
+
         var state = new MenuInputState
         {
             MoveUpPressed = WasPressed(keyboard, Keys.Up) || WasPressed(keyboard, Keys.W),

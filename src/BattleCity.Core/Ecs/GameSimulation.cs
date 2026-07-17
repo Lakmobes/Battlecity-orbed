@@ -4,6 +4,7 @@ using Arch.Core;
 
 using BattleCity.Core.Audio;
 using BattleCity.Core.City;
+using BattleCity.Core.Collision;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Ecs.Systems;
 using BattleCity.Core.Gameplay;
@@ -87,16 +88,43 @@ public sealed class GameSimulation : IDisposable
     public void LoadCityLayout(CityLayout layout)
     {
         _loadedCity = layout;
-        LevelLoader.SpawnBuildings(_world, layout);
 
         var build = new CityBuildState { CityId = 0 };
         CityBuildInitializer.InitializeFromLayout(build, layout, _tileMap);
         LevelLoader.SpawnCommandCenter(_world, build.CommandCenterGridX, build.CommandCenterGridY);
-        build.CurrentBuildingCount = Math.Max(build.CurrentBuildingCount, layout.Buildings.Count + 1);
-        build.MaxBuildingCount = Math.Max(build.MaxBuildingCount, build.CurrentBuildingCount);
+        LevelLoader.SpawnRemoteCommandCenters(
+            _world,
+            _tileMap,
+            build.CommandCenterGridX,
+            build.CommandCenterGridY);
+
+        var spawnedFromLayout = 0;
+        foreach (var building in layout.Buildings)
+        {
+            if (OverlapsBuildingFootprint(
+                    building.GridX,
+                    building.GridY,
+                    build.CommandCenterGridX,
+                    build.CommandCenterGridY))
+            {
+                continue;
+            }
+
+            LevelLoader.SpawnBuilding(_world, building);
+            spawnedFromLayout++;
+        }
+
+        build.CurrentBuildingCount = Math.Max(1, spawnedFromLayout + 1);
+        build.MaxBuildingCount = build.CurrentBuildingCount;
         _cityBuild = build;
         AssignNetworkBuildingIds();
     }
+
+    private static bool OverlapsBuildingFootprint(int gridAnchorX, int gridAnchorY, int otherGridX, int otherGridY) =>
+        gridAnchorX >= otherGridX - 2
+        && gridAnchorX <= otherGridX + 2
+        && gridAnchorY >= otherGridY - 2
+        && gridAnchorY <= otherGridY + 2;
 
     public void SpawnDemoItems(int cityId = 0)
     {
@@ -303,7 +331,11 @@ public sealed class GameSimulation : IDisposable
         mayor.IsMayor = isMayor;
     }
 
-    public Entity CreateBotEntity(Vector2 position, int cityId, int spriteSourceX = 48)
+    public Entity CreateBotEntity(
+        Vector2 position,
+        int cityId,
+        int spriteSourceX = 48,
+        float aggroRangePixels = 2000f)
     {
         return _world.Create(
             new Transform2D { Position = position, PreviousPosition = position },
@@ -312,7 +344,7 @@ public sealed class GameSimulation : IDisposable
             {
                 TextureKey = "Sprites/Tanks",
                 SourceX = spriteSourceX,
-                SourceY = 0,
+                SourceY = TankSpriteSelector.EnemyCommandoRow * GameConstants.TileSize,
                 Width = GameConstants.TileSize,
                 Height = GameConstants.TileSize,
             },
@@ -324,7 +356,7 @@ public sealed class GameSimulation : IDisposable
                 Height = GameConstants.TileSize - GameConstants.PlayerCollisionInset * 2,
                 Layer = CollisionLayer.Player,
             },
-            new BotController { AggroRangePixels = 2000f },
+            new BotController { AggroRangePixels = aggroRangePixels },
             new PatrolBehavior(),
             new TankFacing { Direction = 16, TurnCooldownSeconds = 0f },
             new Health { Current = GameConstants.MaxHealth, Max = GameConstants.MaxHealth },
@@ -391,8 +423,162 @@ public sealed class GameSimulation : IDisposable
 
     public void SpawnPracticeBots(Vector2 playerSpawn)
     {
-        CreateBotEntity(playerSpawn + new Vector2(0f, -144f), cityId: 1, spriteSourceX: 48);
-        CreateBotEntity(playerSpawn + new Vector2(192f, 96f), cityId: 1, spriteSourceX: 96);
+        const float practiceAggroPixels = 720f;
+        var spawns = FindPracticeBotSpawns(playerSpawn, count: 2);
+        CreateBotEntity(spawns[0], cityId: 1, spriteSourceX: 48, aggroRangePixels: practiceAggroPixels);
+        CreateBotEntity(spawns[1], cityId: 1, spriteSourceX: 96, aggroRangePixels: practiceAggroPixels);
+    }
+
+    private Vector2[] FindPracticeBotSpawns(Vector2 playerSpawn, int count)
+    {
+        var results = new Vector2[count];
+        var cityBounds = GetLoadedCityWorldBounds();
+        var tile = GameConstants.TileSize;
+
+        // Prefer open ground south/east of the city, well outside the building footprint.
+        var candidates = new List<Vector2>(capacity: 64);
+        if (cityBounds is { } bounds)
+        {
+            var centerX = (bounds.MinX + bounds.MaxX) / 2f;
+            var southY = bounds.MaxY + tile * 12;
+            var eastX = bounds.MaxX + tile * 12;
+            var westX = bounds.MinX - tile * 12;
+            var northY = bounds.MinY - tile * 12;
+
+            for (var i = 0; i < 16; i++)
+            {
+                var spread = (i - 7.5f) * tile * 2f;
+                candidates.Add(new Vector2(centerX + spread, southY + (i % 4) * tile * 2));
+                candidates.Add(new Vector2(eastX + (i % 4) * tile * 2, bounds.MinY + (bounds.MaxY - bounds.MinY) * 0.5f + spread));
+                candidates.Add(new Vector2(westX - (i % 4) * tile * 2, bounds.MinY + (bounds.MaxY - bounds.MinY) * 0.5f + spread));
+                candidates.Add(new Vector2(centerX + spread, northY - (i % 4) * tile * 2));
+            }
+        }
+        else
+        {
+            candidates.Add(playerSpawn + new Vector2(0f, tile * 20));
+            candidates.Add(playerSpawn + new Vector2(tile * 20, 0f));
+            candidates.Add(playerSpawn + new Vector2(-tile * 20, tile * 8));
+            candidates.Add(playerSpawn + new Vector2(tile * 12, tile * 16));
+        }
+
+        var filled = 0;
+        foreach (var candidate in candidates)
+        {
+            if (filled >= count)
+            {
+                break;
+            }
+
+            var snapped = SnapTankToTile(candidate);
+            if (!IsOpenTankSpawn(snapped))
+            {
+                continue;
+            }
+
+            var tooCloseToPlayer = Vector2.DistanceSquared(snapped, playerSpawn) < (tile * 10f) * (tile * 10f);
+            var tooCloseToOther = false;
+            for (var i = 0; i < filled; i++)
+            {
+                if (Vector2.DistanceSquared(snapped, results[i]) < (tile * 6f) * (tile * 6f))
+                {
+                    tooCloseToOther = true;
+                    break;
+                }
+            }
+
+            if (tooCloseToPlayer || tooCloseToOther)
+            {
+                continue;
+            }
+
+            results[filled++] = snapped;
+        }
+
+        // Fallback: far offsets from the player if city search failed.
+        var fallbackOffsets = new[]
+        {
+            new Vector2(0f, tile * 24),
+            new Vector2(tile * 24, tile * 8),
+            new Vector2(-tile * 24, tile * 8),
+            new Vector2(tile * 16, -tile * 20),
+        };
+        for (var i = filled; i < count; i++)
+        {
+            var fallback = SnapTankToTile(playerSpawn + fallbackOffsets[i % fallbackOffsets.Length]);
+            if (!IsOpenTankSpawn(fallback))
+            {
+                // Walk outward until clear.
+                for (var step = 1; step <= 40; step++)
+                {
+                    var probe = SnapTankToTile(fallback + new Vector2(0f, step * tile));
+                    if (IsOpenTankSpawn(probe))
+                    {
+                        fallback = probe;
+                        break;
+                    }
+                }
+            }
+
+            results[i] = fallback;
+        }
+
+        return results;
+    }
+
+    private (float MinX, float MinY, float MaxX, float MaxY)? GetLoadedCityWorldBounds()
+    {
+        if (_loadedCity is null || _loadedCity.Buildings.Count == 0)
+        {
+            return null;
+        }
+
+        var minX = float.MaxValue;
+        var minY = float.MaxValue;
+        var maxX = float.MinValue;
+        var maxY = float.MinValue;
+
+        foreach (var building in _loadedCity.Buildings)
+        {
+            var topLeft = BuildingPlacement.GridAnchorToWorldPosition(building.GridX, building.GridY);
+            minX = Math.Min(minX, topLeft.X);
+            minY = Math.Min(minY, topLeft.Y);
+            maxX = Math.Max(maxX, topLeft.X + GameConstants.BuildingCollisionSize);
+            maxY = Math.Max(maxY, topLeft.Y + GameConstants.BuildingCollisionSize);
+        }
+
+        return (minX, minY, maxX, maxY);
+    }
+
+    private static Vector2 SnapTankToTile(Vector2 position) =>
+        new(
+            MathF.Floor(position.X / GameConstants.TileSize) * GameConstants.TileSize,
+            MathF.Floor(position.Y / GameConstants.TileSize) * GameConstants.TileSize);
+
+    private bool IsOpenTankSpawn(Vector2 position)
+    {
+        var max = GameConstants.WorldSizePixels - GameConstants.TileSize;
+        if (position.X < 0 || position.Y < 0 || position.X > max || position.Y > max)
+        {
+            return false;
+        }
+
+        var collider = new Collider
+        {
+            OffsetX = GameConstants.PlayerCollisionInset,
+            OffsetY = GameConstants.PlayerCollisionInset,
+            Width = GameConstants.TileSize - GameConstants.PlayerCollisionInset * 2,
+            Height = GameConstants.TileSize - GameConstants.PlayerCollisionInset * 2,
+            Layer = CollisionLayer.Player,
+        };
+
+        return CollisionQueries.CheckPlayerCollision(
+                _world,
+                _tileMap,
+                Entity.Null,
+                position,
+                in collider)
+            == PlayerCollisionResult.None;
     }
 
     public void Tick(float deltaSeconds)
@@ -407,7 +593,7 @@ public sealed class GameSimulation : IDisposable
         MovementSystem.UpdateNonBullets(_world, deltaSeconds);
         WeaponSystem.Update(_world, deltaSeconds, _audioBuffer, ReportLocalShot);
         BotAiSystem.UpdateFiring(_world, deltaSeconds, _audioBuffer);
-        ItemDropSystem.Update(_world, _audioBuffer, SuppressLocalItemDrops, _cityBuild);
+        ItemDropSystem.Update(_world, _tileMap, _audioBuffer, SuppressLocalItemDrops, _cityBuild);
         BombSystem.Update(_world, deltaSeconds, _audioBuffer, CreateBombSimulationHooks());
         BuildingPopulationSystem.Update(_world, deltaSeconds);
         ResearchSystem.Update(_world, _cityBuild, deltaSeconds, _audioBuffer);
@@ -588,7 +774,13 @@ public sealed class GameSimulation : IDisposable
     }
 
     private bool TryGetCityRespawnPositionFromWorld(out Vector2 position) =>
-        CommandCenterLookup.TryGetRespawnPosition(_world, out position);
+        _cityBuild is not null
+            ? CommandCenterLookup.TryGetRespawnPosition(
+                _world,
+                _cityBuild.CommandCenterGridX,
+                _cityBuild.CommandCenterGridY,
+                out position)
+            : CommandCenterLookup.TryGetRespawnPosition(_world, out position);
 
     public void ApplyNetworkHp(in ServerHpPacket packet)
     {
@@ -650,7 +842,7 @@ public sealed class GameSimulation : IDisposable
         }
 
         ref var inventory = ref _world.Get<PlayerInventory>(entity);
-        if (inventory.GetCount(type) <= 0)
+        if (!ItemCatalog.IsPlaceable(type) || inventory.GetCount(type) <= 0)
         {
             return false;
         }
@@ -667,7 +859,8 @@ public sealed class GameSimulation : IDisposable
                 out var gridX,
                 out var gridY,
                 itemId,
-                _cityBuild))
+                _cityBuild,
+                _tileMap))
         {
             return false;
         }
@@ -676,6 +869,8 @@ public sealed class GameSimulation : IDisposable
         {
             return false;
         }
+
+        inventory.SelectNextAvailablePlaceable();
 
         var cityId = _world.Has<CityAffiliation>(entity)
             ? _world.Get<CityAffiliation>(entity).CityId
@@ -1352,7 +1547,8 @@ public sealed class GameSimulation : IDisposable
             active,
             out _,
             out _,
-            cityBuild: _cityBuild);
+            cityBuild: _cityBuild,
+            tileMap: _tileMap);
     }
 
     private CombatLifeSimulationHooks CreateCombatLifeSimulationHooks() =>
