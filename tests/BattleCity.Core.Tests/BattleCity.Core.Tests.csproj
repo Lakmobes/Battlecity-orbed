@@ -22,4 +22,8 @@
     <ProjectReference Include="..\..\src\BattleCity.Shared\BattleCity.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -2,6 +2,7 @@ using System.Net.Sockets;
 
 using BattleCity.Server;
 
+using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Network;
 using BattleCity.Shared.Network.Packets;
 
@@ -11,14 +12,31 @@ namespace BattleCity.Core.Tests;
 
 public class GameServerNetworkTests : IDisposable
 {
-    private readonly GameServer _server = new();
+    private readonly string _dbPath = Path.Combine(
+        Path.GetTempPath(),
+        $"bc-test-{Guid.NewGuid():N}.db");
+    private readonly GameServer _server;
 
     public GameServerNetworkTests()
     {
+        _server = new GameServer(_dbPath);
         _server.Start("127.0.0.1", 0);
     }
 
-    public void Dispose() => _server.Dispose();
+    public void Dispose()
+    {
+        _server.Dispose();
+        try
+        {
+            File.Delete(_dbPath);
+            File.Delete(_dbPath + "-shm");
+            File.Delete(_dbPath + "-wal");
+        }
+        catch
+        {
+            // Best-effort temp cleanup.
+        }
+    }
 
     [Fact]
     public void GuestClientCanCompleteLegacyLoginHandshake()
@@ -43,7 +61,22 @@ public class GameServerNetworkTests : IDisposable
             packet => packet.MessageId == (byte)ServerMessageId.LoginCorrect);
         Assert.Equal((byte)ServerMessageId.LoginCorrect, loginCorrect.MessageId);
 
-        stream.Write(LegacyPacketCodec.EncodeClient(ClientMessageId.NextStep, "A"u8));
+        // Meeting-room path: apply as first player → mayor → JoinGame sends smStateGame.
+        // Direct NextStep 'A' no longer joins without a city assignment.
+        var buenosAiresId = -1;
+        for (var i = 0; i < CityCatalog.Names.Count; i++)
+        {
+            if (CityCatalog.Names[i] == "Buenos Aires")
+            {
+                buenosAiresId = i;
+                break;
+            }
+        }
+
+        Assert.True(buenosAiresId >= 0);
+        Span<byte> jobApp = stackalloc byte[1];
+        jobApp[0] = (byte)buenosAiresId;
+        stream.Write(LegacyPacketCodec.EncodeClient(ClientMessageId.JobApp, jobApp));
         PumpServer();
 
         var stateGame = WaitForServerPacket(
@@ -56,7 +89,7 @@ public class GameServerNetworkTests : IDisposable
 
     private void PumpServer()
     {
-        for (var i = 0; i < 5; i++)
+        for (var i = 0; i < 8; i++)
         {
             _server.Update(1f / 60f);
             Thread.Sleep(10);

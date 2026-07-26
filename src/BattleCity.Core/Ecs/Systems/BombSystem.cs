@@ -95,7 +95,7 @@ public static class BombSystem
 
         ChainDetonateItems(world, blastAnchorX, blastAnchorY, exploded, audio, hooks);
         DamagePlacedItems(world, blastAnchorX, blastAnchorY, exploded, audio, hooks);
-        DamageBuildings(world, blastAnchorX, blastAnchorY, audio);
+        DamageBuildings(world, blastAnchorX, blastAnchorY, audio, hooks);
         DamageTanks(world, center, GameConstants.TileSize * 2f, audio, bomb.CityId, hooks);
     }
 
@@ -189,7 +189,8 @@ public static class BombSystem
         World world,
         int blastAnchorX,
         int blastAnchorY,
-        SimulationAudioBuffer? audio)
+        SimulationAudioBuffer? audio,
+        BombSimulationHooks hooks)
     {
         var buildingQuery = new QueryDescription().WithAll<BuildingRef, BuildingState, Transform2D>();
         var toDestroy = new List<Entity>();
@@ -210,7 +211,6 @@ public static class BombSystem
                     return;
                 }
 
-                BuildingPopulationSystem.DetachBeforeDestroy(world, entity);
                 var center = new Vector2(
                     transform.Position.X + GameConstants.BuildingCollisionSize / 2f,
                     transform.Position.Y + GameConstants.BuildingCollisionSize / 2f);
@@ -221,7 +221,18 @@ public static class BombSystem
 
         foreach (var entity in toDestroy)
         {
-            world.Destroy(entity);
+            if (hooks.DestroyBuilding is not null)
+            {
+                hooks.DestroyBuilding(entity);
+            }
+            else
+            {
+                BuildingPopulationSystem.DetachBeforeDestroy(world, entity);
+                if (world.IsAlive(entity))
+                {
+                    world.Destroy(entity);
+                }
+            }
         }
     }
 

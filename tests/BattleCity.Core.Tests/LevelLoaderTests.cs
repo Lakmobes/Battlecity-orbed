@@ -225,6 +225,7 @@ public class LevelLoaderTests
                 Assert.Equal(BuildingSprites.SpriteSize, sprite.Width);
             });
 
-        Assert.Equal(layout.Buildings.Count, count);
+        // Layout buildings plus the spawned home command center (remote CCs need map CityCenter tiles).
+        Assert.Equal(layout.Buildings.Count + 1, count);
     }
 }

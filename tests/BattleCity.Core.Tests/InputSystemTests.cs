@@ -147,6 +147,8 @@ public class InputSystemTests
 
             new TankLifeState(),
 
+            new TankStatus(),
+
             new SpriteRef
 
             {
@@ -206,6 +208,8 @@ public class InputSystemTests
             new TankFacing { Direction = 0, TurnCooldownSeconds = 0f },
 
             new TankLifeState(),
+
+            new TankStatus(),
 
             new SpriteRef
 
