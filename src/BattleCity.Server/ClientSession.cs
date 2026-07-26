@@ -53,8 +53,19 @@ public sealed class ClientSession : IDisposable
             return;
         }
 
-        var packet = LegacyPacketCodec.Encode(messageId, payload);
-        _stream.Write(packet);
+        try
+        {
+            var packet = LegacyPacketCodec.Encode(messageId, payload);
+            _stream.Write(packet);
+        }
+        catch (IOException)
+        {
+            // Peer disconnected mid-write; removal happens on the next Update.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Stream already closed.
+        }
     }
 
     public void SendServer(ServerMessageId messageId, ReadOnlySpan<byte> payload) =>

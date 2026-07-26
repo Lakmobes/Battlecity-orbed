@@ -37,6 +37,7 @@ public sealed class GameServer : IDisposable
 
     public GameServer(string databasePath)
     {
+        DatabasePath = databasePath;
         _accounts = new AccountDatabase(databasePath);
     }
 
@@ -46,6 +47,14 @@ public sealed class GameServer : IDisposable
     }
 
     public int Port { get; private set; }
+
+    public string BoundHost { get; private set; } = "0.0.0.0";
+
+    public bool IsRunning => _started;
+
+    public string DatabasePath { get; }
+
+    public AccountDatabase Accounts => _accounts;
 
     public GameSimulation Simulation => _simulation;
 
@@ -64,16 +73,73 @@ public sealed class GameServer : IDisposable
         _simulation.NetworkPlayersUseLocalBulletDamage = false;
         _simulation.NetworkPlayersUseLocalHealthDeath = false;
         _simulation.ReportBombEventsToNetwork = true;
+        _simulation.ReportFactoryItemSpawnsToNetwork = true;
         _simulation.ReportRespawnEventsToNetwork = true;
+        _simulation.ReturnInventoryPlaceablesOnDeath = true;
         _buildPopSync.Reset(_simulation);
         _factoryItemCountSync.Reset(_simulation);
 
-        _listener = new TcpListener(IPAddress.Parse(host), port);
+        BoundHost = string.IsNullOrWhiteSpace(host) ? "0.0.0.0" : host.Trim();
+        var listenAddress = BoundHost is "0.0.0.0" or "*"
+            ? IPAddress.Any
+            : IPAddress.Parse(BoundHost);
+
+        _listener = new TcpListener(listenAddress, port);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
         _started = true;
 
-        Console.WriteLine($"Battle City server listening on {host}:{Port}");
+        Console.WriteLine($"Battle City server listening on {BoundHost}:{Port}");
+    }
+
+    public void Stop()
+    {
+        if (!_started)
+        {
+            return;
+        }
+
+        _started = false;
+        try
+        {
+            _listener?.Stop();
+        }
+        catch
+        {
+            // Listener may already be closed.
+        }
+
+        _listener = null;
+
+        lock (_sync)
+        {
+            foreach (var session in _sessions.Values)
+            {
+                session.Dispose();
+            }
+
+            _sessions.Clear();
+        }
+
+        Console.WriteLine("Battle City server stopped.");
+    }
+
+    public IReadOnlyList<ConnectedPlayerInfo> GetConnectedPlayers()
+    {
+        lock (_sync)
+        {
+            return _sessions.Values
+                .OrderBy(session => session.PlayerId)
+                .Select(session => new ConnectedPlayerInfo(
+                    session.PlayerId,
+                    session.DisplayName,
+                    session.State.ToString(),
+                    session.CityId,
+                    session.IsAdmin,
+                    session.IsMayor,
+                    session.IsGuest))
+                .ToList();
+        }
     }
 
     public void Update(float deltaSeconds)
@@ -88,8 +154,10 @@ public sealed class GameServer : IDisposable
         _simulation.Update(deltaSeconds);
         BroadcastBuildPopSync();
         BroadcastFactoryItemCountSync();
+        BroadcastFactoryAddItems();
         BroadcastPendingOrbEvents();
         BroadcastPendingExplosionEvents();
+        BroadcastPendingBombBuildingRemovals();
         BroadcastPendingDeathEvents();
         BroadcastPendingRespawnEvents();
         BroadcastPendingHpEvents();
@@ -98,20 +166,33 @@ public sealed class GameServer : IDisposable
 
     public void Dispose()
     {
+        Stop();
+        _simulation.Dispose();
+        _accounts.Dispose();
+    }
+
+    public bool TrySetAccountAdmin(string username, bool isAdmin)
+    {
+        if (!_accounts.TrySetAdmin(username, isAdmin))
+        {
+            return false;
+        }
+
         lock (_sync)
         {
             foreach (var session in _sessions.Values)
             {
-                session.Dispose();
-            }
+                if (!string.Equals(session.RegisteredUsername, username, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
-            _sessions.Clear();
+                session.IsAdmin = isAdmin
+                    || string.Equals(username, "admin", StringComparison.OrdinalIgnoreCase);
+            }
         }
 
-        _listener?.Stop();
-        _simulation.Dispose();
-        _accounts.Dispose();
-        _started = false;
+        return true;
     }
 
     private void AcceptPendingConnections()
@@ -329,7 +410,8 @@ public sealed class GameServer : IDisposable
             displayName = account!.Username;
             town = account.Town;
             session.IsGuest = false;
-            session.IsAdmin = string.Equals(account.Username, "admin", StringComparison.OrdinalIgnoreCase);
+            session.IsAdmin = account.IsAdmin
+                || string.Equals(account.Username, "admin", StringComparison.OrdinalIgnoreCase);
             session.RegisteredUsername = account.Username;
             session.Points = account.Points;
             session.Deaths = account.Deaths;
@@ -341,7 +423,8 @@ public sealed class GameServer : IDisposable
 
         Span<byte> loginCorrect = stackalloc byte[2];
         loginCorrect[0] = session.PlayerId;
-        loginCorrect[1] = 1;
+        // Bit0 = success, bit1 = admin (clients that ignore bit1 still see non-zero success).
+        loginCorrect[1] = (byte)(1 | (session.IsAdmin ? 2 : 0));
         session.SendServer(ServerMessageId.LoginCorrect, loginCorrect);
 
         Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
@@ -700,6 +783,7 @@ public sealed class GameServer : IDisposable
         _simulation.TryRemoveNetworkPlayer(session.PlayerId);
         session.State = PlayerSessionState.Meeting;
         session.IsMayor = false;
+        BroadcastCityListToMeetingClients();
     }
 
     private int CountInGamePlayersInCity(byte cityId)
@@ -744,16 +828,25 @@ public sealed class GameServer : IDisposable
             return;
         }
 
-        var spawn = _cityLayout.GetSpawnPosition();
-        var position = new Vector2(spawn.X, spawn.Y);
-        _simulation.CreateNetworkPlayerEntity(position, session.PlayerId, session.CityId);
+        Vector2 spawn;
+        if (_simulation.TryGetCityRespawnPosition(session.CityId, out var openSpawn, out _))
+        {
+            spawn = openSpawn;
+        }
+        else
+        {
+            spawn = _cityLayout.GetSpawnPosition();
+            spawn = _simulation.FindOpenTankSpawnNear(spawn);
+        }
+
+        _simulation.CreateNetworkPlayerEntity(spawn, session.PlayerId, session.CityId);
         session.State = PlayerSessionState.InGame;
         EnsureMayorAssigned(session);
 
         Span<byte> stateGame = stackalloc byte[ServerStateGamePacket.Size];
         new ServerStateGamePacket(
-            (ushort)spawn.X,
-            (ushort)spawn.Y,
+            (ushort)Math.Clamp((int)spawn.X, 0, ushort.MaxValue),
+            (ushort)Math.Clamp((int)spawn.Y, 0, ushort.MaxValue),
             session.CityId).Write(stateGame);
         session.SendServer(ServerMessageId.StateGame, stateGame);
 
@@ -791,6 +884,7 @@ public sealed class GameServer : IDisposable
         SendFactoryItemCountSnapshot(session);
         SendPointsSnapshot(session);
         BroadcastPointsUpdate(session);
+        BroadcastCityListToMeetingClients();
 
         Console.WriteLine($"Player {session.DisplayName} joined at ({spawn.X}, {spawn.Y})");
     }
@@ -848,6 +942,29 @@ public sealed class GameServer : IDisposable
             Span<byte> payload = stackalloc byte[ServerItemCountPacket.Size];
             packet.Write(payload);
             BroadcastAll(ServerMessageId.ItemCount, payload);
+        }
+    }
+
+    private void BroadcastFactoryAddItems()
+    {
+        while (_simulation.TryConsumeFactoryAddItem(out var addItem))
+        {
+            Span<byte> payload = stackalloc byte[ServerAddItemPacket.Size];
+            addItem.Write(payload);
+            BroadcastAll(ServerMessageId.AddItem, payload);
+        }
+    }
+
+    private void BroadcastCityListToMeetingClients()
+    {
+        foreach (var session in GetLobbySessions())
+        {
+            if (session.State != PlayerSessionState.Meeting)
+            {
+                continue;
+            }
+
+            SendCityList(session);
         }
     }
 
@@ -1308,6 +1425,16 @@ public sealed class GameServer : IDisposable
         }
     }
 
+    private void BroadcastPendingBombBuildingRemovals()
+    {
+        while (_simulation.TryConsumeBombBuildingRemoval(out var building))
+        {
+            Span<byte> payload = stackalloc byte[ServerBuildingPacket.Size];
+            building.Write(payload);
+            BroadcastAll(ServerMessageId.RemBuilding, payload);
+        }
+    }
+
     private void BroadcastPendingRespawnEvents()
     {
         while (_simulation.TryConsumeNetworkRespawnEvent(out var respawnEvent))
@@ -1411,7 +1538,17 @@ public sealed class GameServer : IDisposable
     {
         if (_mayors.HasMayor(session.CityId))
         {
-            session.IsMayor = _mayors.IsMayor(session.CityId, session.PlayerId);
+            if (_mayors.IsMayor(session.CityId, session.PlayerId))
+            {
+                // Re-apply after the network entity exists, and re-send MayorUpdate
+                // (first promotion may have happened while still in Meeting).
+                SetMayor(session, isMayor: true);
+            }
+            else
+            {
+                session.IsMayor = false;
+            }
+
             return;
         }
 
@@ -1448,7 +1585,10 @@ public sealed class GameServer : IDisposable
 
         Span<byte> update = stackalloc byte[ServerMayorUpdatePacket.Size];
         new ServerMayorUpdatePacket(session.PlayerId, isMayor).Write(update);
-        BroadcastAll(ServerMessageId.MayorUpdate, update);
+        // Always notify the assignee — they may not be InGame yet (Meeting → Join).
+        session.SendServer(ServerMessageId.MayorUpdate, update);
+        BroadcastExcept(session.PlayerId, ServerMessageId.MayorUpdate, update);
+        BroadcastCityListToMeetingClients();
     }
 
     private static TileMap LoadTileMap()

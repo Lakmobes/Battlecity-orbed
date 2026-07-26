@@ -2,7 +2,7 @@ using BattleCity.Server;
 using BattleCity.Server.Accounts;
 using BattleCity.Shared.Constants;
 
-const string DefaultHost = "127.0.0.1";
+const string DefaultHost = "0.0.0.0";
 var port = NetworkConstants.TcpPort;
 var host = DefaultHost;
 var databasePath = Path.Combine(AppContext.BaseDirectory, "accounts.db");
@@ -53,6 +53,14 @@ if (args.Length >= 1 && args[0] == "create-account")
 
 using var server = new GameServer(databasePath);
 server.Start(host, port);
+
+Console.WriteLine("Share one of these addresses with players:");
+foreach (var address in LanAddressHelper.GetLanIPv4Addresses())
+{
+    Console.WriteLine($"  {address}:{server.Port}");
+}
+
+Console.WriteLine("Press Ctrl+C to stop.");
 
 var tickSeconds = GameServerTickRate.Seconds;
 while (true)
