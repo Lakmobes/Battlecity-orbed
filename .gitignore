@@ -14,6 +14,7 @@ x64/
 build/
 [Bb]in/
 [Oo]bj/
+dist/
 
 # MSTest test Results
 [Tt]est[Rr]esult*/
@@ -160,3 +161,17 @@ artifacts/
 .mono/
 content-source/sprites/
 content-source/*.bmp
+
+# Local HD upscale marker
+src/BattleCity.Client/Content/Sprites/.hd2x
+
+# Local Affinity / scratch art (not pipeline inputs)
+**/image Edits/
+**/*.afphoto
+**/* - Copy.png
+**/*Copy.png
+
+# Runtime server database
+**/accounts.db
+**/accounts.db-*
+

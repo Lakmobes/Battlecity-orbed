@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BattleCity.Smoke</RootNamespace>
+    <AssemblyName>BattleCity.Smoke</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BattleCity.Client\BattleCity.Client.csproj" />
+    <ProjectReference Include="..\..\src\BattleCity.Server\BattleCity.Server.csproj" />
+    <ProjectReference Include="..\..\src\BattleCity.Shared\BattleCity.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

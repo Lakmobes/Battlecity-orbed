@@ -2,6 +2,8 @@
 
 MonoGame + C# rewrite of Battle City. Legacy C++ source lives in `legacy/`.
 
+For the current handoff checkpoint (host UI, modern HUD, population, recharge abilities, release zip), see **[PROJECT-STATUS.md](PROJECT-STATUS.md)** and **[LEGACY-DELTAS.md](LEGACY-DELTAS.md)**.
+
 ## Phases
 
 - [x] **Phase 0 — Scaffold** — Solution layout, MonoGame window, CI workflow
@@ -38,13 +40,28 @@ MonoGame + C# rewrite of Battle City. Legacy C++ source lives in `legacy/`.
 
 Finance HUD (`smFinance`) is intentionally **out of scope** for this rewrite.
 
+### Post–Phase 30 — PC polish checkpoint (2026-07)
+
+Not numbered as formal phases; shipping together as a contributor handoff:
+
+| Area | Notes |
+|------|-------|
+| `BattleCity.Server.Host` | WinForms Start/Stop, LAN invite, player list, admin toggles |
+| Publish zip | `tools/Publish-Release.ps1` → `dist/BattleCity-win-x64.zip` |
+| Modern HUD / title | 1080p overlay, `MenuTheme`, title sprites |
+| Population | `BuildingPopulationSystem` — house slots 50+50; bullet-immune when populated |
+| Cloak / flare | City research+factory → 10s recharge + HUD bar |
+| Minimap | 3×3 building markers |
+| Turret muzzle / audio pan | Coordinate + MonoGame `Play` argument fixes |
+| Smoke | `tools/BattleCity.Smoke` |
+
 ### Remaining network parity (not yet scheduled as phases)
 
 There is **no fixed total phase count** — phases are added incrementally as legacy multiplayer gaps are closed. Likely next targets:
 
 | Candidate | Legacy packets | Notes |
 |-----------|----------------|-------|
-| City under attack | `smUnderAttack` | CC alert overlay |
+| City under attack | `smUnderAttack` | Local alert exists; network broadcast still open |
 | Item life sync | `smItemLife` | Bomb fuse / item TTL for remotes |
 | Promotion | `smPromotion` | Rank-up chat line on point thresholds |
 
@@ -85,7 +102,7 @@ dotnet run --project src/BattleCity.Client/BattleCity.Client.csproj
 | `RemotePlayerSync` | Renders other players from server broadcasts |
 | `InGameOnlineScene` | Online sandbox with local prediction + network sync |
 
-Legacy account database, chat, and full packet parity are not implemented yet — movement multiplayer is the Phase 12 milestone.
+> **Superseded:** Phases 15–30 added accounts, chat, combat sync, meeting/hiring, etc. Treat Phase 12 as the movement baseline only.
 
 ### Phase 13 — Network Gameplay Sync (authoritative server)
 

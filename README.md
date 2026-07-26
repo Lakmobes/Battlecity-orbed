@@ -7,13 +7,25 @@ The best thing about Battle City is that it has been released under the GPLv3 op
 License: GPLv3  
 Credits: Deceth
 
-Download the latest release from the [official website](http://battlecity.org)
+Original site / downloads: [battlecity.org](http://battlecity.org)
 
-## C# / MonoGame Rewrite
+## C# / MonoGame Rewrite (active)
 
-This repository is being rewritten in **C# with MonoGame**. Progress is tracked in [docs/REWRITE-PROGRESS.md](docs/REWRITE-PROGRESS.md).
+This repository’s playable path is a **C# + MonoGame** rewrite. The original C++ / DirectDraw code remains in [`legacy/`](legacy/) for reference and data.
 
-**Requirements:** [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+**Start here if you are new to this codebase:**
+
+| Doc | Why read it |
+|-----|-------------|
+| [docs/PROJECT-STATUS.md](docs/PROJECT-STATUS.md) | Current checkpoint, architecture, next tasks |
+| [docs/LEGACY-DELTAS.md](docs/LEGACY-DELTAS.md) | What’s intentionally different from the C++ game |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to build, test, and continue work |
+| [docs/REWRITE-PROGRESS.md](docs/REWRITE-PROGRESS.md) | Phase-by-phase checklist (0–30 done) |
+| [docs/HOSTING.md](docs/HOSTING.md) | Hosting for friends (LAN / Tailscale) |
+
+### Requirements
+
+[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 
 ```powershell
 dotnet tool restore
@@ -23,10 +35,50 @@ dotnet build src/BattleCity.sln
 dotnet run --project src/BattleCity.Client/BattleCity.Client.csproj
 ```
 
-The original C++ source (Visual Studio 2010, DirectDraw) is preserved in [`legacy/`](legacy/).
+- **Play Offline** — Buenos Aires sandbox  
+- **Play Online** — start a server first (see below), then login → Meeting Room  
 
-## Resources
+### Host / play with friends (no Visual Studio)
 
-* [Rewrite progress checklist](docs/REWRITE-PROGRESS.md)
+```powershell
+./tools/Publish-Release.ps1
+```
+
+Share `dist/BattleCity-win-x64.zip`:
+
+1. Host: `Server/BattleCity.Server.Host.exe` → **Start** → **Copy Invite**
+2. Players: `Client/BattleCity.Client.exe` → paste invite into login **Server**
+
+Details: [docs/HOSTING.md](docs/HOSTING.md).
+
+### Dev online
+
+```powershell
+# Terminal 1
+dotnet run --project src/BattleCity.Server.Host/BattleCity.Server.Host.csproj
+
+# Terminal 2
+dotnet run --project src/BattleCity.Client/BattleCity.Client.csproj
+```
+
+Smoke test (mayor + 3 soldiers):
+
+```powershell
+dotnet run --project tools/BattleCity.Smoke/BattleCity.Smoke.csproj
+```
+
+### Solution layout
+
+| Project | Role |
+|---------|------|
+| `BattleCity.Shared` | Constants, catalogs, network packets |
+| `BattleCity.Core` | Headless ECS simulation |
+| `BattleCity.Client` | MonoGame client |
+| `BattleCity.Server` | Authoritative TCP server (port 5643) |
+| `BattleCity.Server.Host` | WinForms host UI for non-devs |
+| `tests/*` | Unit tests |
+
+## Legacy resources
+
 * [How to Setup your Development Environment (legacy C++)](https://github.com/Deceth/Battle-City/wiki/How-to-Setup-your-Development-Environment)
 * [Game Design](https://github.com/Deceth/Battle-City/wiki#game-design)
