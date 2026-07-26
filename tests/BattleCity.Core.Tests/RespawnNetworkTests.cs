@@ -38,7 +38,7 @@ public class RespawnNetworkTests
     }
 
     [Fact]
-    public void SuppressLocalPlayerRespawn_KeepsLocalPlayerDeadUntilWarp()
+    public void LocalPlayer_RespawnsOptimisticallyWhenTimerExpires()
     {
         using var simulation = new GameSimulation();
         simulation.TileMap = TileMap.CreateEmpty();
@@ -49,10 +49,14 @@ public class RespawnNetworkTests
         ref var life = ref simulation.World.Get<TankLifeState>(entity);
         life.IsDead = true;
         life.RespawnTimerSeconds = 0f;
+        simulation.World.Get<Health>(entity).Current = 0;
+        simulation.World.Get<Collider>(entity).Layer = CollisionLayer.None;
 
         simulation.Tick(0.016f);
 
-        Assert.True(simulation.World.Get<TankLifeState>(entity).IsDead);
+        Assert.False(simulation.World.Get<TankLifeState>(entity).IsDead);
+        Assert.Equal(GameConstants.MaxHealth, simulation.World.Get<Health>(entity).Current);
+        Assert.Equal(CollisionLayer.Player, simulation.World.Get<Collider>(entity).Layer);
     }
 
     [Fact]
@@ -111,7 +115,7 @@ public class RespawnNetworkTests
     }
 
     [Fact]
-    public void ApplyPlayerDeath_ResyncsLocalRespawnTimerWithServer()
+    public void ApplyPlayerDeath_DoesNotRestartLocalRespawnTimerWhenAlreadyDead()
     {
         using var simulation = new GameSimulation();
         simulation.TileMap = TileMap.CreateEmpty();
@@ -122,7 +126,7 @@ public class RespawnNetworkTests
 
         simulation.ApplyPlayerDeath(new ServerDeathPacket(playerId: 1, deathType: 0, killerCity: 0), localPlayerId: 1);
 
-        Assert.Equal(GameConstants.TimerRespawn / 1000f, life.RespawnTimerSeconds);
+        Assert.Equal(0.5f, life.RespawnTimerSeconds);
     }
 }
 

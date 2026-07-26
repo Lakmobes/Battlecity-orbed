@@ -13,12 +13,20 @@ namespace BattleCity.Client.Scenes;
 
 public sealed class LoginScene : IScene
 {
+    private enum Field
+    {
+        Server,
+        Username,
+        Password,
+    }
+
     private readonly SceneContext _context;
     private readonly ScreenUiRenderer _ui;
     private readonly MenuInputReader _menuInput = new();
+    private readonly LoginTextInput _serverInput = new(maxLength: 64);
     private readonly LoginTextInput _usernameInput = new(maxLength: 15);
     private readonly LoginTextInput _passwordInput = new(maxLength: 15);
-    private bool _editingPassword;
+    private Field _activeField = Field.Username;
     private string? _statusMessage;
     private KeyboardState _previousKeyboard;
 
@@ -26,6 +34,7 @@ public sealed class LoginScene : IScene
     {
         _context = context;
         _ui = new ScreenUiRenderer(context.Assets);
+        _serverInput.SetText(FormatServerField(context.ServerHost, context.ServerPort));
         _usernameInput.SetText(context.PlayerName);
         _passwordInput.SetText(context.PlayerPassword);
         _statusMessage = context.LoginStatusMessage;
@@ -40,12 +49,23 @@ public sealed class LoginScene : IScene
 
     public SceneTransition Update(GameTime gameTime, int screenWidth, int screenHeight)
     {
+        _ui.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
         var menuInput = _menuInput.Poll();
         var keyboard = Keyboard.GetState();
 
         if (WasPressed(keyboard, Keys.Tab))
         {
             _context.Audio.Play(SoundId.Click);
+            var shift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
+            _activeField = NextField(_activeField, shift ? -1 : 1);
+            _previousKeyboard = keyboard;
+            return SceneTransition.None;
+        }
+
+        if (WasPressed(keyboard, Keys.F2))
+        {
+            _context.Audio.Play(SoundId.Click);
+            ApplyServerFieldToContext();
             _context.PlayerName = _usernameInput.Text.Trim();
             _context.PlayerPassword = _passwordInput.Text;
             _previousKeyboard = keyboard;
@@ -54,12 +74,12 @@ public sealed class LoginScene : IScene
 
         if (menuInput.MoveDownPressed)
         {
-            _editingPassword = true;
+            _activeField = NextField(_activeField, 1);
         }
 
         if (menuInput.MoveUpPressed)
         {
-            _editingPassword = false;
+            _activeField = NextField(_activeField, -1);
         }
 
         if (menuInput.CancelPressed)
@@ -68,20 +88,13 @@ public sealed class LoginScene : IScene
             return SceneTransition.MainMenu;
         }
 
-        if (!_editingPassword)
-        {
-            _usernameInput.Update();
-        }
-        else
-        {
-            _passwordInput.Update();
-        }
+        ActiveInput().Update();
 
         if (menuInput.ConfirmPressed)
         {
-            if (!_editingPassword)
+            if (_activeField != Field.Password)
             {
-                _editingPassword = true;
+                _activeField = NextField(_activeField, 1);
             }
             else
             {
@@ -93,6 +106,26 @@ public sealed class LoginScene : IScene
         return SceneTransition.None;
     }
 
+    private LoginTextInput ActiveInput() =>
+        _activeField switch
+        {
+            Field.Server => _serverInput,
+            Field.Username => _usernameInput,
+            _ => _passwordInput,
+        };
+
+    private static Field NextField(Field current, int delta)
+    {
+        var values = Enum.GetValues<Field>();
+        var index = ((int)current + delta) % values.Length;
+        if (index < 0)
+        {
+            index += values.Length;
+        }
+
+        return values[index];
+    }
+
     private bool WasPressed(KeyboardState keyboard, Keys key) =>
         keyboard.IsKeyDown(key) && !_previousKeyboard.IsKeyDown(key);
 
@@ -100,6 +133,13 @@ public sealed class LoginScene : IScene
     {
         _context.Audio.Play(SoundId.Click);
         _statusMessage = "Connecting...";
+
+        if (!ApplyServerFieldToContext())
+        {
+            _statusMessage = "Invalid server. Use host or host:port (example 192.168.1.10:5643).";
+            _activeField = Field.Server;
+            return SceneTransition.None;
+        }
 
         var username = _usernameInput.Text.Trim();
         var password = _passwordInput.Text;
@@ -115,7 +155,7 @@ public sealed class LoginScene : IScene
         var client = new GameClient();
         var connected = client.ConnectAndLogin(
             _context.ServerHost,
-            NetworkConstants.TcpPort,
+            _context.ServerPort,
             username,
             password,
             TimeSpan.FromSeconds(5));
@@ -133,27 +173,81 @@ public sealed class LoginScene : IScene
         return SceneTransition.Meeting;
     }
 
+    private bool ApplyServerFieldToContext()
+    {
+        if (!TryParseServer(_serverInput.Text, out var host, out var port))
+        {
+            return false;
+        }
+
+        _context.ServerHost = host;
+        _context.ServerPort = port;
+        return true;
+    }
+
+    public static bool TryParseServer(string text, out string host, out int port)
+    {
+        host = "127.0.0.1";
+        port = NetworkConstants.TcpPort;
+        text = text.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        // host:port — split on last ':' so IPv6 is not required for now.
+        var colon = text.LastIndexOf(':');
+        if (colon > 0 && colon < text.Length - 1
+            && int.TryParse(text[(colon + 1)..], out var parsedPort)
+            && parsedPort is > 0 and <= 65535)
+        {
+            host = text[..colon].Trim();
+            port = parsedPort;
+            return !string.IsNullOrWhiteSpace(host);
+        }
+
+        host = text;
+        return !string.IsNullOrWhiteSpace(host);
+    }
+
+    private static string FormatServerField(string host, int port) =>
+        port == NetworkConstants.TcpPort ? host : $"{host}:{port}";
+
     public void DrawWorld(SpriteBatch spriteBatch)
     {
     }
 
     public void DrawScreen(SpriteBatch spriteBatch)
     {
-        _ui.DrawBackdrop(spriteBatch, RenderConstants.DefaultWindowWidth, RenderConstants.DefaultWindowHeight);
-        _ui.DrawTitle(spriteBatch, RenderConstants.DefaultWindowWidth);
-        _ui.DrawMessageBlock(
+        var width = UiLayout.LogicalWidth;
+        var height = UiLayout.LogicalHeight;
+        _ui.DrawBackdrop(spriteBatch, width, height);
+        _ui.DrawTitle(spriteBatch, width);
+
+        var panel = ScreenUiRenderer.CenteredFormPanel(width, height, 600, 420);
+        _ui.DrawFormPanel(
             spriteBatch,
-            RenderConstants.DefaultWindowWidth,
-            RenderConstants.DefaultWindowHeight,
+            panel,
             "Multiplayer Login",
             [
-                $"Server: {_context.ServerHost}:{NetworkConstants.TcpPort}",
-                "Guest login: password = guest",
-                $"Username: {_usernameInput.Text}{(_editingPassword ? string.Empty : "_")}",
-                $"Password: {new string('*', _passwordInput.Text.Length)}{(_editingPassword ? "_" : string.Empty)}",
-                _statusMessage ?? "Down - password field   Tab - create account",
+                "Paste the host invite (IP or IP:port)",
+                "Guest login: leave user blank or set password to guest",
+                string.Empty,
+                FormatField("Server", _serverInput.Text, mask: false, focused: _activeField == Field.Server),
+                FormatField("Username", _usernameInput.Text, mask: false, focused: _activeField == Field.Username),
+                FormatField("Password", _passwordInput.Text, mask: true, focused: _activeField == Field.Password),
+                string.Empty,
+                _statusMessage ?? "Enter connects   Tab switches field",
             ],
-            "Up/Down - switch field   Enter - next/connect   Tab - create account   Esc - back");
+            "Tab - next field   Enter - connect   F2 - create account   Esc - back");
+    }
+
+    private static string FormatField(string label, string value, bool mask, bool focused)
+    {
+        var display = mask ? new string('*', value.Length) : value;
+        var cursor = focused ? "_" : string.Empty;
+        var marker = focused ? "> " : "  ";
+        return $"{marker}{label}: {display}{cursor}";
     }
 
     public void Dispose()

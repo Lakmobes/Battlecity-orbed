@@ -34,9 +34,7 @@ public sealed class CityLayout
         var centerGridX = sumX / Buildings.Count;
         var spawnGridY = maxY + 3;
 
-        return new Vector2(
-            centerGridX * GameConstants.TileSize,
-            spawnGridY * GameConstants.TileSize);
+        return BuildingPlacement.GridAnchorToWorldPosition(centerGridX, spawnGridY);
     }
 
     public Vector2 GetCameraFocus()
@@ -57,9 +55,9 @@ public sealed class CityLayout
 
         var centerGridX = sumX / Buildings.Count;
         var centerGridY = sumY / Buildings.Count;
-
-        return new Vector2(
-            centerGridX * GameConstants.TileSize + GameConstants.TileSize / 2f,
-            centerGridY * GameConstants.TileSize + GameConstants.TileSize / 2f);
+        var topLeft = BuildingPlacement.GridAnchorToWorldPosition(centerGridX, centerGridY);
+        return topLeft + new Vector2(
+            GameConstants.BuildingCollisionSize / 2f,
+            GameConstants.BuildingCollisionSize / 2f);
     }
 }

@@ -4,7 +4,9 @@ using BattleCity.Shared.Data;
 namespace BattleCity.Core.Maps;
 
 /// <summary>
-/// Autotile index calculation ported from legacy/client/CMap.cpp CalculateTiles.
+/// Autotile source-X for lava/rock strips (16 columns × 48px legacy / 96px HD).
+/// Column = open-edge bitmask: left=1, right=2, down=4, up=8
+/// (screen space, Y increases downward — matches the current Lava/Rocks sheet order).
 /// </summary>
 public static class AutotileCalculator
 {
@@ -24,10 +26,10 @@ public static class AutotileCalculator
                 }
 
                 var current = (int)tile;
-                var left = ToBit(x == size - 1 || (int)terrain[x + 1, y] != current);
-                var right = ToBit(x == 0 || (int)terrain[x - 1, y] != current);
-                var up = ToBit(y == size - 1 || (int)terrain[x, y + 1] != current);
-                var down = ToBit(y == 0 || (int)terrain[x, y - 1] != current);
+                var left = ToBit(x == 0 || (int)terrain[x - 1, y] != current);
+                var right = ToBit(x == size - 1 || (int)terrain[x + 1, y] != current);
+                var up = ToBit(y == 0 || (int)terrain[x, y - 1] != current);
+                var down = ToBit(y == size - 1 || (int)terrain[x, y + 1] != current);
 
                 autotiles[x, y] = (short)((left + right * 2 + down * 4 + up * 8) * GameConstants.TileSize);
             }

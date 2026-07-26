@@ -3,6 +3,7 @@ using System.Numerics;
 using Arch.Core;
 
 using BattleCity.Core.Audio;
+using BattleCity.Core.City;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Ecs.Systems;
 using BattleCity.Shared.Constants;
@@ -19,6 +20,8 @@ public static class WeaponActions
         weapons.LaserCooldownSeconds = Math.Max(0f, weapons.LaserCooldownSeconds - deltaSeconds);
         weapons.RocketCooldownSeconds = Math.Max(0f, weapons.RocketCooldownSeconds - deltaSeconds);
         weapons.FlareCooldownSeconds = Math.Max(0f, weapons.FlareCooldownSeconds - deltaSeconds);
+        weapons.CloakRechargeSeconds = Math.Max(0f, weapons.CloakRechargeSeconds - deltaSeconds);
+        weapons.FlareRechargeSeconds = Math.Max(0f, weapons.FlareRechargeSeconds - deltaSeconds);
     }
 
     public static bool TryFireFromInput(
@@ -31,6 +34,7 @@ public static class WeaponActions
         ref TankLifeState life,
         ref TankStatus status,
         Vector2 tankTopLeft,
+        CityBuildState? cityBuild,
         SimulationAudioBuffer? audio,
         out ClientShotPacket? networkShot)
     {
@@ -41,13 +45,14 @@ public static class WeaponActions
             return false;
         }
 
-        if (input.FireFlareHeld && weapons.FlareCooldownSeconds <= 0f && inventory.Flare > 0)
+        if (input.FireFlareHeld
+            && weapons.FlareCooldownSeconds <= 0f
+            && TryConsumeFlare(ref weapons, ref inventory, cityBuild))
         {
-            var centerDirection = (facing.Direction + 16) % TankFacing.DirectionCount;
+            var rearFacing = (facing.Direction + 16) % TankFacing.DirectionCount;
             FireFlare(world, owner, tankTopLeft, facing.Direction, audio);
-            inventory.Flare--;
             weapons.FlareCooldownSeconds = GameConstants.TimerShootFlare / 1000f;
-            networkShot = CreateShotPacket(tankTopLeft, facing.Direction, bulletType: 3, centerDirection);
+            networkShot = CreateShotPacket(tankTopLeft, rearFacing, bulletType: 3, packetDirection: rearFacing);
             return true;
         }
 
@@ -88,6 +93,7 @@ public static class WeaponActions
         ref TankLifeState life,
         ref TankStatus status,
         in ClientShotPacket request,
+        CityBuildState? cityBuild,
         SimulationAudioBuffer? audio)
     {
         if (life.IsDead || status.IsFrozen)
@@ -97,13 +103,13 @@ public static class WeaponActions
 
         if (request.Type == 3)
         {
-            if (weapons.FlareCooldownSeconds > 0f || inventory.Flare <= 0)
+            if (weapons.FlareCooldownSeconds > 0f
+                || !TryConsumeFlare(ref weapons, ref inventory, cityBuild))
             {
                 return false;
             }
 
             ApplyLegacyShot(world, owner, request, audio);
-            inventory.Flare--;
             weapons.FlareCooldownSeconds = GameConstants.TimerShootFlare / 1000f;
             return true;
         }
@@ -141,14 +147,7 @@ public static class WeaponActions
         var muzzle = new Vector2(packet.X, packet.Y);
         if (packet.Type == 3)
         {
-            var left = (packet.Direction + 4) % TankFacing.DirectionCount;
-            var center = packet.Direction % TankFacing.DirectionCount;
-            var right = (packet.Direction + TankFacing.DirectionCount - 4) % TankFacing.DirectionCount;
-            GameplayEntityFactory.CreateExplosion(world, ExplosionKind.MuzzleFlash, muzzle);
-            GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, left, shooter);
-            GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, center, shooter);
-            GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, right, shooter);
-            audio?.Play(SoundId.Flare, muzzle);
+            SpawnFlareSpread(world, shooter, muzzle, packet.Direction, audio);
             return;
         }
 
@@ -172,14 +171,7 @@ public static class WeaponActions
         var muzzle = new Vector2(request.X, request.Y);
         if (request.Type == 3)
         {
-            var left = (request.Direction + 4) % TankFacing.DirectionCount;
-            var center = request.Direction % TankFacing.DirectionCount;
-            var right = (request.Direction + TankFacing.DirectionCount - 4) % TankFacing.DirectionCount;
-            GameplayEntityFactory.CreateExplosion(world, ExplosionKind.MuzzleFlash, muzzle);
-            GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, left, owner);
-            GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, center, owner);
-            GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, right, owner);
-            audio?.Play(SoundId.Flare, muzzle);
+            SpawnFlareSpread(world, owner, muzzle, request.Direction, audio);
             return;
         }
 
@@ -231,11 +223,39 @@ public static class WeaponActions
         int spriteFacing,
         SimulationAudioBuffer? audio)
     {
-        var left = (spriteFacing + 20) % TankFacing.DirectionCount;
-        var center = (spriteFacing + 16) % TankFacing.DirectionCount;
-        var right = (spriteFacing + 12) % TankFacing.DirectionCount;
-        var travelDirection = InputSystem.ToTravelDirection(spriteFacing);
-        var muzzle = WeaponGeometry.GetMuzzleWorldPosition(tankTopLeft, travelDirection);
+        // Legacy drops flares out the rear (Direction+12/16/20). Convert through travel space
+        // so they leave opposite the laser/rocket muzzle.
+        var rearFacing = (spriteFacing + 16) % TankFacing.DirectionCount;
+        var leftFacing = (spriteFacing + 20) % TankFacing.DirectionCount;
+        var rightFacing = (spriteFacing + 12) % TankFacing.DirectionCount;
+        var left = InputSystem.ToTravelDirection(leftFacing);
+        var center = InputSystem.ToTravelDirection(rearFacing);
+        var right = InputSystem.ToTravelDirection(rightFacing);
+        var muzzle = WeaponGeometry.GetMuzzleWorldPosition(tankTopLeft, center);
+
+        GameplayEntityFactory.CreateExplosion(world, ExplosionKind.MuzzleFlash, muzzle);
+        GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, left, owner);
+        GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, center, owner);
+        GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, right, owner);
+        audio?.Play(SoundId.Flare, muzzle);
+    }
+
+    /// <summary>
+    /// <paramref name="rearSpriteFacing"/> is the tank sprite facing opposite the hull
+    /// (legacy ReverseDirectionCenter). Bullets travel in rewrite travel-direction space.
+    /// </summary>
+    private static void SpawnFlareSpread(
+        World world,
+        Entity owner,
+        Vector2 muzzle,
+        int rearSpriteFacing,
+        SimulationAudioBuffer? audio)
+    {
+        var leftFacing = (rearSpriteFacing + 4) % TankFacing.DirectionCount;
+        var rightFacing = (rearSpriteFacing + TankFacing.DirectionCount - 4) % TankFacing.DirectionCount;
+        var left = InputSystem.ToTravelDirection(leftFacing);
+        var center = InputSystem.ToTravelDirection(rearSpriteFacing);
+        var right = InputSystem.ToTravelDirection(rightFacing);
 
         GameplayEntityFactory.CreateExplosion(world, ExplosionKind.MuzzleFlash, muzzle);
         GameplayEntityFactory.CreateBullet(world, BulletKind.Flare, muzzle, left, owner);
@@ -251,4 +271,42 @@ public static class WeaponActions
             BulletKind.Flare => SoundId.Flare,
             _ => SoundId.Laser,
         };
+
+    public static bool TryConsumeFlare(
+        ref WeaponState weapons,
+        ref PlayerInventory inventory,
+        CityBuildState? cityBuild)
+    {
+        if (CityEquipmentRules.HasRechargeableFlare(cityBuild))
+        {
+            if (weapons.FlareRechargeSeconds > 0f)
+            {
+                return false;
+            }
+
+            weapons.FlareRechargeSeconds = EconomyConstants.AbilityRechargeSeconds;
+            return true;
+        }
+
+        return inventory.Flare > 0 && inventory.TryConsume(ItemType.Flare);
+    }
+
+    public static bool TryConsumeCloak(
+        ref WeaponState weapons,
+        ref PlayerInventory inventory,
+        CityBuildState? cityBuild)
+    {
+        if (CityEquipmentRules.HasRechargeableCloak(cityBuild))
+        {
+            if (weapons.CloakRechargeSeconds > 0f)
+            {
+                return false;
+            }
+
+            weapons.CloakRechargeSeconds = EconomyConstants.AbilityRechargeSeconds;
+            return true;
+        }
+
+        return inventory.TryConsume(ItemType.Cloak);
+    }
 }

@@ -64,6 +64,49 @@ public static class CommandCenterLookup
         return topLeft + new Vector2(GameConstants.TileSize * 1.5f, GameConstants.TileSize * 1.5f);
     }
 
+    /// <summary>Nearest command center that is not the home CC (orbable-city compass target).</summary>
+    public static bool TryFindNearestOtherWorldPosition(
+        World world,
+        int homeGridAnchorX,
+        int homeGridAnchorY,
+        Vector2 fromWorldCenter,
+        out Vector2 position)
+    {
+        var found = false;
+        var bestDistance = float.MaxValue;
+        var best = Vector2.Zero;
+
+        world.Query(
+            in CommandCenterQuery,
+            (ref Transform2D transform, ref BuildingRef building) =>
+            {
+                if (!BuildingCatalog.IsCommandCenter(building.TypeCode))
+                {
+                    return;
+                }
+
+                if (building.GridAnchorX == homeGridAnchorX && building.GridAnchorY == homeGridAnchorY)
+                {
+                    return;
+                }
+
+                var center = transform.Position
+                    + new Vector2(GameConstants.TileSize * 1.5f, GameConstants.TileSize * 1.5f);
+                var distance = Vector2.DistanceSquared(fromWorldCenter, center);
+                if (distance >= bestDistance)
+                {
+                    return;
+                }
+
+                bestDistance = distance;
+                best = center;
+                found = true;
+            });
+
+        position = best;
+        return found;
+    }
+
     /// <summary>
     /// Legacy CC respawn / join position: center of the southern drive row
     /// (<c>legacy/client/CCollision.cpp</c> — only the bottom tile row is drivable).

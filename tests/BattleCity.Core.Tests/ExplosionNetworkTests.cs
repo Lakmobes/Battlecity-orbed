@@ -92,4 +92,63 @@ public class ExplosionNetworkTests
 
         Assert.True(found);
     }
+
+    [Fact]
+    public void ApplyNetworkExplosion_SoundSurvivesFollowingTick()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+
+        simulation.ApplyNetworkExplosion(new ServerExplosionPacket(cityId: 0, gridX: 11, gridY: 13));
+        simulation.Tick(GameSimulation.FixedDeltaSeconds);
+
+        var events = simulation.ConsumeSoundEvents();
+        Assert.Contains(events, e => e.Sound == SoundId.Explode);
+    }
+
+    [Fact]
+    public void ReportBombEventsToNetwork_QueuesBuildingRemoval()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.ReportBombEventsToNetwork = true;
+        simulation.LoadCityLayout(new BattleCity.Core.Levels.CityLayout
+        {
+            CityName = "BombCity",
+            SourcePath = "test",
+            Buildings =
+            [
+                new BattleCity.Core.Levels.CityBuildingPlacement(0, 10, 10, 0), // CC
+                new BattleCity.Core.Levels.CityBuildingPlacement(9, 20, 20, 102), // MedKit Factory
+            ],
+        });
+
+        GameplayEntityFactory.CreatePlacedItem(
+            simulation.World,
+            ItemType.Bomb,
+            20,
+            20,
+            active: true,
+            networkItemId: 7);
+
+        simulation.Tick(EconomyConstants.TimerBomb / 1000f + 0.1f);
+
+        Assert.True(simulation.TryConsumeBombBuildingRemoval(out var removal));
+        Assert.Equal(20, removal.X);
+        Assert.Equal(20, removal.Y);
+        Assert.NotEqual((ushort)0, removal.Id);
+
+        var factoryStillPresent = false;
+        var buildingQuery = new QueryDescription().WithAll<BuildingRef>();
+        simulation.World.Query(
+            in buildingQuery,
+            (ref BuildingRef building) =>
+            {
+                if (building.GridAnchorX == 20 && building.GridAnchorY == 20)
+                {
+                    factoryStillPresent = true;
+                }
+            });
+        Assert.False(factoryStillPresent);
+    }
 }

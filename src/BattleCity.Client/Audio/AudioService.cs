@@ -67,7 +67,8 @@ public sealed class AudioService
             return;
         }
 
-        effect.Play(Math.Clamp(volume * _masterVolume, 0f, 1f), pan, 0f);
+        // MonoGame: Play(volume, pitch, pan) — pan must not go in the pitch slot.
+        effect.Play(Math.Clamp(volume * _masterVolume, 0f, 1f), pitch: 0f, pan: Math.Clamp(pan, -1f, 1f));
     }
 
     public void PlayAt(SoundId sound, float listenerX, float listenerY, float worldX, float worldY, float volume = 1f)

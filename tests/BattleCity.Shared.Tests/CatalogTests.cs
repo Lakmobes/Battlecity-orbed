@@ -57,6 +57,19 @@ public class CatalogTests
         Assert.Equal(expected, actual);
     }
 
+    [Theory]
+    [InlineData(100, Data.ItemType.Rocket)]
+    [InlineData(109, Data.ItemType.Turret)]
+    [InlineData(103, Data.ItemType.Cloak)]
+    [InlineData(101, Data.ItemType.Bomb)]
+    [InlineData(400, Data.ItemType.Rocket)]
+    [InlineData(409, Data.ItemType.Turret)]
+    public void EquipmentItemTypeMatchesBuildTreeProduct(int typeCode, Data.ItemType expected)
+    {
+        Assert.True(BuildingCatalog.TryGetEquipmentItemType(typeCode, out var itemType));
+        Assert.Equal(expected, itemType);
+    }
+
     [Fact]
     public void BuildTreeMatchesLegacyServerBuildTree()
     {

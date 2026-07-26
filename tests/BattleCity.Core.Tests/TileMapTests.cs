@@ -91,6 +91,29 @@ public class TileMapTests
         Assert.Equal(15 * 48, autotiles[10, 10]);
     }
 
+    [Theory]
+    [InlineData(0, -1, 8)]  // open north → up bit → col 8
+    [InlineData(0, 1, 4)]   // open south → down bit → col 4
+    [InlineData(-1, 0, 1)]  // open west → left bit → col 1
+    [InlineData(1, 0, 2)]   // open east → right bit → col 2
+    public void AutotileColumnMatchesSheetEdgeOrder(int openDx, int openDy, int expectedColumn)
+    {
+        var terrain = new TerrainTileType[TileMap.Size, TileMap.Size];
+        // 3×3 lava block; clear one neighbor of the center so only that edge is open.
+        for (var y = 9; y <= 11; y++)
+        {
+            for (var x = 9; x <= 11; x++)
+            {
+                terrain[x, y] = TerrainTileType.Lava;
+            }
+        }
+
+        terrain[10 + openDx, 10 + openDy] = TerrainTileType.Open;
+
+        var autotiles = AutotileCalculator.Calculate(terrain);
+        Assert.Equal(expectedColumn * 48, autotiles[10, 10]);
+    }
+
     private static string? FindLegacyMapDat()
     {
         var directory = AppContext.BaseDirectory;

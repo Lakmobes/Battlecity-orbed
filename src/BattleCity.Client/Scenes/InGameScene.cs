@@ -13,6 +13,7 @@ using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
+using BattleCity.Shared.Gameplay;
 
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -38,6 +39,9 @@ public sealed class InGameScene : IScene
     private Vector2 _cameraPanOffset;
     private Vector2 _buildMenuAnchor;
     private bool _showMiniMap;
+    private bool _showStatusPanel = true;
+    private bool _showSettingsMenu;
+    private int _settingsSelectedIndex;
     private bool _showBuildMenu;
     private int _buildModeSlot;
     private float _animationTime;
@@ -82,17 +86,17 @@ public sealed class InGameScene : IScene
         _simulation.LoadCityLayout(_cityLayout);
         _simulation.SpawnDemoItems();
 
-        var spawn = _simulation.TryGetCityBuild(0, out var homeBuild)
-                && CommandCenterLookup.TryGetRespawnPosition(
-                    _simulation.World,
-                    homeBuild.CommandCenterGridX,
-                    homeBuild.CommandCenterGridY,
-                    out var ccSpawn)
-            ? new NumericsVector2(ccSpawn.X, ccSpawn.Y)
+        var spawn = _simulation.TryGetCityRespawnPosition(
+                cityId: 0,
+                out var openSpawn,
+                out _)
+            ? new NumericsVector2(openSpawn.X, openSpawn.Y)
             : new NumericsVector2(_cityLayout.GetSpawnPosition().X, _cityLayout.GetSpawnPosition().Y);
 
         _cameraFocus = new Vector2(spawn.X + GameConstants.TileSize / 2f, spawn.Y + GameConstants.TileSize / 2f);
-        _simulation.CreatePlayerEntity(spawn);
+        _simulation.CreatePlayerEntity(
+            spawn,
+            isAdmin: TankSpriteSelector.IsAdminAccount(_context.PlayerName));
         _simulation.SpawnPracticeBots(spawn);
 
         _gameplayAudio = new GameplayAudioController(_context.Audio);
@@ -113,22 +117,7 @@ public sealed class InGameScene : IScene
             return SceneTransition.None;
         }
 
-        if (_menuInput.Poll().CancelPressed && !_chatInput.IsActive)
-        {
-            _context.Audio.StopEngine();
-            return SceneTransition.MainMenu;
-        }
-
         var keyboard = Keyboard.GetState();
-        var chatUpdate = _chatInput.Update(keyboard);
-        if (chatUpdate.Submitted)
-        {
-            InGameChatService.AppendLocalOutgoing(
-                _chatLog,
-                _context.PlayerName,
-                chatUpdate.Message,
-                isDead: _simulation.TryGetPlayerLifeState(out var life) && life.IsDead);
-        }
 
         var worldWidth = UiLayout.WorldViewportWidth;
         _camera.SetViewport(UiLayout.LogicalWidth, UiLayout.LogicalHeight);
@@ -143,18 +132,54 @@ public sealed class InGameScene : IScene
                 playerPosition.Y + GameConstants.TileSize / 2f);
         }
 
-        if (!_chatInput.IsActive)
+        // Settings must win over chat so Enter confirms the settings item instead of opening chat.
+        if (_showSettingsMenu)
         {
-            var frameInput = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
-            HandleBuildInput(frameInput.Ui, playerCenter, worldWidth);
-            UpdateBuildPreview(frameInput.Ui, playerCenter, worldWidth);
+            var settingsFrame = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+            if (HandleSettingsInput(settingsFrame.Ui, out var leaveToMenu) && leaveToMenu)
+            {
+                _context.Audio.StopEngine();
+                return SceneTransition.MainMenu;
+            }
+        }
+        else
+        {
+            var chatUpdate = _chatInput.Update(keyboard);
+            if (chatUpdate.Submitted)
+            {
+                InGameChatService.AppendLocalOutgoing(
+                    _chatLog,
+                    _context.PlayerName,
+                    chatUpdate.Message,
+                    isDead: _simulation.TryGetPlayerLifeState(out var life) && life.IsDead);
+            }
 
-            NotifyFailedItemDrops(frameInput.Gameplay);
-            InputCommandWriter.Apply(_simulation.World, frameInput.Gameplay);
-            ApplyUiInput(frameInput.Ui, gameTime);
+            if (!_chatInput.IsActive)
+            {
+                var frameInput = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+                if (HandleSettingsInput(frameInput.Ui, out var leaveToMenu))
+                {
+                    if (leaveToMenu)
+                    {
+                        _context.Audio.StopEngine();
+                        return SceneTransition.MainMenu;
+                    }
+                }
+                else
+                {
+                    HandleBuildInput(frameInput.Ui, playerCenter, worldWidth);
+                    UpdateBuildPreview(frameInput.Ui, playerCenter, worldWidth);
+                    NotifyFailedItemDrops(frameInput.Gameplay);
+                    InputCommandWriter.Apply(_simulation.World, frameInput.Gameplay);
+                    ApplyUiInput(frameInput.Ui, gameTime);
+                }
+            }
         }
 
-        _simulation.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+        if (!_showSettingsMenu)
+        {
+            _simulation.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+        }
         _animationTime += (float)gameTime.ElapsedGameTime.TotalSeconds;
 
         if (_simulation.TryGetPlayerPosition(out playerPosition))
@@ -326,14 +351,18 @@ public sealed class InGameScene : IScene
         PlayerInventory? inventory = null;
         var isUnderAttack = false;
         var underAttackFlashVisible = false;
-        var playerQuery = new Arch.Core.QueryDescription().WithAll<InputControlled, PlayerInventory, CityAlertState>();
+        var cloakRecharge = 0f;
+        var flareRecharge = 0f;
+        var playerQuery = new Arch.Core.QueryDescription().WithAll<InputControlled, PlayerInventory, CityAlertState, WeaponState>();
         _simulation.World.Query(
             in playerQuery,
-            (ref PlayerInventory value, ref CityAlertState alert) =>
+            (ref PlayerInventory value, ref CityAlertState alert, ref WeaponState weapons) =>
             {
                 inventory = value;
                 isUnderAttack = alert.IsUnderAttack;
                 underAttackFlashVisible = alert.FlashArrowVisible;
+                cloakRecharge = weapons.CloakRechargeSeconds;
+                flareRecharge = weapons.FlareRechargeSeconds;
             });
 
         CityBuildState? cityBuild = null;
@@ -342,14 +371,33 @@ public sealed class InGameScene : IScene
             cityBuild = build;
         }
 
-        var cityCenterWorldPosition = _simulation.TryGetCityBuild(0, out var homeCity)
-                && CommandCenterLookup.TryGetWorldPosition(
+        var homeCcGridX = 0;
+        var homeCcGridY = 0;
+        var cityCenterWorldPosition = new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y);
+        Vector2? nearestOrbableCity = null;
+        if (_simulation.TryGetCityBuild(0, out var homeCity))
+        {
+            homeCcGridX = homeCity.CommandCenterGridX;
+            homeCcGridY = homeCity.CommandCenterGridY;
+            if (CommandCenterLookup.TryGetWorldPosition(
                     _simulation.World,
                     homeCity.CommandCenterGridX,
                     homeCity.CommandCenterGridY,
-                    out var commandCenterPosition)
-            ? new Vector2(commandCenterPosition.X, commandCenterPosition.Y)
-            : new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y);
+                    out var commandCenterPosition))
+            {
+                cityCenterWorldPosition = new Vector2(commandCenterPosition.X, commandCenterPosition.Y);
+            }
+
+            if (CommandCenterLookup.TryFindNearestOtherWorldPosition(
+                    _simulation.World,
+                    homeCity.CommandCenterGridX,
+                    homeCity.CommandCenterGridY,
+                    new NumericsVector2(_cameraFocus.X, _cameraFocus.Y),
+                    out var orbTarget))
+            {
+                nearestOrbableCity = new Vector2(orbTarget.X, orbTarget.Y);
+            }
+        }
 
         var showOrbedOverlay = false;
         var orbedOverlayIsVictim = false;
@@ -391,10 +439,12 @@ public sealed class InGameScene : IScene
             TileMap = _tileMap,
             World = _simulation.World,
             FocusWorldPosition = _cameraFocus,
-            CityCenterWorldPosition = cityCenterWorldPosition,
             ScreenWidth = _camera.ViewportWidth,
             ScreenHeight = _camera.ViewportHeight,
             ShowMiniMap = _showMiniMap,
+            ShowStatusPanel = _showStatusPanel,
+            ShowSettingsMenu = _showSettingsMenu,
+            SettingsSelectedIndex = _settingsSelectedIndex,
             LoadedCityName = _cityLayout.CityName,
             BuildingCount = _cityLayout.Buildings.Count,
             PlayerDisplayName = _context.PlayerName,
@@ -402,6 +452,14 @@ public sealed class InGameScene : IScene
             PlayerMaxHealth = playerMaxHealth,
             PlayerRespawnSeconds = playerRespawnSeconds,
             PlayerInventory = inventory,
+            CloakRechargeSeconds = cloakRecharge,
+            FlareRechargeSeconds = flareRecharge,
+            CloakRechargeUnlocked = CityEquipmentRules.HasRechargeableCloak(cityBuild),
+            FlareRechargeUnlocked = CityEquipmentRules.HasRechargeableFlare(cityBuild),
+            CityCenterWorldPosition = cityCenterWorldPosition,
+            NearestOrbableCityWorldPosition = nearestOrbableCity,
+            HomeCommandCenterGridX = homeCcGridX,
+            HomeCommandCenterGridY = homeCcGridY,
             IsUnderAttack = isUnderAttack,
             UnderAttackFlashVisible = underAttackFlashVisible,
             ShowBuildMenu = _showBuildMenu,
@@ -423,8 +481,71 @@ public sealed class InGameScene : IScene
             ChatLines = _chatLog.Lines,
             IsChatting = _chatInput.IsActive,
             ChatDraft = _chatInput.Draft,
-            ObserverCityId = 0,
+            ObserverCityId = _simulation.TryGetPlayerCityId(out var observerCityId) ? observerCityId : 0,
         };
+    }
+
+    /// <returns>True when settings UI consumed the input.</returns>
+    private bool HandleSettingsInput(UiInputState ui, out bool leaveToMenu)
+    {
+        leaveToMenu = false;
+        var hamburgerClicked = ui.MouseLeftClicked
+            && ModernHudLayout.HamburgerBounds.Contains(
+                (int)ui.MouseLogicalPosition.X,
+                (int)ui.MouseLogicalPosition.Y);
+
+        if (ui.ToggleSettingsPressed || hamburgerClicked)
+        {
+            _showSettingsMenu = !_showSettingsMenu;
+            if (_showSettingsMenu)
+            {
+                _settingsSelectedIndex = 0;
+                _menuInput.Reset();
+            }
+
+            return true;
+        }
+
+        if (!_showSettingsMenu)
+        {
+            return false;
+        }
+
+        var menu = _menuInput.Poll();
+        if (menu.MoveUpPressed)
+        {
+            _settingsSelectedIndex =
+                (_settingsSelectedIndex - 1 + UiRenderer.SettingsMenuItems.Length)
+                % UiRenderer.SettingsMenuItems.Length;
+        }
+
+        if (menu.MoveDownPressed)
+        {
+            _settingsSelectedIndex =
+                (_settingsSelectedIndex + 1) % UiRenderer.SettingsMenuItems.Length;
+        }
+
+        if (menu.ConfirmPressed)
+            {
+                switch (_settingsSelectedIndex)
+                {
+                    case 0:
+                        _showSettingsMenu = false;
+                        break;
+                    case 1:
+                        _showStatusPanel = !_showStatusPanel;
+                        break;
+                    case 2:
+                        _showMiniMap = !_showMiniMap;
+                        break;
+                    case 3:
+                    case 4:
+                        leaveToMenu = true;
+                        break;
+                }
+            }
+
+        return true;
     }
 
     private void ApplyUiInput(UiInputState ui, GameTime gameTime)
@@ -432,6 +553,11 @@ public sealed class InGameScene : IScene
         if (ui.ToggleMiniMapPressed)
         {
             _showMiniMap = !_showMiniMap;
+        }
+
+        if (ui.ToggleStatusPanelPressed)
+        {
+            _showStatusPanel = !_showStatusPanel;
         }
 
         if (ui.ZoomSteps != 0)

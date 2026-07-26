@@ -82,7 +82,8 @@ public static class LevelLoader
     public static Entity SpawnBuilding(World world, CityBuildingPlacement building)
     {
         var position = BuildingPlacement.GridAnchorToWorldPosition(building.GridX, building.GridY);
-        var (sourceX, sourceY) = BuildingSprites.GetSourceOrigin(building.TypeCode);
+        var animationFrame = Random.Shared.Next(0, 6);
+        var (sourceX, sourceY) = BuildingSprites.GetSourceOrigin(building.TypeCode, animationFrame);
 
         var (offsetX, offsetY, width, height) = BuildingCollision.GetPlayerColliderShape(building.TypeCode);
 
@@ -99,6 +100,8 @@ public static class LevelLoader
             {
                 Population = GetInitialPopulation(building.TypeCode),
                 ItemsLeft = 0,
+                AnimationFrame = animationFrame,
+                AnimationCooldownSeconds = 0.5f,
             },
             new SpriteRef
             {
@@ -118,18 +121,5 @@ public static class LevelLoader
             });
     }
 
-    private static int GetInitialPopulation(int typeCode)
-    {
-        if (BuildingCatalog.IsResearch(typeCode))
-        {
-            return 0;
-        }
-
-        if (BuildingCatalog.IsHouse(typeCode))
-        {
-            return EconomyConstants.PopulationMaxHouse / 2;
-        }
-
-        return EconomyConstants.PopulationMaxNonHouse / 2;
-    }
+    private static int GetInitialPopulation(int typeCode) => 0;
 }

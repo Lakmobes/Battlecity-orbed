@@ -210,7 +210,7 @@ public static class BombSystem
                     return;
                 }
 
-                state.Population = 0;
+                BuildingPopulationSystem.DetachBeforeDestroy(world, entity);
                 var center = new Vector2(
                     transform.Position.X + GameConstants.BuildingCollisionSize / 2f,
                     transform.Position.Y + GameConstants.BuildingCollisionSize / 2f);
@@ -264,47 +264,6 @@ public static class BombSystem
                 {
                     hooks.ReportNetworkPlayerKilled(entity, life.KillerCityId);
                 }
-            });
-    }
-}
-
-public static class BuildingPopulationSystem
-{
-    private const float TickIntervalSeconds = 2f;
-    private static float _accumulator;
-
-    private static readonly QueryDescription BuildingQuery =
-        new QueryDescription().WithAll<BuildingRef, BuildingState>();
-
-    public static void Update(World world, float deltaSeconds)
-    {
-        _accumulator += deltaSeconds;
-        if (_accumulator < TickIntervalSeconds)
-        {
-            return;
-        }
-
-        _accumulator = 0f;
-
-        world.Query(
-            in BuildingQuery,
-            (ref BuildingRef building, ref BuildingState state) =>
-            {
-                if (BuildingCatalog.IsResearch(building.TypeCode))
-                {
-                    return;
-                }
-
-                var max = BuildingCatalog.IsHouse(building.TypeCode)
-                    ? EconomyConstants.PopulationMaxHouse
-                    : EconomyConstants.PopulationMaxNonHouse;
-
-                if (state.Population >= max)
-                {
-                    return;
-                }
-
-                state.Population = Math.Min(max, state.Population + 5);
             });
     }
 }

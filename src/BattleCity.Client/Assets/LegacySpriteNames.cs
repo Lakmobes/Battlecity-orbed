@@ -23,6 +23,7 @@ public static class LegacySpriteNames
     public const string Health = "Sprites/Health";
     public const string BlackNumbers = "Sprites/BlackNumbers";
     public const string MenuFont = "Fonts/MenuFont";
+    public const string UiFont = "Fonts/UiFont";
 
     public static string ToContentPath(string legacyBmpFileName)
     {

@@ -67,6 +67,11 @@ public static class TurretAiSystem
                     return;
                 }
 
+                // Legacy resets lastturn every interval whether or not a shot is fired
+                // (CItem.cpp). Only starting the timer on Fire let turrets re-shoot as soon
+                // as the previous bullet died (~bullet lifetime) instead of on 250ms ticks.
+                turret.TurnCooldownSeconds = GameConstants.TimerTurretTurn / 1000f;
+
                 if (!turret.HasTarget)
                 {
                     return;
@@ -78,7 +83,6 @@ public static class TurretAiSystem
                 }
 
                 Fire(world, entity, ref item, ref turret, audio);
-                turret.TurnCooldownSeconds = GameConstants.TimerTurretTurn / 1000f;
             });
     }
 

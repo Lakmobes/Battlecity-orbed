@@ -74,4 +74,19 @@ public static class CityCatalog
     public static bool IsValidCityId(int cityId) => cityId >= 0 && cityId < Names.Count;
 
     public static string GetName(int cityId) => Names[cityId];
+
+    public static bool TryGetId(string cityName, out int cityId)
+    {
+        for (var i = 0; i < Names.Count; i++)
+        {
+            if (string.Equals(Names[i], cityName, StringComparison.OrdinalIgnoreCase))
+            {
+                cityId = i;
+                return true;
+            }
+        }
+
+        cityId = 0;
+        return false;
+    }
 }

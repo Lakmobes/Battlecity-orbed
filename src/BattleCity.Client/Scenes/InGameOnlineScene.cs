@@ -12,6 +12,7 @@ using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Gameplay;
 using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
+using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Chat;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
@@ -44,6 +45,7 @@ public sealed class InGameOnlineScene : IScene
     private Vector2 _cameraPanOffset;
     private Vector2 _buildMenuAnchor;
     private bool _showMiniMap;
+    private bool _showStatusPanel = true;
     private bool _showBuildMenu;
     private int _buildModeSlot;
     private bool _showBuildPreview;
@@ -62,8 +64,11 @@ public sealed class InGameOnlineScene : IScene
     private byte? _pendingApplicantId;
     private string? _pendingApplicantName;
     private bool _returnToMeeting;
+    private bool _keepNetworkClientOnDispose;
     private readonly InGameChatLog _chatLog = new();
     private readonly InGameChatInput _chatInput = new();
+    private bool _showSettingsMenu;
+    private int _settingsSelectedIndex;
 
     public InGameOnlineScene(SceneContext context, GameClient client)
     {
@@ -95,13 +100,16 @@ public sealed class InGameOnlineScene : IScene
         _simulation.SuppressLocalOrbEffects = true;
         _simulation.SuppressLocalItemDrops = true;
         _simulation.SuppressLocalBombDetonation = true;
+        _simulation.SuppressLocalFactoryProduction = true;
+        _simulation.ReturnInventoryPlaceablesOnDeath = false;
         _simulation.SuppressLocalPlayerRespawn = true;
         _simulation.DeferRemotePlayerRespawn = true;
         _simulation.NetworkPlayersUseLocalHealthDeath = false;
         _simulation.NetworkPlayersUseLocalBulletDamage = false;
         _simulation.ReportLocalShot = shot => _client.SendShoot(shot);
 
-        _cityLayout = LevelLoader.LoadLegacyCity(_context.SelectedCity, _context.CityDesign);
+        // Online multiplayer shares the Buenos Aires world layout; affiliation comes from SpawnState.
+        _cityLayout = LevelLoader.LoadLegacyCity("Buenos Aires", _context.CityDesign);
         _simulation.LoadCityLayout(_cityLayout);
 
         _remotePlayers = new RemotePlayerSync(_simulation.World);
@@ -111,16 +119,38 @@ public sealed class InGameOnlineScene : IScene
         _client.PollAvailable();
         ApplyPendingNetworkEvents();
 
-        var spawn = _client.SpawnState is { } stateGame
-            ? new Vector2(stateGame.X, stateGame.Y)
-            : _cityLayout.GetSpawnPosition();
+        NumericsVector2 spawn;
+        if (_client.SpawnState is { } stateGame)
+        {
+            spawn = new NumericsVector2(stateGame.X, stateGame.Y);
+        }
+        else if (_simulation.TryGetCityRespawnPosition(0, out var fallbackSpawn, out _))
+        {
+            spawn = fallbackSpawn;
+        }
+        else
+        {
+            spawn = _cityLayout.GetSpawnPosition();
+        }
 
-        _simulation.CreatePlayerEntity(new NumericsVector2(spawn.X, spawn.Y), isMayor: false);
-        _remotePlayers.ObserverCityId = _client.SpawnState?.City ?? 0;
+        spawn = _simulation.FindOpenTankSpawnNear(spawn);
+
+        var localCityId = _client.SpawnState?.City ?? 0;
+        if (CityCatalog.IsValidCityId(localCityId))
+        {
+            _context.SelectedCity = CityCatalog.GetName(localCityId);
+        }
+
+        _simulation.CreatePlayerEntity(
+            spawn,
+            isMayor: false,
+            isAdmin: IsLocalAdmin(),
+            cityId: localCityId);
+        _remotePlayers.ObserverCityId = localCityId;
         ApplyLocalMayorVisual(_client.IsMayor);
         _cameraFocus = new Vector2(spawn.X + GameConstants.TileSize / 2f, spawn.Y + GameConstants.TileSize / 2f);
 
-        _simulation.SpawnPracticeBots(new NumericsVector2(spawn.X, spawn.Y));
+        // Practice bots are offline-only; online enemies are other players.
 
         _gameplayAudio = new GameplayAudioController(_context.Audio);
         _camera.SetViewport(UiLayout.LogicalWidth, UiLayout.LogicalHeight);
@@ -140,15 +170,10 @@ public sealed class InGameOnlineScene : IScene
             return SceneTransition.None;
         }
 
-        var menuInput = _menuInput.Poll();
-        if (menuInput.CancelPressed && !_chatInput.IsActive && !_pendingApplicantId.HasValue)
+        var menuInput = default(MenuInputState);
+        if (_pendingApplicantId.HasValue && !_showSettingsMenu)
         {
-            _context.Audio.StopEngine();
-            return SceneTransition.MainMenu;
-        }
-
-        if (_pendingApplicantId.HasValue)
-        {
+            menuInput = _menuInput.Poll();
             if (menuInput.ConfirmPressed)
             {
                 _client.AcceptApplicant();
@@ -174,11 +199,6 @@ public sealed class InGameOnlineScene : IScene
         }
 
         var keyboard = Keyboard.GetState();
-        var chatUpdate = _chatInput.Update(keyboard);
-        if (chatUpdate.Submitted)
-        {
-            SendChatMessage(chatUpdate.Message);
-        }
 
         var worldWidth = UiLayout.WorldViewportWidth;
         _camera.SetViewport(UiLayout.LogicalWidth, UiLayout.LogicalHeight);
@@ -193,31 +213,90 @@ public sealed class InGameOnlineScene : IScene
                 playerPosition.Y + GameConstants.TileSize / 2f);
         }
 
-        if (!_chatInput.IsActive)
+        // Settings must win over chat so Esc / Enter are not stolen by chat or leave-to-menu.
+        var networkGameplay = default(GameplayInputState);
+        var hasNetworkGameplay = false;
+        if (_showSettingsMenu)
         {
-            var frameInput = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
-            SendNetworkItemDrops(frameInput.Gameplay);
-            SendNetworkItemPickup(frameInput.Gameplay);
-            SendNetworkMedKit(frameInput.Gameplay);
-            SendNetworkCloak(frameInput.Gameplay);
-            SendNetworkDeathReport();
-            InputCommandWriter.Apply(_simulation.World, frameInput.Gameplay);
-            HandleBuildInput(frameInput.Ui, playerCenter, worldWidth);
-            UpdateBuildPreview(frameInput.Ui, playerCenter, worldWidth);
-            ApplyUiInput(frameInput.Ui, gameTime);
-
-            if (_simulation.TryGetPlayerPosition(out playerPosition))
+            var settingsFrame = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+            if (HandleSettingsInput(settingsFrame.Ui, out var leaveToMenu, out var abandonCity))
             {
-                _cameraFocus = new Vector2(
-                    playerPosition.X + GameConstants.TileSize / 2f,
-                    playerPosition.Y + GameConstants.TileSize / 2f);
-                playerCenter = _cameraFocus;
+                if (abandonCity)
+                {
+                    AbandonCityToLobby();
+                    return SceneTransition.Meeting;
+                }
+
+                if (leaveToMenu)
+                {
+                    _context.Audio.StopEngine();
+                    return SceneTransition.MainMenu;
+                }
+            }
+        }
+        else
+        {
+            var chatUpdate = _chatInput.Update(keyboard);
+            if (chatUpdate.Submitted)
+            {
+                SendChatMessage(chatUpdate.Message);
             }
 
-            SendNetworkUpdate(playerPosition, frameInput.Gameplay, (float)gameTime.ElapsedGameTime.TotalSeconds);
+            if (!_chatInput.IsActive)
+            {
+                var frameInput = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+                if (HandleSettingsInput(frameInput.Ui, out var leaveToMenu, out var abandonCity))
+                {
+                    if (abandonCity)
+                    {
+                        AbandonCityToLobby();
+                        return SceneTransition.Meeting;
+                    }
+
+                    if (leaveToMenu)
+                    {
+                        _context.Audio.StopEngine();
+                        return SceneTransition.MainMenu;
+                    }
+                }
+                else
+                {
+                    SendNetworkItemDrops(frameInput.Gameplay);
+                    SendNetworkItemPickup(frameInput.Gameplay);
+                    SendNetworkMedKit(frameInput.Gameplay);
+                    SendNetworkCloak(frameInput.Gameplay);
+                    SendNetworkDeathReport();
+                    InputCommandWriter.Apply(_simulation.World, frameInput.Gameplay);
+                    HandleBuildInput(frameInput.Ui, playerCenter, worldWidth);
+                    UpdateBuildPreview(frameInput.Ui, playerCenter, worldWidth);
+                    ApplyUiInput(frameInput.Ui, gameTime);
+                    networkGameplay = frameInput.Gameplay;
+                    hasNetworkGameplay = true;
+                }
+            }
         }
 
-        _simulation.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+        if (_simulation.TryGetPlayerPosition(out playerPosition))
+        {
+            _cameraFocus = new Vector2(
+                playerPosition.X + GameConstants.TileSize / 2f,
+                playerPosition.Y + GameConstants.TileSize / 2f);
+            playerCenter = _cameraFocus;
+        }
+
+        if (!_showSettingsMenu)
+        {
+            if (_simulation.TryGetPlayerPosition(out playerPosition))
+            {
+                SendNetworkUpdate(
+                    new NumericsVector2(playerPosition.X, playerPosition.Y),
+                    hasNetworkGameplay ? networkGameplay : default,
+                    (float)gameTime.ElapsedGameTime.TotalSeconds);
+            }
+
+            _simulation.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+        }
+
         _animationTime += (float)gameTime.ElapsedGameTime.TotalSeconds;
         _camera.CenterOn(_cameraFocus + _cameraPanOffset);
 
@@ -227,6 +306,7 @@ public sealed class InGameOnlineScene : IScene
 
         _context.Audio.SetEngineRunning(
             !_chatInput.IsActive
+            && !_showSettingsMenu
             && _simulation.TryGetPlayerInputMove(out var move)
             && move != 0);
 
@@ -243,8 +323,12 @@ public sealed class InGameOnlineScene : IScene
     {
         _context.Audio.StopEngine();
         _remotePlayers?.Clear();
-        _client.Dispose();
-        _context.NetworkClient = null;
+        if (!_keepNetworkClientOnDispose)
+        {
+            _client.Dispose();
+            _context.NetworkClient = null;
+        }
+
         _simulation.Dispose();
         _loaded = false;
     }
@@ -300,6 +384,7 @@ public sealed class InGameOnlineScene : IScene
                     break;
                 case GameClientEventKind.MedKit:
                     _simulation.TryConsumeLocalPlayerItem(ItemType.MedKit);
+                    _context.Audio.Play(SoundId.Click);
                     break;
                 case GameClientEventKind.Cloak:
                     _simulation.ApplyNetworkCloak(networkEvent.Cloak.PlayerId, _client.PlayerId);
@@ -347,7 +432,7 @@ public sealed class InGameOnlineScene : IScene
                         networkEvent.Death);
                     break;
                 case GameClientEventKind.Hp:
-                    _simulation.ApplyNetworkHp(networkEvent.Hp);
+                    _simulation.ApplyNetworkHp(networkEvent.Hp, _client.PlayerId);
                     break;
                 case GameClientEventKind.ChatMessage:
                     InGameChatService.AppendIncoming(
@@ -403,7 +488,7 @@ public sealed class InGameOnlineScene : IScene
                     AppendInterviewComms(networkEvent.ChatMessage);
                     break;
                 case GameClientEventKind.Fired:
-                    _returnToMeeting = true;
+                    AbandonCityToLobby();
                     break;
                 case GameClientEventKind.Orbed:
                     _simulation.ApplyNetworkOrb(
@@ -706,20 +791,24 @@ public sealed class InGameOnlineScene : IScene
         PlayerInventory? inventory = null;
         var isUnderAttack = false;
         var underAttackFlashVisible = false;
+        var cloakRecharge = 0f;
+        var flareRecharge = 0f;
         CityBuildState? cityBuild = null;
         if (_simulation.TryGetCityBuild(0, out var buildState))
         {
             cityBuild = buildState;
         }
 
-        var playerQuery = new Arch.Core.QueryDescription().WithAll<InputControlled, PlayerInventory, CityAlertState>();
+        var playerQuery = new Arch.Core.QueryDescription().WithAll<InputControlled, PlayerInventory, CityAlertState, WeaponState>();
         _simulation.World.Query(
             in playerQuery,
-            (ref PlayerInventory value, ref CityAlertState alert) =>
+            (ref PlayerInventory value, ref CityAlertState alert, ref WeaponState weapons) =>
             {
                 inventory = value;
                 isUnderAttack = alert.IsUnderAttack;
                 underAttackFlashVisible = alert.FlashArrowVisible;
+                cloakRecharge = weapons.CloakRechargeSeconds;
+                flareRecharge = weapons.FlareRechargeSeconds;
             });
 
         var showOrbedOverlay = false;
@@ -756,34 +845,66 @@ public sealed class InGameOnlineScene : IScene
                 researchCompleteOverlayMessage = complete.Message;
             });
 
+        var observerCityId = _simulation.TryGetPlayerCityId(out var playerCityId)
+            ? playerCityId
+            : _remotePlayers?.ObserverCityId ?? 0;
+        var homeCcGridX = 0;
+        var homeCcGridY = 0;
+        var cityCenterWorldPosition = new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y);
+        Vector2? nearestOrbableCity = null;
+        if (_simulation.TryGetCityBuild(observerCityId, out var homeCityForCompass))
+        {
+            homeCcGridX = homeCityForCompass.CommandCenterGridX;
+            homeCcGridY = homeCityForCompass.CommandCenterGridY;
+            if (CommandCenterLookup.TryGetWorldPosition(
+                    _simulation.World,
+                    homeCityForCompass.CommandCenterGridX,
+                    homeCityForCompass.CommandCenterGridY,
+                    out var commandCenterPosition))
+            {
+                cityCenterWorldPosition = new Vector2(commandCenterPosition.X, commandCenterPosition.Y);
+            }
+
+            if (CommandCenterLookup.TryFindNearestOtherWorldPosition(
+                    _simulation.World,
+                    homeCityForCompass.CommandCenterGridX,
+                    homeCityForCompass.CommandCenterGridY,
+                    new NumericsVector2(_cameraFocus.X, _cameraFocus.Y),
+                    out var orbTarget))
+            {
+                nearestOrbableCity = new Vector2(orbTarget.X, orbTarget.Y);
+            }
+        }
+        else if (CommandCenterLookup.TryGetWorldPosition(_simulation.World, out var anyCommandCenter))
+        {
+            cityCenterWorldPosition = new Vector2(anyCommandCenter.X, anyCommandCenter.Y);
+        }
+
         return new RenderContext
         {
             Camera = _camera,
             TileMap = _tileMap,
             World = _simulation.World,
             FocusWorldPosition = _cameraFocus,
-            CityCenterWorldPosition = _simulation.TryGetCityBuild(_remotePlayers?.ObserverCityId ?? 0, out var homeCity)
-                    && CommandCenterLookup.TryGetWorldPosition(
-                        _simulation.World,
-                        homeCity.CommandCenterGridX,
-                        homeCity.CommandCenterGridY,
-                        out var commandCenterPosition)
-                ? new Vector2(commandCenterPosition.X, commandCenterPosition.Y)
-                : CommandCenterLookup.TryGetWorldPosition(
-                    _simulation.World,
-                    out var anyCommandCenter)
-                    ? new Vector2(anyCommandCenter.X, anyCommandCenter.Y)
-                    : new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y),
+            CityCenterWorldPosition = cityCenterWorldPosition,
+            NearestOrbableCityWorldPosition = nearestOrbableCity,
+            HomeCommandCenterGridX = homeCcGridX,
+            HomeCommandCenterGridY = homeCcGridY,
             ScreenWidth = _camera.ViewportWidth,
             ScreenHeight = _camera.ViewportHeight,
             ShowMiniMap = _showMiniMap,
-            LoadedCityName = _cityLayout.CityName,
+            ShowStatusPanel = _showStatusPanel,
+            LoadedCityName = _context.SelectedCity,
             BuildingCount = _cityLayout.Buildings.Count,
             PlayerDisplayName = _context.PlayerName,
             PlayerHealth = playerHealth,
             PlayerMaxHealth = playerMaxHealth,
             PlayerRespawnSeconds = playerRespawnSeconds,
             PlayerInventory = inventory,
+            CloakRechargeSeconds = cloakRecharge,
+            FlareRechargeSeconds = flareRecharge,
+            CloakRechargeUnlocked = CityEquipmentRules.HasRechargeableCloak(cityBuild),
+            FlareRechargeUnlocked = CityEquipmentRules.HasRechargeableFlare(cityBuild),
             IsUnderAttack = isUnderAttack,
             UnderAttackFlashVisible = underAttackFlashVisible,
             CityBuild = cityBuild,
@@ -805,22 +926,100 @@ public sealed class InGameOnlineScene : IScene
             ChatLines = _chatLog.Lines,
             IsChatting = _chatInput.IsActive,
             ChatDraft = _chatInput.Draft,
-            ObserverCityId = _remotePlayers?.ObserverCityId ?? 0,
+            ObserverCityId = observerCityId,
+            ShowSettingsMenu = _showSettingsMenu,
+            SettingsSelectedIndex = _settingsSelectedIndex,
         };
     }
 
+    private bool HandleSettingsInput(UiInputState ui, out bool leaveToMenu, out bool abandonCity)
+    {
+        leaveToMenu = false;
+        abandonCity = false;
+        var hamburgerClicked = ui.MouseLeftClicked
+            && ModernHudLayout.HamburgerBounds.Contains(
+                (int)ui.MouseLogicalPosition.X,
+                (int)ui.MouseLogicalPosition.Y);
+
+        if (ui.ToggleSettingsPressed || hamburgerClicked)
+        {
+            _showSettingsMenu = !_showSettingsMenu;
+            if (_showSettingsMenu)
+            {
+                _settingsSelectedIndex = 0;
+                _menuInput.Reset();
+            }
+
+            return true;
+        }
+
+        if (!_showSettingsMenu)
+        {
+            return false;
+        }
+
+        var menu = _menuInput.Poll();
+        if (menu.MoveUpPressed)
+        {
+            _settingsSelectedIndex =
+                (_settingsSelectedIndex - 1 + UiRenderer.SettingsMenuItems.Length)
+                % UiRenderer.SettingsMenuItems.Length;
+        }
+
+        if (menu.MoveDownPressed)
+        {
+            _settingsSelectedIndex =
+                (_settingsSelectedIndex + 1) % UiRenderer.SettingsMenuItems.Length;
+        }
+
+        if (menu.ConfirmPressed)
+        {
+            switch (_settingsSelectedIndex)
+            {
+                case 0:
+                    _showSettingsMenu = false;
+                    break;
+                case 1:
+                    _showStatusPanel = !_showStatusPanel;
+                    break;
+                case 2:
+                    _showMiniMap = !_showMiniMap;
+                    break;
+                case 3:
+                    abandonCity = true;
+                    break;
+                case 4:
+                    leaveToMenu = true;
+                    break;
+            }
+        }
+
+        return true;
+    }
+
+    private void AbandonCityToLobby()
+    {
+        _keepNetworkClientOnDispose = true;
+        _context.NetworkClient = _client;
+        _client.EnterMeetingRoom();
+        _returnToMeeting = true;
+        _showSettingsMenu = false;
+        _context.Audio.StopEngine();
+    }
+
     private bool IsLocalAdmin() =>
-        string.Equals(_context.PlayerName, "admin", StringComparison.OrdinalIgnoreCase);
+        _client.IsAdmin || TankSpriteSelector.IsAdminAccount(_context.PlayerName);
 
     private void ApplyLocalMayorVisual(bool isMayor)
     {
+        var isAdmin = IsLocalAdmin();
         var query = new QueryDescription().WithAll<InputControlled, SpriteRef, MayorStatus, CityAffiliation>();
         _simulation.World.Query(
             in query,
             (ref SpriteRef sprite, ref MayorStatus mayor, ref CityAffiliation city) =>
             {
                 mayor.IsMayor = isMayor;
-                sprite.SourceY = TankSpriteSelector.GetSourceY(city.CityId, city.CityId, isMayor)
+                sprite.SourceY = TankSpriteSelector.GetSourceY(city.CityId, city.CityId, isMayor, isAdmin)
                     * GameConstants.TileSize;
             });
     }
@@ -948,6 +1147,11 @@ public sealed class InGameOnlineScene : IScene
         if (ui.ToggleMiniMapPressed)
         {
             _showMiniMap = !_showMiniMap;
+        }
+
+        if (ui.ToggleStatusPanelPressed)
+        {
+            _showStatusPanel = !_showStatusPanel;
         }
 
         if (ui.ZoomSteps != 0)

@@ -87,6 +87,10 @@ public sealed class InputManager
         {
             ToggleMiniMapPressed = keyboard.IsKeyDown(UiInputMap.ToggleMiniMap)
                 && !_previousKeyboard.IsKeyDown(UiInputMap.ToggleMiniMap),
+            ToggleStatusPanelPressed = keyboard.IsKeyDown(UiInputMap.ToggleStatusPanel)
+                && !_previousKeyboard.IsKeyDown(UiInputMap.ToggleStatusPanel),
+            ToggleSettingsPressed = keyboard.IsKeyDown(UiInputMap.ToggleSettings)
+                && !_previousKeyboard.IsKeyDown(UiInputMap.ToggleSettings),
             ZoomSteps = Math.Sign(mouse.ScrollWheelValue - _previousMouse.ScrollWheelValue),
             CameraPanLeft = cameraPan && keyboard.IsKeyDown(UiInputMap.CameraPanLeft),
             CameraPanRight = cameraPan && keyboard.IsKeyDown(UiInputMap.CameraPanRight),

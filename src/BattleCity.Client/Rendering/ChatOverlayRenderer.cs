@@ -9,8 +9,9 @@ namespace BattleCity.Client.Rendering;
 
 public sealed class ChatOverlayRenderer
 {
-    private const int LineHeight = 16;
-    private const int InputLineHeight = 16;
+    private const int LineHeight = 18;
+    private const int InputLineHeight = 20;
+    private const float TextScale = 1f;
     private static readonly Color PanelBackground = new(0, 0, 0, 140);
     private static readonly Color InputBackground = new(0, 0, 0, 180);
 
@@ -22,7 +23,7 @@ public sealed class ChatOverlayRenderer
         _assets = assets;
     }
 
-    public void LoadContent() => _font = _assets.LoadFont("Fonts/MenuFont");
+    public void LoadContent() => _font = _assets.LoadFont(LegacySpriteNames.UiFont);
 
     public void Draw(
         SpriteBatch spriteBatch,
@@ -45,7 +46,7 @@ public sealed class ChatOverlayRenderer
 
         var chatHeight = ModernHudLayout.ChatAreaHeight;
         var startY = viewportHeight - chatHeight;
-        var chatWidth = Math.Min(520, viewportWidth);
+        var chatWidth = Math.Min(560, viewportWidth);
         var pixel = _assets.Pixel;
 
         HudOverlayHelper.DrawPanel(
@@ -55,17 +56,18 @@ public sealed class ChatOverlayRenderer
             PanelBackground,
             borderThickness: 0);
 
-        var y = startY + 4;
-        foreach (var line in lines)
+        var y = startY + 6;
+        var maxLines = Math.Max(1, (chatHeight - InputLineHeight - 12) / LineHeight);
+        foreach (var line in lines.TakeLast(maxLines))
         {
             spriteBatch.DrawString(
                 _font,
                 line.Text,
-                new Vector2(6, y),
+                new Vector2(8, y),
                 line.Color,
                 0f,
                 Vector2.Zero,
-                0.9f,
+                TextScale,
                 SpriteEffects.None,
                 0f);
             y += LineHeight;
@@ -73,19 +75,19 @@ public sealed class ChatOverlayRenderer
 
         if (isChatting)
         {
-            var inputY = viewportHeight - InputLineHeight - 2;
+            var inputY = viewportHeight - InputLineHeight - 4;
             spriteBatch.Draw(
                 pixel,
-                new Rectangle(0, inputY, chatWidth, InputLineHeight + 2),
+                new Rectangle(0, inputY, chatWidth, InputLineHeight + 4),
                 InputBackground);
             spriteBatch.DrawString(
                 _font,
                 (chatDraft ?? string.Empty) + "_",
-                new Vector2(6, inputY),
+                new Vector2(8, inputY + 2),
                 new Color(UiColors.Yellow.R, UiColors.Yellow.G, UiColors.Yellow.B),
                 0f,
                 Vector2.Zero,
-                0.9f,
+                TextScale,
                 SpriteEffects.None,
                 0f);
         }

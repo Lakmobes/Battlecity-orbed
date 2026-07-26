@@ -85,6 +85,7 @@ public sealed class LoginTextInput
             Keys.Space => ' ',
             Keys.OemMinus => shift ? '_' : '-',
             Keys.OemPeriod => '.',
+            Keys.OemSemicolon => shift ? ':' : null,
             _ => null,
         };
     }

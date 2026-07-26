@@ -6,8 +6,6 @@ using BattleCity.Core.Audio;
 using BattleCity.Core.Collision;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Gameplay;
-using BattleCity.Core.Gameplay;
-using BattleCity.Core.Levels;
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
@@ -78,6 +76,7 @@ public static class CombatLifeSystem
                     var center = GetTankCenter(transform.Position);
                     GameplayEntityFactory.CreateExplosion(world, ExplosionKind.Small, center);
                     audio?.Play(SoundId.Die, center);
+                    hooks.OnTankDied?.Invoke(entity);
 
                     if (isNetworkPlayer)
                     {
@@ -101,14 +100,17 @@ public static class CombatLifeSystem
                     return;
                 }
 
+                // Remote tanks on clients / server network tanks: wait for Warp / ProcessNetworkPlayerRespawns.
                 if (world.Has<NetworkIdentity>(entity) && hooks.DeferNetworkPlayerRespawn)
                 {
                     return;
                 }
 
-                if (world.Has<InputControlled>(entity) && hooks.SuppressLocalPlayerRespawn)
+                // Local online player: respawn immediately when the countdown hits 0.
+                // smWarp still arrives afterward and reconciles the authoritative pad position.
+                if (hooks.ResolveRespawnPosition?.Invoke(entity) is { } resolvedSpawn)
                 {
-                    return;
+                    life.SpawnPosition = resolvedSpawn;
                 }
 
                 life.IsDead = false;
@@ -116,6 +118,12 @@ public static class CombatLifeSystem
                 health.Current = health.Max;
                 transform.Position = life.SpawnPosition;
                 transform.PreviousPosition = life.SpawnPosition;
+
+                if (world.Has<Collider>(entity))
+                {
+                    ref var collider = ref world.Get<Collider>(entity);
+                    collider.Layer = CollisionLayer.Player;
+                }
             });
     }
 

@@ -64,7 +64,8 @@ public static class CityLayoutParser
         }
 
         var typeCode = BuildingCatalog.MenuTypeCodes[menuIndex - 1];
-        placement = new CityBuildingPlacement(menuIndex, gridX, gridY, typeCode);
+        // City files use 1-based menu slots; CanBuild / BuildingRef use 0-based indexes.
+        placement = new CityBuildingPlacement(menuIndex - 1, gridX, gridY, typeCode);
         return true;
     }
 

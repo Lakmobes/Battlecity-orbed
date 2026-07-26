@@ -150,7 +150,7 @@ public class CollisionSystemTests
     }
 
     [Fact]
-    public void Resolve_PlayerTanksDoNotOverlap()
+    public void Resolve_PlayerTanksCanPassThroughEachOther()
     {
         var map = TileMap.CreateEmpty();
 
@@ -161,7 +161,8 @@ public class CollisionSystemTests
         simulation.Tick(0.05f);
 
         ref var patrolTransform = ref simulation.World.Get<Transform2D>(patrol);
-        Assert.True(patrolTransform.Position.X >= 132f);
+        // Tanks do not block each other — patrol keeps moving left through the player.
+        Assert.True(patrolTransform.Position.X < 200f);
     }
 
     [Fact]

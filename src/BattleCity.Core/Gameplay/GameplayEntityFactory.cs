@@ -116,16 +116,19 @@ public static class GameplayEntityFactory
                 Height = ItemSprites.WorldSpriteSize,
             });
 
-        if (blocksMovement)
+        // Legacy only collides with active walls/turrets — factory bay stock is inactive and driveable.
+        if (blocksMovement && active)
         {
+            // Legacy CCollision ItemRect: +gap on left/top, size 48-gap (flush on right/bottom).
+            var gap = GameConstants.PlayerCollisionInset;
             world.Add(
                 entity,
                 new Collider
                 {
-                    OffsetX = GameConstants.PlayerCollisionInset,
-                    OffsetY = GameConstants.PlayerCollisionInset,
-                    Width = GameConstants.TileSize - GameConstants.PlayerCollisionInset * 2,
-                    Height = GameConstants.TileSize - GameConstants.PlayerCollisionInset * 2,
+                    OffsetX = gap,
+                    OffsetY = gap,
+                    Width = GameConstants.TileSize - gap,
+                    Height = GameConstants.TileSize - gap,
                     Layer = CollisionLayer.Item,
                 });
         }

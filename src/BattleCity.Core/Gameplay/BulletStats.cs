@@ -21,7 +21,7 @@ public static class BulletStats
             BulletKind.Laser => GameConstants.DamageLaser,
             BulletKind.Rocket => GameConstants.DamageRocket,
             BulletKind.Flare => GameConstants.DamageLaser,
-            BulletKind.Plasma => 12,
+            BulletKind.Plasma => GameConstants.DamagePlasmaTurretBullet,
             _ => GameConstants.DamageLaser,
         };
 

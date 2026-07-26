@@ -18,7 +18,7 @@ namespace BattleCity.Core.Ecs.Systems;
 public static class ItemDropSystem
 {
     private static readonly QueryDescription PlayerQuery =
-        new QueryDescription().WithAll<InputControlled, InputCommand, Transform2D, TankFacing, TankLifeState, PlayerInventory, TankStatus>();
+        new QueryDescription().WithAll<InputControlled, InputCommand, Transform2D, TankFacing, TankLifeState, PlayerInventory, TankStatus, WeaponState>();
 
     public static void Update(
         World world,
@@ -29,7 +29,7 @@ public static class ItemDropSystem
     {
         world.Query(
             in PlayerQuery,
-            (Entity entity, ref InputCommand input, ref Transform2D transform, ref TankFacing facing, ref TankLifeState life, ref PlayerInventory inventory, ref TankStatus status) =>
+            (Entity entity, ref InputCommand input, ref Transform2D transform, ref TankFacing facing, ref TankLifeState life, ref PlayerInventory inventory, ref TankStatus status, ref WeaponState weapons) =>
             {
                 if (life.IsDead)
                 {
@@ -56,7 +56,8 @@ public static class ItemDropSystem
                     return;
                 }
 
-                if (input.UseCloakPressed && inventory.TryConsume(ItemType.Cloak))
+                if (input.UseCloakPressed
+                    && WeaponActions.TryConsumeCloak(ref weapons, ref inventory, cityBuild))
                 {
                     TankStatusSystem.ActivateCloak(ref status);
                     audio?.Play(SoundId.Cloak, transform.Position);
@@ -100,7 +101,14 @@ public static class ItemDropSystem
 
                 if (input.PickUpItemPressed)
                 {
-                    if (ItemPickupActions.TryFindItemAtTank(world, entity, out var itemEntity, out var itemType, out _)
+                    var mapCityId = cityBuild?.CityId;
+                    if (ItemPickupActions.TryFindItemAtTank(
+                            world,
+                            entity,
+                            out var itemEntity,
+                            out var itemType,
+                            out _,
+                            mapCityId)
                         && ItemPickupActions.TryPickUp(world, entity, ref inventory, itemEntity, itemType))
                     {
                         audio?.Play(SoundId.Click, transform.Position);
@@ -135,7 +143,6 @@ public static class ItemDropSystem
         }
 
         inventory.TryConsume(inventory.SelectedItemType);
-        inventory.SelectNextAvailablePlaceable();
         return true;
     }
 
@@ -182,14 +189,12 @@ public static class BulletCollisionSystem
                     return;
                 }
 
-                if (bullet.CollisionGraceSeconds > 0f)
-                {
-                    return;
-                }
-
                 var bounds = AxisAlignedBox.FromCollider(transform.Position, collider);
                 var impactPoint = new Vector2(bounds.Left + bounds.Width / 2f, bounds.Top + bounds.Height / 2f);
 
+                // Grace only skips tank damage so the muzzle does not hit the shooter.
+                // Terrain/walls/buildings must still collide on the first frames — otherwise
+                // shots fired while pressed against a wall travel through during grace.
                 if (TerrainCollision.IsBlockingForBullet(map, bounds))
                 {
                     hits.Add(bulletEntity);
@@ -198,23 +203,37 @@ public static class BulletCollisionSystem
                     return;
                 }
 
-                if (TryHitPlacedItem(world, bulletEntity, bounds, damage.Value, hits, audio))
+                if (TryHitPlacedItem(
+                        world,
+                        bulletEntity,
+                        bullet.Owner,
+                        bounds,
+                        transform.PreviousPosition,
+                        collider,
+                        damage.Value,
+                        hits,
+                        audio))
                 {
                     return;
                 }
 
                 // Buildings are handled by TryHitBuilding (population damage). Do not hard-kill
                 // bullets on building colliders — that blocked shots into items on factory bays.
-                if (TryHitBuilding(world, bulletEntity, bounds, hits, audio))
+                if (TryHitBuilding(world, bulletEntity, bounds, transform.PreviousPosition, collider, hits, audio))
                 {
                     return;
                 }
 
-                if (CollisionQueries.IntersectsItemCollider(world, bulletEntity, bounds))
+                if (CollisionQueries.IntersectsItemCollider(world, bulletEntity, bounds, bullet.Owner))
                 {
                     hits.Add(bulletEntity);
                     GameplayEntityFactory.CreateExplosion(world, ExplosionKind.Small, impactPoint);
                     audio?.Play(SoundId.Explode, impactPoint);
+                    return;
+                }
+
+                if (bullet.CollisionGraceSeconds > 0f)
+                {
                     return;
                 }
 
@@ -307,13 +326,20 @@ public static class BulletCollisionSystem
     private static bool TryHitPlacedItem(
         World world,
         Entity bulletEntity,
+        Entity owner,
         AxisAlignedBox bulletBounds,
+        Vector2 previousPosition,
+        in Collider collider,
         int damage,
         List<Entity> hits,
         SimulationAudioBuffer? audio)
     {
         var itemQuery = new QueryDescription().WithAll<PlacedItemRef, Transform2D, Health>();
-        var impactPoint = new Vector2(
+        var previousBounds = AxisAlignedBox.FromCollider(previousPosition, collider);
+        var previousCenter = new Vector2(
+            previousBounds.Left + previousBounds.Width / 2f,
+            previousBounds.Top + previousBounds.Height / 2f);
+        var currentCenter = new Vector2(
             bulletBounds.Left + bulletBounds.Width / 2f,
             bulletBounds.Top + bulletBounds.Height / 2f);
         var hit = false;
@@ -322,7 +348,8 @@ public static class BulletCollisionSystem
             in itemQuery,
             (Entity entity, ref PlacedItemRef item, ref Transform2D transform, ref Health health) =>
             {
-                if (hit || !ItemHealth.IsDamageable(item.Type))
+                // Turrets must not damage themselves when their own shot clips the tile.
+                if (hit || entity == owner || !ItemHealth.IsDamageable(item.Type))
                 {
                     return;
                 }
@@ -334,12 +361,16 @@ public static class BulletCollisionSystem
                     GameConstants.TileSize,
                     GameConstants.TileSize);
 
-                if (!itemBounds.Intersects(bulletBounds))
+                if (!itemBounds.Intersects(bulletBounds)
+                    && !itemBounds.Intersects(previousBounds)
+                    && itemBounds.TryGetSegmentEntryPoint(previousCenter, currentCenter) is null)
                 {
                     return;
                 }
 
                 hit = true;
+                var impactPoint = itemBounds.TryGetSegmentEntryPoint(previousCenter, currentCenter)
+                    ?? itemBounds.ClosestPoint(currentCenter);
                 health.Current = Math.Max(0, health.Current - damage);
                 MaybeTriggerUnderAttack(world, bulletEntity, item.CityId);
                 audio?.Play(SoundId.Hit, impactPoint);
@@ -360,14 +391,21 @@ public static class BulletCollisionSystem
         World world,
         Entity bulletEntity,
         AxisAlignedBox bulletBounds,
+        Vector2 previousPosition,
+        in Collider collider,
         List<Entity> hits,
         SimulationAudioBuffer? audio)
     {
         var buildingQuery = new QueryDescription().WithAll<BuildingRef, BuildingState, Transform2D>();
-        var impactPoint = new Vector2(
+        var previousBounds = AxisAlignedBox.FromCollider(previousPosition, collider);
+        var previousCenter = new Vector2(
+            previousBounds.Left + previousBounds.Width / 2f,
+            previousBounds.Top + previousBounds.Height / 2f);
+        var currentCenter = new Vector2(
             bulletBounds.Left + bulletBounds.Width / 2f,
             bulletBounds.Top + bulletBounds.Height / 2f);
         var hit = false;
+        var ownerIsTurret = IsTurretOwnedBullet(world, bulletEntity);
 
         world.Query(
             in buildingQuery,
@@ -378,29 +416,34 @@ public static class BulletCollisionSystem
                     return;
                 }
 
-                var buildingBounds = GetBuildingBulletBounds(building);
-                if (!buildingBounds.Intersects(bulletBounds))
+                var buildingBounds = BuildingCollision.GetBulletHitBounds(
+                    building.TypeCode,
+                    building.GridAnchorX,
+                    building.GridAnchorY);
+                if (!buildingBounds.Intersects(bulletBounds)
+                    && !buildingBounds.Intersects(previousBounds)
+                    && buildingBounds.TryGetSegmentEntryPoint(previousCenter, currentCenter) is null)
                 {
                     return;
                 }
 
                 hit = true;
-                if (BuildingCatalog.IsCommandCenter(building.TypeCode))
-                {
-                    hits.Add(bulletEntity);
-                    GameplayEntityFactory.CreateExplosion(world, ExplosionKind.Small, impactPoint);
-                    audio?.Play(SoundId.Explode, impactPoint);
-                    return;
-                }
+                var impactPoint = buildingBounds.TryGetSegmentEntryPoint(previousCenter, currentCenter)
+                    ?? buildingBounds.ClosestPoint(currentCenter);
 
-                if (!BuildingCatalog.IsResearch(building.TypeCode))
+                // Legacy: bullets stop on buildings; populated buildings are immune.
+                // Empty buildings (pop 0) are destroyed in one hit. Bombs ignore population.
+                if (!ownerIsTurret
+                    && !BuildingCatalog.IsCommandCenter(building.TypeCode)
+                    && state.Population <= 0)
                 {
-                    state.Population = Math.Max(0, state.Population - GameConstants.DamageLaser);
                     MaybeTriggerUnderAttack(world, bulletEntity, defendedCityId: 0);
-                    if (state.Population <= 0)
-                    {
-                        world.Destroy(entity);
-                    }
+                    BuildingPopulationSystem.DetachBeforeDestroy(world, entity);
+                    world.Destroy(entity);
+                }
+                else if (!ownerIsTurret && !BuildingCatalog.IsCommandCenter(building.TypeCode))
+                {
+                    MaybeTriggerUnderAttack(world, bulletEntity, defendedCityId: 0);
                 }
 
                 hits.Add(bulletEntity);
@@ -411,12 +454,15 @@ public static class BulletCollisionSystem
         return hit;
     }
 
-    private static AxisAlignedBox GetBuildingBulletBounds(BuildingRef building)
+    private static bool IsTurretOwnedBullet(World world, Entity bulletEntity)
     {
-        var spriteTopLeft = BuildingPlacement.GridAnchorToWorldPosition(
-            building.GridAnchorX,
-            building.GridAnchorY);
-        return BuildingCollision.GetPlayerBlockingBounds(building.TypeCode, spriteTopLeft);
+        if (!world.IsAlive(bulletEntity) || !world.Has<BulletRef>(bulletEntity))
+        {
+            return false;
+        }
+
+        var owner = world.Get<BulletRef>(bulletEntity).Owner;
+        return owner != default && world.IsAlive(owner) && world.Has<TurretState>(owner);
     }
 
     private static void MaybeTriggerUnderAttack(World world, Entity bulletEntity, int defendedCityId)

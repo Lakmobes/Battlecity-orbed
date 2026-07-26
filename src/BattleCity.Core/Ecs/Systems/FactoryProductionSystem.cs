@@ -4,11 +4,15 @@ using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Gameplay;
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Constants;
+using BattleCity.Shared.Data;
+using BattleCity.Shared.Network.Packets;
 
 namespace BattleCity.Core.Ecs.Systems;
 
 /// <summary>
 /// Spawns inactive items on factory bays (legacy/server/CBuilding.cpp, 7 s interval).
+/// Keeps producing until the city holds <see cref="ItemCatalog.MaxCarryCount"/> of that product
+/// (items may stack on the bay while waiting for pickup).
 /// </summary>
 public static class FactoryProductionSystem
 {
@@ -21,7 +25,15 @@ public static class FactoryProductionSystem
     private static readonly QueryDescription ItemQuery =
         new QueryDescription().WithAll<PlacedItemRef>();
 
-    public static void Update(World world, CityBuildState? build, float deltaSeconds)
+    private static readonly QueryDescription InventoryQuery =
+        new QueryDescription().WithAll<PlayerInventory, CityAffiliation>();
+
+    public static void Update(
+        World world,
+        CityBuildState? build,
+        float deltaSeconds,
+        Func<ushort>? allocateNetworkItemId = null,
+        Action<ServerAddItemPacket>? reportSpawn = null)
     {
         _accumulator += deltaSeconds;
         if (_accumulator < ProductionIntervalSeconds)
@@ -46,10 +58,26 @@ public static class FactoryProductionSystem
                     return;
                 }
 
+                var menuIndex = BuildingCatalog.GetMenuIndex(building.TypeCode);
                 if (build is not null
-                    && (building.MenuIndex < 0
-                        || building.MenuIndex >= build.CanBuild.Length
-                        || build.CanBuild[building.MenuIndex] != 2))
+                    && (menuIndex < 0
+                        || menuIndex >= build.CanBuild.Length
+                        || build.CanBuild[menuIndex] != 2))
+                {
+                    return;
+                }
+
+                var cityId = build?.CityId ?? 0;
+                var capacity = ItemCatalog.MaxCarryCount[(int)product];
+                var held = CountCityProduct(world, cityId, product);
+                state.ItemsLeft = Math.Max(0, capacity - held);
+
+                if (state.ItemsLeft <= 0)
+                {
+                    return;
+                }
+
+                if (product == ItemType.Orb && !OrbCityRules.CanAddOrbToCity(world, cityId))
                 {
                     return;
                 }
@@ -58,47 +86,89 @@ public static class FactoryProductionSystem
                     building.GridAnchorX,
                     building.GridAnchorY);
 
-                if (HasItemAt(world, bayX, bayY))
-                {
-                    return;
-                }
-
-                if (state.ItemsLeft <= 0)
-                {
-                    state.ItemsLeft = ItemCatalog.MaxCarryCount[(int)product];
-                }
-
-                if (state.ItemsLeft <= 0)
-                {
-                    return;
-                }
-
+                var networkItemId = allocateNetworkItemId?.Invoke() ?? 0;
                 GameplayEntityFactory.CreatePlacedItem(
                     world,
                     product,
                     bayX,
                     bayY,
                     active: false,
-                    cityId: 0);
+                    cityId: cityId,
+                    networkItemId: networkItemId);
 
-                state.ItemsLeft--;
+                if (networkItemId != 0 && reportSpawn is not null)
+                {
+                    reportSpawn(new ServerAddItemPacket(
+                        (ushort)bayX,
+                        (ushort)bayY,
+                        (byte)Math.Clamp(cityId, 0, byte.MaxValue),
+                        (byte)product,
+                        active: 0,
+                        networkItemId));
+                }
+
+                state.ItemsLeft = Math.Max(0, capacity - CountCityProduct(world, cityId, product));
             });
     }
 
-    private static bool HasItemAt(World world, int gridX, int gridY)
+    public static int CountCityProduct(World world, int cityId, ItemType product)
     {
-        var found = false;
+        _ = cityId;
+        var count = 0;
 
         world.Query(
             in ItemQuery,
             (ref PlacedItemRef item) =>
             {
-                if (!found && item.GridX == gridX && item.GridY == gridY)
+                if (item.Type == product)
                 {
-                    found = true;
+                    count++;
                 }
             });
 
-        return found;
+        world.Query(
+            in InventoryQuery,
+            (ref PlayerInventory inventory, ref CityAffiliation _) =>
+            {
+                count += inventory.GetCount(product);
+            });
+
+        return count;
+    }
+
+    public static bool TryFindFactoryBayForProduct(World world, ItemType product, out int bayX, out int bayY)
+    {
+        bayX = 0;
+        bayY = 0;
+        var found = false;
+        var foundX = 0;
+        var foundY = 0;
+
+        world.Query(
+            in BuildingQuery,
+            (ref BuildingRef building, ref BuildingState _) =>
+            {
+                if (found
+                    || !BuildingCatalog.IsFactory(building.TypeCode)
+                    || !BuildingCatalog.TryGetFactoryProduct(building.TypeCode, out var factoryProduct)
+                    || factoryProduct != product)
+                {
+                    return;
+                }
+
+                (foundX, foundY) = BuildingCatalog.GetFactoryBayTile(
+                    building.GridAnchorX,
+                    building.GridAnchorY);
+                found = true;
+            });
+
+        if (!found)
+        {
+            return false;
+        }
+
+        bayX = foundX;
+        bayY = foundY;
+        return true;
     }
 }

@@ -4,8 +4,8 @@ using Microsoft.Xna.Framework.Graphics;
 namespace BattleCity.Client.Rendering;
 
 /// <summary>
-/// Maps legacy 48px sprite layout to higher-resolution PNG sheets (client render only).
-/// Simulation and collision stay at <see cref="BattleCity.Shared.Constants.GameConstants.TileSize"/>.
+/// Maps higher-resolution PNG sheets onto legacy 48px world space (client render only).
+/// Destination stays simulation-sized; only the source rect is scaled for sharper sampling.
 /// </summary>
 public static class WorldSpriteMetrics
 {
@@ -14,9 +14,6 @@ public static class WorldSpriteMetrics
     public static int Scaled(int legacyPixels) =>
         Math.Max(1, (int)MathF.Round(legacyPixels * Scale));
 
-    public static int AnchorOffset(int legacyPixels) =>
-        (int)MathF.Floor((Scale - 1f) * legacyPixels / 2f);
-
     public static Rectangle ScaleSource(in Rectangle legacy) =>
         new(
             Scaled(legacy.X),
@@ -24,16 +21,13 @@ public static class WorldSpriteMetrics
             Scaled(legacy.Width),
             Scaled(legacy.Height));
 
+    /// <summary>World-space draw rect — always legacy size so zoom/framing stay stable.</summary>
     public static Rectangle LegacyWorldDestination(
         float worldX,
         float worldY,
         int legacyWidth,
         int legacyHeight) =>
-        new(
-            (int)worldX - AnchorOffset(legacyWidth),
-            (int)worldY - AnchorOffset(legacyHeight),
-            Scaled(legacyWidth),
-            Scaled(legacyHeight));
+        new((int)worldX, (int)worldY, legacyWidth, legacyHeight);
 
     public static void DrawLegacySprite(
         SpriteBatch spriteBatch,
@@ -41,11 +35,31 @@ public static class WorldSpriteMetrics
         float worldX,
         float worldY,
         Rectangle legacySource,
+        Color color) =>
+        DrawLegacySprite(
+            spriteBatch,
+            texture,
+            worldX,
+            worldY,
+            legacySource,
+            legacySource.Width,
+            legacySource.Height,
+            color);
+
+    /// <summary>Sample a legacy UV rect but draw at an explicit world size (building overlay icons).</summary>
+    public static void DrawLegacySprite(
+        SpriteBatch spriteBatch,
+        Texture2D texture,
+        float worldX,
+        float worldY,
+        Rectangle legacySource,
+        int destWidth,
+        int destHeight,
         Color color)
     {
         spriteBatch.Draw(
             texture,
-            LegacyWorldDestination(worldX, worldY, legacySource.Width, legacySource.Height),
+            LegacyWorldDestination(worldX, worldY, destWidth, destHeight),
             ScaleSource(legacySource),
             color);
     }

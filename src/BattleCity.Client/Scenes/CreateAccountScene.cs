@@ -58,13 +58,23 @@ public sealed class CreateAccountScene : IScene
 
     public SceneTransition Update(GameTime gameTime, int screenWidth, int screenHeight)
     {
+        _ui.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
         var menuInput = _menuInput.Poll();
         var keyboard = Keyboard.GetState();
 
-        if (menuInput.CancelPressed || WasPressed(keyboard, Keys.Tab))
+        if (menuInput.CancelPressed)
         {
             _context.Audio.Play(SoundId.Click);
             return SceneTransition.Login;
+        }
+
+        if (WasPressed(keyboard, Keys.Tab))
+        {
+            _context.Audio.Play(SoundId.Click);
+            var shift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
+            _activeField = NextField(_activeField, shift ? -1 : 1);
+            _previousKeyboard = keyboard;
+            return SceneTransition.None;
         }
 
         if (menuInput.MoveDownPressed)
@@ -125,7 +135,7 @@ public sealed class CreateAccountScene : IScene
         using var client = new GameClient();
         var created = client.ConnectAndCreateAccount(
             _context.ServerHost,
-            NetworkConstants.TcpPort,
+            _context.ServerPort,
             account,
             TimeSpan.FromSeconds(5));
 
@@ -147,24 +157,30 @@ public sealed class CreateAccountScene : IScene
 
     public void DrawScreen(SpriteBatch spriteBatch)
     {
-        _ui.DrawBackdrop(spriteBatch, RenderConstants.DefaultWindowWidth, RenderConstants.DefaultWindowHeight);
-        _ui.DrawTitle(spriteBatch, RenderConstants.DefaultWindowWidth);
-        _ui.DrawMessageBlock(
+        var width = UiLayout.LogicalWidth;
+        var height = UiLayout.LogicalHeight;
+        _ui.DrawBackdrop(spriteBatch, width, height);
+        _ui.DrawTitle(spriteBatch, width);
+
+        var panel = ScreenUiRenderer.CenteredFormPanel(width, height, 600, 500);
+        _ui.DrawFormPanel(
             spriteBatch,
-            RenderConstants.DefaultWindowWidth,
-            RenderConstants.DefaultWindowHeight,
+            panel,
             "Create Account",
             [
-                $"Server: {_context.ServerHost}:{NetworkConstants.TcpPort}",
+                $"Server: {_context.ServerHost}:{_context.ServerPort}",
+                "Username: 1-15 letters, numbers, - or _",
+                string.Empty,
                 FormatField(Field.Username, _usernameInput.Text, mask: false),
                 FormatField(Field.Password, _passwordInput.Text, mask: true),
                 FormatField(Field.FullName, _fullNameInput.Text, mask: false),
                 FormatField(Field.Email, _emailInput.Text, mask: false),
                 FormatField(Field.Town, _townInput.Text, mask: false),
                 FormatField(Field.State, _stateInput.Text, mask: false),
+                string.Empty,
                 _statusMessage ?? string.Empty,
             ],
-            "Up/Down - field   Enter - next/create   Tab/Esc - back to login");
+            "Tab - next field   Enter - next/create   Esc - back to login");
     }
 
     private string FormatField(Field field, string value, bool mask)

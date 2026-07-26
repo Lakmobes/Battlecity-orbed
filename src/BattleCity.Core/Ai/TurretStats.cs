@@ -28,10 +28,12 @@ public static class TurretStats
             return false;
         }
 
+        // Legacy sets a burn flag after damage when life is below these thresholds.
+        // Sleeper max health is 16, so `< 17` would be true at full health — require actual damage.
         return type switch
         {
             ItemType.Turret => currentHealth < 9,
-            ItemType.Sleeper => currentHealth < 17,
+            ItemType.Sleeper => currentHealth < GameConstants.SleeperTurretMaxHealth,
             ItemType.Plasma => currentHealth < 21,
             _ => false,
         };

@@ -43,6 +43,12 @@ public static class ItemDropActions
             ? world.Get<CityAffiliation>(owner).CityId
             : 0;
 
+        // Inventory→map is fine; refuse if this city already has a different orb on the map.
+        if (type == ItemType.Orb && OrbCityRules.CityHasPlacedOrb(world, cityId))
+        {
+            return false;
+        }
+
         GameplayEntityFactory.CreatePlacedItem(
             world,
             type,
@@ -62,23 +68,18 @@ public static class ItemDropActions
 
     public static bool CanPlaceItem(World world, Entity owner, int gridX, int gridY, ItemType type)
     {
+        _ = owner;
+
         // Soft items (bomb/mine/orb/dfg) may share a tile. Solids need a free tile.
         if (!ItemDropPlacement.RequiresDedicatedTile(type))
         {
             return true;
         }
 
-        var tileSize = GameConstants.TileSize;
-        var worldPos = PlacedItemPlacement.GridToWorldPosition(gridX, gridY);
-        var bounds = new AxisAlignedBox(worldPos.X, worldPos.Y, tileSize, tileSize);
-
-        if (CollisionQueries.IntersectsItemCollider(world, owner, bounds)
-            || HasPlacedItemAt(world, gridX, gridY))
-        {
-            return false;
-        }
-
-        return true;
+        // Grid occupancy only — do not AABB-test the full tile against neighbors.
+        // Wall colliders are flush on the right/bottom, so a 48×48 probe on the next
+        // tile edge-touches and falsely blocks adjacent placement.
+        return !HasPlacedItemAt(world, gridX, gridY);
     }
 
     public static bool TryNudgeTankOffSolid(World world, TileMap map, Entity owner)

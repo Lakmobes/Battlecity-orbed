@@ -5,8 +5,27 @@ namespace BattleCity.Core.Ecs.Components;
 
 public struct PlayerInventory
 {
+    /// <summary>Placeables cycled / dropped with D (and selected via [ ] among stocked slots).</summary>
     public static readonly ItemType[] SelectableItems =
     [
+        ItemType.MedKit,
+        ItemType.Wall,
+        ItemType.Turret,
+        ItemType.Sleeper,
+        ItemType.Plasma,
+        ItemType.Mine,
+        ItemType.Bomb,
+        ItemType.Orb,
+        ItemType.Dfg,
+    ];
+
+    /// <summary>Full HUD bar: gear first, then placeables (empty slots stay visible).</summary>
+    public static readonly ItemType[] HudItems =
+    [
+        ItemType.Cloak,
+        ItemType.Rocket,
+        ItemType.Flare,
+        ItemType.MedKit,
         ItemType.Wall,
         ItemType.Turret,
         ItemType.Sleeper,
@@ -31,23 +50,18 @@ public struct PlayerInventory
     public int Plasma;
     public ItemType SelectedItemType;
 
-    public static PlayerInventory CreateDemoLoadout() =>
+    /// <summary>Starter kit: laser is always available; inventory starts with rocket, flare, cloak only.</summary>
+    public static PlayerInventory CreateStarterLoadout() =>
         new()
         {
-            Rocket = 2,
-            MedKit = 2,
-            Wall = 5,
-            Mine = 3,
-            Bomb = 2,
-            Orb = 1,
+            Rocket = 1,
             Flare = 1,
-            Turret = 3,
-            Sleeper = 2,
-            Plasma = 2,
             Cloak = 1,
-            Dfg = 1,
-            SelectedItemType = ItemType.Wall,
+            SelectedItemType = ItemType.Rocket,
         };
+
+    /// <summary>Obsolete name kept for call sites; same as <see cref="CreateStarterLoadout"/>.</summary>
+    public static PlayerInventory CreateDemoLoadout() => CreateStarterLoadout();
 
     public int GetCount(ItemType type) =>
         type switch
@@ -128,21 +142,21 @@ public struct PlayerInventory
 
     public void CycleSelection(int delta)
     {
-        if (delta == 0 || SelectableItems.Length == 0)
+        if (delta == 0 || HudItems.Length == 0)
         {
             return;
         }
 
-        var currentIndex = Array.IndexOf(SelectableItems, SelectedItemType);
+        var currentIndex = Array.IndexOf(HudItems, SelectedItemType);
         if (currentIndex < 0)
         {
             currentIndex = 0;
         }
 
-        for (var step = 0; step < SelectableItems.Length; step++)
+        for (var step = 0; step < HudItems.Length; step++)
         {
-            currentIndex = (currentIndex + delta + SelectableItems.Length) % SelectableItems.Length;
-            SelectedItemType = SelectableItems[currentIndex];
+            currentIndex = (currentIndex + delta + HudItems.Length) % HudItems.Length;
+            SelectedItemType = HudItems[currentIndex];
             if (GetCount(SelectedItemType) > 0)
             {
                 return;
@@ -150,10 +164,10 @@ public struct PlayerInventory
         }
     }
 
-    /// <summary>After depleting the selected placeable, move selection to the next stocked slot.</summary>
+    /// <summary>After depleting the selected item, move highlight to the next stocked slot.</summary>
     public void SelectNextAvailablePlaceable()
     {
-        if (GetCount(SelectedItemType) > 0 && ItemCatalog.IsPlaceable(SelectedItemType))
+        if (GetCount(SelectedItemType) > 0)
         {
             return;
         }

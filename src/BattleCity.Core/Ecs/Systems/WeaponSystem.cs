@@ -5,8 +5,6 @@ using Arch.Core;
 using BattleCity.Core.Audio;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Gameplay;
-using BattleCity.Shared.Constants;
-using BattleCity.Shared.Data;
 using BattleCity.Shared.Network.Packets;
 
 namespace BattleCity.Core.Ecs.Systems;
@@ -19,6 +17,7 @@ public static class WeaponSystem
     public static void Update(
         World world,
         float deltaSeconds,
+        CityBuildState? cityBuild = null,
         SimulationAudioBuffer? audio = null,
         Action<ClientShotPacket>? reportLocalShot = null)
     {
@@ -26,8 +25,6 @@ public static class WeaponSystem
             in PlayerQuery,
             (Entity entity, ref InputCommand input, ref Transform2D transform, ref TankFacing facing, ref TankLifeState life, ref WeaponState weapons, ref PlayerInventory inventory, ref TankStatus status) =>
             {
-                WeaponActions.AdvanceCooldowns(ref weapons, deltaSeconds);
-
                 if (WeaponActions.TryFireFromInput(
                         world,
                         entity,
@@ -38,6 +35,7 @@ public static class WeaponSystem
                         ref life,
                         ref status,
                         transform.Position,
+                        cityBuild,
                         audio,
                         out var networkShot)
                     && networkShot is { } shot)

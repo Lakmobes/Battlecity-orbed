@@ -131,6 +131,8 @@ public sealed class GameClient : IDisposable
 
     public bool IsMayor { get; private set; }
 
+    public bool IsAdmin { get; private set; }
+
     public IReadOnlyCollection<GameClientEvent> DrainEvents()
     {
         var events = _events.ToArray();
@@ -541,6 +543,8 @@ public sealed class GameClient : IDisposable
         return false;
     }
 
+    public bool TryWaitForGameStart(TimeSpan timeout) => WaitForGameStart(timeout);
+
     private bool WaitForGameStart(TimeSpan timeout)
     {
         var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
@@ -577,6 +581,7 @@ public sealed class GameClient : IDisposable
         switch ((ServerMessageId)packet.MessageId)
         {
             case ServerMessageId.LoginCorrect when packet.Payload.Length >= 2:
+                IsAdmin = (packet.Payload.Span[1] & 2) != 0;
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.LoginCorrect)
                 {
                     PlayerId = packet.Payload.Span[0],
@@ -802,6 +807,8 @@ public sealed class GameClient : IDisposable
     private void Disconnect()
     {
         IsInGame = false;
+        IsMayor = false;
+        IsAdmin = false;
         _stream?.Dispose();
         _client?.Dispose();
         _stream = null;

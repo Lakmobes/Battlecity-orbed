@@ -112,23 +112,39 @@ public static class BuildingCatalog
             return false;
         }
 
-        var factoryIndex = 0;
-        foreach (var code in MenuTypeCodes)
+        var menuIndex = GetMenuIndex(factoryTypeCode);
+        if (menuIndex < 3 || (menuIndex - 3) % 2 != 0)
         {
-            if (!IsFactory(code))
-            {
-                continue;
-            }
-
-            if (code == factoryTypeCode)
-            {
-                product = FactoryProducts[factoryIndex];
-                return true;
-            }
-
-            factoryIndex++;
+            return false;
         }
 
+        var treeIndex = (menuIndex - 3) / 2;
+        if (treeIndex < 0 || treeIndex >= FactoryProducts.Count)
+        {
+            return false;
+        }
+
+        product = FactoryProducts[treeIndex];
+        return true;
+    }
+
+    /// <summary>
+    /// Item icon for factory/research overlays (legacy build-tree product, not <c>typeCode % 100</c>).
+    /// </summary>
+    public static bool TryGetEquipmentItemType(int typeCode, out Data.ItemType itemType)
+    {
+        if (TryGetFactoryProduct(typeCode, out itemType))
+        {
+            return true;
+        }
+
+        if (TryGetResearchTreeIndex(typeCode, out var treeIndex))
+        {
+            itemType = FactoryProducts[treeIndex];
+            return true;
+        }
+
+        itemType = default;
         return false;
     }
 

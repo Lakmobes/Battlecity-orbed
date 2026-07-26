@@ -31,6 +31,32 @@ public sealed class CityBuildTests
     }
 
     [Fact]
+    public void MarkExistingBuildings_DoesNotReopenExistingFactoryWhenResearchFollows()
+    {
+        var build = new CityBuildState();
+        CityBuildInitializer.ApplyLegacyStartingPermissions(build);
+
+        // Factory listed before its research must stay CanBuild == 2 (already owned).
+        var layout = new CityLayout
+        {
+            CityName = "Test",
+            SourcePath = "test.city",
+            Buildings =
+            [
+                new CityBuildingPlacement(9, 20, 20, 102), // MedKit Factory
+                new CityBuildingPlacement(8, 24, 20, 402), // MedKit Research
+            ],
+        };
+
+        CityBuildInitializer.MarkExistingBuildings(build, layout);
+
+        Assert.Equal(2, build.CanBuild[9]);
+        Assert.Equal(2, build.CanBuild[8]);
+        Assert.False(CityBuildPermissions.CanPlace(build, 9));
+        Assert.False(CityBuildPermissions.IsVisibleInMenu(build, 9));
+    }
+
+    [Fact]
     public void TryPlaceBuilding_SpawnsHouseOnOpenTerrain()
     {
         using var simulation = new GameSimulation();
@@ -103,7 +129,9 @@ public sealed class CityBuildTests
     public void TryDropItemForNetworkPlayer_CreatesAuthoritativeItem()
     {
         using var simulation = new GameSimulation();
-        simulation.CreateNetworkPlayerEntity(new System.Numerics.Vector2(12 * 48f, 12 * 48f), playerId: 1);
+        var entity = simulation.CreateNetworkPlayerEntity(new System.Numerics.Vector2(12 * 48f, 12 * 48f), playerId: 1);
+        ref var inventory = ref simulation.World.Get<PlayerInventory>(entity);
+        inventory.Orb = 1;
 
         Assert.True(simulation.TryDropItemForNetworkPlayer(
             1,
@@ -134,8 +162,10 @@ public sealed class CityBuildTests
     {
         using var simulation = new GameSimulation();
         simulation.TileMap = TileMap.CreateEmpty();
-        simulation.CreateNetworkPlayerEntity(new System.Numerics.Vector2(12 * 48f, 12 * 48f), playerId: 1);
-        simulation.TryDropItemForNetworkPlayer(1, ItemType.Bomb, active: true, out var dropPacket);
+        var entity = simulation.CreateNetworkPlayerEntity(new System.Numerics.Vector2(12 * 48f, 12 * 48f), playerId: 1);
+        ref var inventory = ref simulation.World.Get<PlayerInventory>(entity);
+        inventory.Bomb = 1;
+        Assert.True(simulation.TryDropItemForNetworkPlayer(1, ItemType.Bomb, active: true, out var dropPacket));
         simulation.ApplyNetworkAddItem(dropPacket);
 
         Assert.True(simulation.TryPickupItemForNetworkPlayer(

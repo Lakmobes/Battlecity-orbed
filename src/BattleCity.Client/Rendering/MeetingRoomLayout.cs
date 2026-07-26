@@ -2,26 +2,32 @@ using Microsoft.Xna.Framework;
 
 namespace BattleCity.Client.Rendering;
 
-/// <summary>Layout for the online meeting room.</summary>
+/// <summary>Layout for the online meeting room (logical 1920×1080).</summary>
 public static class MeetingRoomLayout
 {
-    public const int RowHeight = 40;
-    public const int HeaderHeight = 28;
+    public const int RowHeight = 32;
+    public const int HeaderHeight = 26;
     public const int PanelPadding = 14;
+    public const int PanelTop = 88;
+    public const int PanelBottomMargin = 88;
+    public const int FooterReserved = 40;
 
     public static Rectangle CitiesPanel =>
-        new(24, 72, UiLayout.LogicalWidth / 2 - 36, UiLayout.LogicalHeight - 160);
+        new(32, PanelTop, UiLayout.LogicalWidth / 2 - 48, UiLayout.LogicalHeight - PanelTop - PanelBottomMargin);
 
     public static Rectangle ChatPanel =>
-        new(UiLayout.LogicalWidth / 2 + 12, 72, UiLayout.LogicalWidth / 2 - 36, UiLayout.LogicalHeight - 160);
+        new(UiLayout.LogicalWidth / 2 + 16, PanelTop, UiLayout.LogicalWidth / 2 - 48, UiLayout.LogicalHeight - PanelTop - PanelBottomMargin);
 
     public static Rectangle RefreshButton =>
-        new(24, UiLayout.LogicalHeight - 72, 140, 32);
+        new(32, UiLayout.LogicalHeight - 64, 130, 28);
 
     public static Rectangle QuitHint =>
-        new(UiLayout.LogicalWidth / 2 + 12, UiLayout.LogicalHeight - 72, UiLayout.LogicalWidth / 2 - 36, 32);
+        new(UiLayout.LogicalWidth / 2 + 16, UiLayout.LogicalHeight - 64, UiLayout.LogicalWidth / 2 - 48, 28);
 
     public static int CityListTop => CitiesPanel.Y + PanelPadding + HeaderHeight;
+
+    public static int MaxVisibleCityRows =>
+        Math.Max(1, (CitiesPanel.Height - PanelPadding * 2 - HeaderHeight - FooterReserved) / RowHeight);
 
     public static Rectangle GetCityRowBounds(int index) =>
         new(
@@ -38,7 +44,8 @@ public static class MeetingRoomLayout
             return false;
         }
 
-        for (var i = 0; i < cityCount; i++)
+        var visible = Math.Min(cityCount, MaxVisibleCityRows);
+        for (var i = 0; i < visible; i++)
         {
             if (GetCityRowBounds(i).Contains(x, y))
             {

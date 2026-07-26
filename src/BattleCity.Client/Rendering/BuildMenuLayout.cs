@@ -7,7 +7,7 @@ namespace BattleCity.Client.Rendering;
 /// <summary>Build menu layout and hit testing (legacy CDrawing::DrawBuildMenu / CInput build menu).</summary>
 public static class BuildMenuLayout
 {
-    public const int MenuWidth = 180;
+    public const int MenuWidth = 220;
     public const int LineHeight = 18;
 
     public readonly record struct Entry(int BuildSlot, string Label, int TopY, int BottomY);
@@ -84,10 +84,10 @@ public static class BuildMenuLayout
     private static List<Entry> BuildEntries(int menuAnchorY, CityBuildState build)
     {
         var entries = new List<Entry>();
-        var menuY = menuAnchorY;
-        var drawY = menuY;
+        var drawY = menuAnchorY;
 
-        entries.Add(new Entry(-1, "Demolish", drawY - LineHeight, drawY));
+        // Legacy CDrawing::DrawBuildMenu: Demolish at the bottom, then items stacked upward.
+        entries.Add(new Entry(-1, "Demolish", drawY, drawY + LineHeight));
 
         for (var i = BuildingCatalog.MenuNames.Count - 1; i >= 0; i--)
         {

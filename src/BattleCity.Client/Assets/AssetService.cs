@@ -67,6 +67,8 @@ public sealed class AssetService
     public Texture2D HudSlot => LoadTexture(HudSpriteNames.Slot);
     public Texture2D HudSlotSelected => LoadTexture(HudSpriteNames.SlotSelected);
     public Texture2D HudCompassRing => LoadTexture(HudSpriteNames.CompassRing);
+    public Texture2D TitleLogo => LoadTexture(TitleSpriteNames.BCLogo);
+    public Texture2D TitleCompany => LoadTexture(TitleSpriteNames.Company);
 
     public SpriteFont LoadFont(string contentPath)
     {

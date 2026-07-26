@@ -47,51 +47,139 @@ public static class CityBuildInitializer
             {
                 build.ResearchStatus[treeIndex] = -1;
                 var factoryIndex = BuildingCatalog.GetFactoryMenuIndex(treeIndex);
-                if (factoryIndex < build.CanBuild.Length)
+                // Do not reopen a factory that already exists in the layout (CanBuild == 2).
+                if (factoryIndex < build.CanBuild.Length && build.CanBuild[factoryIndex] != 2)
                 {
                     build.CanBuild[factoryIndex] = 1;
                 }
             }
 
-            if (building.TypeCode == 105)
+            if (building.TypeCode == 103)
             {
                 build.HadBombFactory = true;
             }
-            else if (building.TypeCode == 106)
+            else if (building.TypeCode == 105)
             {
                 build.HadOrbFactory = true;
             }
         }
     }
 
+    /// <summary>
+    /// Legacy <c>CMap::CalculateTiles</c>: scan map top-to-bottom, left-to-right, assign
+    /// CityCenter clusters to city ids 63→0. Never fall back onto open/lava tiles.
+    /// </summary>
     public static void ResolveCommandCenter(CityBuildState build, CityLayout layout, TileMap tileMap)
     {
+        if (TryResolveByCityIndex(build, tileMap))
+        {
+            return;
+        }
+
+        // Fallback: nearest CityCenter terrain cluster to the layout centroid (never lava/open).
         var focus = layout.GetCameraFocus();
         var centerGridX = (int)(focus.X / GameConstants.TileSize);
         var centerGridY = (int)(focus.Y / GameConstants.TileSize);
-        var searchRadius = 48;
+        var bestDistance = int.MaxValue;
+        var bestX = centerGridX;
+        var bestY = centerGridY;
+        var found = false;
 
-        for (var dx = -searchRadius; dx <= searchRadius; dx++)
+        for (var y = 1; y < TileMap.Size - 1; y++)
         {
-            for (var dy = -searchRadius; dy <= searchRadius; dy++)
+            for (var x = 1; x < TileMap.Size - 1; x++)
             {
-                var x = centerGridX + dx;
-                var y = centerGridY + dy;
-                if (x < 0 || y < 0 || x >= TileMap.Size || y >= TileMap.Size)
+                if (!IsCityCenterClusterOrigin(tileMap, x, y))
                 {
                     continue;
                 }
 
-                if (tileMap.Terrain[x, y] == TerrainTileType.CityCenter)
+                var dx = x - centerGridX;
+                var dy = y - centerGridY;
+                var distance = dx * dx + dy * dy;
+                if (distance >= bestDistance)
+                {
+                    continue;
+                }
+
+                bestDistance = distance;
+                bestX = x;
+                bestY = y;
+                found = true;
+            }
+        }
+
+        if (found)
+        {
+            build.CommandCenterGridX = bestX + GameConstants.BuildingCollisionOffset;
+            build.CommandCenterGridY = bestY + GameConstants.BuildingCollisionOffset;
+            return;
+        }
+
+        // Empty/test maps with no CityCenter tiles: use layout focus only on open ground.
+        var focusTileX = (int)(focus.X / GameConstants.TileSize);
+        var focusTileY = (int)(focus.Y / GameConstants.TileSize);
+        if (!IsHazardTerrain(tileMap, focusTileX, focusTileY))
+        {
+            build.CommandCenterGridX = focusTileX + GameConstants.BuildingCollisionOffset;
+            build.CommandCenterGridY = focusTileY + GameConstants.BuildingCollisionOffset;
+        }
+    }
+
+    private static bool IsHazardTerrain(TileMap tileMap, int tileX, int tileY)
+    {
+        if (tileX < 0 || tileY < 0 || tileX >= TileMap.Size || tileY >= TileMap.Size)
+        {
+            return true;
+        }
+
+        var terrain = tileMap.Terrain[tileX, tileY];
+        return terrain is TerrainTileType.Lava or TerrainTileType.Rock;
+    }
+
+    private static bool TryResolveByCityIndex(CityBuildState build, TileMap tileMap)
+    {
+        if (!CityCatalog.IsValidCityId(build.CityId))
+        {
+            return false;
+        }
+
+        var citIndex = 63;
+        for (var y = 1; y < TileMap.Size - 1; y++)
+        {
+            for (var x = 1; x < TileMap.Size - 1; x++)
+            {
+                if (!IsCityCenterClusterOrigin(tileMap, x, y))
+                {
+                    continue;
+                }
+
+                if (citIndex == build.CityId)
                 {
                     build.CommandCenterGridX = x + GameConstants.BuildingCollisionOffset;
                     build.CommandCenterGridY = y + GameConstants.BuildingCollisionOffset;
-                    return;
+                    return true;
+                }
+
+                citIndex--;
+                if (citIndex < 0)
+                {
+                    return false;
                 }
             }
         }
 
-        build.CommandCenterGridX = centerGridX + GameConstants.BuildingCollisionOffset;
-        build.CommandCenterGridY = centerGridY + GameConstants.BuildingCollisionOffset;
+        return false;
+    }
+
+    private static bool IsCityCenterClusterOrigin(TileMap tileMap, int x, int y)
+    {
+        if (tileMap.Terrain[x, y] != TerrainTileType.CityCenter)
+        {
+            return false;
+        }
+
+        return tileMap.Terrain[x - 1, y] != TerrainTileType.CityCenter
+            && tileMap.Terrain[x, y - 1] != TerrainTileType.CityCenter;
     }
 }

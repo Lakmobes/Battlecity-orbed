@@ -16,13 +16,6 @@ namespace BattleCity.Client.Scenes;
 
 public sealed class MeetingScene : IScene
 {
-    private static readonly Color PanelFill = new(24, 30, 48, 230);
-    private static readonly Color PanelBorder = new(72, 88, 128);
-    private static readonly Color RowSelected = new(48, 64, 104, 180);
-    private static readonly Color RowHover = new(40, 52, 80, 140);
-    private static readonly Color MutedText = new(160, 168, 188);
-    private static readonly Color AccentText = new(255, 220, 96);
-
     private readonly SceneContext _context;
     private readonly GameClient _client;
     private readonly ScreenUiRenderer _ui;
@@ -33,7 +26,8 @@ public sealed class MeetingScene : IScene
     private int _selectedCityIndex;
     private int _hoverCityIndex = -1;
     private KeyboardState _previousKeyboard;
-    private MouseState _previousMouse;
+    private Point _previousLogicalMouse;
+    private ButtonState _previousMouseButton;
 
     public MeetingScene(SceneContext context, GameClient client)
     {
@@ -57,6 +51,7 @@ public sealed class MeetingScene : IScene
 
     public SceneTransition Update(GameTime gameTime, int screenWidth, int screenHeight)
     {
+        _ui.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
         _client.Poll();
         var transition = ApplyNetworkEvents();
         if (transition != SceneTransition.None)
@@ -73,6 +68,7 @@ public sealed class MeetingScene : IScene
             return SceneTransition.MainMenu;
         }
 
+        var visibleCount = VisibleCityCount;
         if (!_chatInput.IsActive && _cities.Count > 0)
         {
             if (menuInput.MoveUpPressed)
@@ -104,28 +100,32 @@ public sealed class MeetingScene : IScene
         }
 
         var mouse = Mouse.GetState();
+        var logicalMouse = _context.Presentation.ScreenToLogical(new Vector2(mouse.X, mouse.Y));
+        var logicalPoint = new Point((int)logicalMouse.X, (int)logicalMouse.Y);
+
         _hoverCityIndex = !_chatInput.IsActive
-            && MeetingRoomLayout.TryGetCityIndexAt(mouse.X, mouse.Y, _cities.Count, out var hoverIndex)
+            && TryGetCityIndexAtLogical(logicalPoint.X, logicalPoint.Y, out var hoverIndex)
             ? hoverIndex
             : -1;
 
         var clicked = mouse.LeftButton == ButtonState.Pressed
-            && _previousMouse.LeftButton == ButtonState.Released;
+            && _previousMouseButton == ButtonState.Released;
 
         if (clicked && !_chatInput.IsActive)
         {
-            if (MeetingRoomLayout.RefreshButton.Contains(mouse.X, mouse.Y))
+            if (MeetingRoomLayout.RefreshButton.Contains(logicalPoint))
             {
                 RefreshCityList();
             }
-            else if (MeetingRoomLayout.TryGetCityIndexAt(mouse.X, mouse.Y, _cities.Count, out var cityIndex))
+            else if (TryGetCityIndexAtLogical(logicalPoint.X, logicalPoint.Y, out var cityIndex))
             {
                 ApplyToCity(cityIndex);
             }
         }
 
         _previousKeyboard = keyboard;
-        _previousMouse = mouse;
+        _previousLogicalMouse = logicalPoint;
+        _previousMouseButton = mouse.LeftButton;
         return SceneTransition.None;
     }
 
@@ -135,8 +135,8 @@ public sealed class MeetingScene : IScene
 
     public void DrawScreen(SpriteBatch spriteBatch)
     {
-        var width = RenderConstants.DefaultWindowWidth;
-        var height = RenderConstants.DefaultWindowHeight;
+        var width = UiLayout.LogicalWidth;
+        var height = UiLayout.LogicalHeight;
 
         _ui.DrawBackdrop(spriteBatch, width, height);
         _ui.DrawTitle(spriteBatch, width);
@@ -150,11 +150,42 @@ public sealed class MeetingScene : IScene
     {
     }
 
+    private int VisibleCityCount => Math.Min(_cities.Count, MeetingRoomLayout.MaxVisibleCityRows);
+
+    private int GetCityScrollOffset()
+    {
+        var visible = VisibleCityCount;
+        if (visible <= 0 || _cities.Count <= visible)
+        {
+            return 0;
+        }
+
+        var scroll = Math.Clamp(_selectedCityIndex - visible + 1, 0, _cities.Count - visible);
+        if (_selectedCityIndex < scroll)
+        {
+            scroll = _selectedCityIndex;
+        }
+
+        return scroll;
+    }
+
+    private bool TryGetCityIndexAtLogical(int x, int y, out int cityIndex)
+    {
+        cityIndex = -1;
+        if (!MeetingRoomLayout.TryGetCityIndexAt(x, y, _cities.Count, out var rowIndex))
+        {
+            return false;
+        }
+
+        cityIndex = rowIndex + GetCityScrollOffset();
+        return cityIndex >= 0 && cityIndex < _cities.Count;
+    }
+
     private void DrawCitiesPanel(SpriteBatch spriteBatch)
     {
         var panel = MeetingRoomLayout.CitiesPanel;
-        _ui.DrawPanel(spriteBatch, panel, PanelFill, PanelBorder);
-        _ui.DrawText(spriteBatch, "Open Cities", panel.X + MeetingRoomLayout.PanelPadding, panel.Y + 8, Color.White);
+        _ui.DrawPanel(spriteBatch, panel, MenuTheme.PanelFill, MenuTheme.PanelBorder);
+        _ui.DrawText(spriteBatch, "Open Cities", panel.X + MeetingRoomLayout.PanelPadding, panel.Y + 6, MenuTheme.TextPrimary);
 
         if (_cities.Count == 0)
         {
@@ -163,56 +194,80 @@ public sealed class MeetingScene : IScene
                 "Waiting for city list...",
                 panel.X + MeetingRoomLayout.PanelPadding,
                 MeetingRoomLayout.CityListTop + 4,
-                MutedText,
-                0.9f);
+                MenuTheme.TextMuted);
             _ui.DrawText(
                 spriteBatch,
                 "Click Refresh or press R",
                 panel.X + MeetingRoomLayout.PanelPadding,
-                MeetingRoomLayout.CityListTop + 28,
-                MutedText,
-                0.85f);
+                MeetingRoomLayout.CityListTop + 22,
+                MenuTheme.TextMuted);
             return;
         }
 
-        for (var i = 0; i < _cities.Count; i++)
+        var visible = VisibleCityCount;
+        var scroll = GetCityScrollOffset();
+
+        for (var row = 0; row < visible; row++)
         {
-            var row = MeetingRoomLayout.GetCityRowBounds(i);
+            var i = row + scroll;
+            if (i >= _cities.Count)
+            {
+                break;
+            }
+
+            var bounds = MeetingRoomLayout.GetCityRowBounds(row);
             if (i == _selectedCityIndex)
             {
-                _ui.DrawPanel(spriteBatch, row, RowSelected, RowSelected);
+                _ui.DrawPanel(spriteBatch, bounds, MenuTheme.RowSelected, MenuTheme.ButtonFocusBorder);
             }
             else if (i == _hoverCityIndex)
             {
-                _ui.DrawPanel(spriteBatch, row, RowHover, RowHover);
+                _ui.DrawPanel(spriteBatch, bounds, MenuTheme.RowHover, MenuTheme.RowHover);
             }
 
             var city = _cities[i];
-            var nameColor = i == _selectedCityIndex ? AccentText : Color.White;
-            _ui.DrawText(spriteBatch, city.CityName, row.X + 6, row.Y + 4, nameColor, 0.95f);
-            _ui.DrawText(spriteBatch, city.RoleLabel, row.X + 6, row.Y + 16, MutedText, 0.75f);
+            var nameColor = i == _selectedCityIndex ? MenuTheme.TextAccent : MenuTheme.TextPrimary;
+            var label = $"{city.CityName} - {city.RoleLabel}";
+            _ui.DrawText(spriteBatch, label, bounds.X + 6, bounds.Y + 6, nameColor);
         }
 
-        _ui.DrawText(
-            spriteBatch,
-            "Click a city to apply",
-            panel.X + MeetingRoomLayout.PanelPadding,
-            panel.Bottom - 24,
-            MutedText,
-            0.85f);
+        if (_cities.Count > visible)
+        {
+            _ui.DrawText(
+                spriteBatch,
+                $"+ {_cities.Count - visible} more (use Up/Down)",
+                panel.X + MeetingRoomLayout.PanelPadding,
+                panel.Bottom - 22,
+                MenuTheme.TextMuted);
+        }
+        else
+        {
+            _ui.DrawText(
+                spriteBatch,
+                "Click a city to apply",
+                panel.X + MeetingRoomLayout.PanelPadding,
+                panel.Bottom - 22,
+                MenuTheme.TextMuted);
+        }
     }
 
     private void DrawChatPanel(SpriteBatch spriteBatch)
     {
         var panel = MeetingRoomLayout.ChatPanel;
-        _ui.DrawPanel(spriteBatch, panel, PanelFill, PanelBorder);
-        _ui.DrawText(spriteBatch, "Lobby Chat", panel.X + MeetingRoomLayout.PanelPadding, panel.Y + 8, Color.White);
+        _ui.DrawPanel(spriteBatch, panel, MenuTheme.PanelFill, MenuTheme.PanelBorder);
+        _ui.DrawText(spriteBatch, "Lobby Chat", panel.X + MeetingRoomLayout.PanelPadding, panel.Y + 6, MenuTheme.TextPrimary);
 
         var chatY = MeetingRoomLayout.CityListTop;
+        var maxY = panel.Bottom - 36;
         foreach (var line in _chatLog.Lines)
         {
-            _ui.DrawText(spriteBatch, line.Text, panel.X + MeetingRoomLayout.PanelPadding, chatY, line.Color, 0.85f);
-            chatY += 18;
+            if (chatY + 16 > maxY)
+            {
+                break;
+            }
+
+            _ui.DrawText(spriteBatch, line.Text, panel.X + MeetingRoomLayout.PanelPadding, chatY, line.Color);
+            chatY += 16;
         }
 
         if (_chatInput.IsActive)
@@ -221,9 +276,8 @@ public sealed class MeetingScene : IScene
                 spriteBatch,
                 $"> {_chatInput.Draft}_",
                 panel.X + MeetingRoomLayout.PanelPadding,
-                panel.Bottom - 28,
-                AccentText,
-                0.9f);
+                panel.Bottom - 24,
+                MenuTheme.TextAccent);
         }
         else
         {
@@ -231,30 +285,28 @@ public sealed class MeetingScene : IScene
                 spriteBatch,
                 "Press Enter to chat",
                 panel.X + MeetingRoomLayout.PanelPadding,
-                panel.Bottom - 28,
-                MutedText,
-                0.85f);
+                panel.Bottom - 24,
+                MenuTheme.TextMuted);
         }
     }
 
     private void DrawFooter(SpriteBatch spriteBatch, int screenWidth)
     {
         var refresh = MeetingRoomLayout.RefreshButton;
-        var refreshHover = refresh.Contains(_previousMouse.X, _previousMouse.Y);
+        var refreshHover = refresh.Contains(_previousLogicalMouse);
         _ui.DrawPanel(
             spriteBatch,
             refresh,
-            refreshHover ? RowHover : new Color(36, 44, 68),
-            PanelBorder);
-        _ui.DrawText(spriteBatch, "Refresh (R)", refresh.X + 10, refresh.Y + 6, Color.White, 0.85f);
+            refreshHover ? MenuTheme.RowHover : MenuTheme.ButtonIdleFill,
+            MenuTheme.PanelBorder);
+        _ui.DrawText(spriteBatch, "Refresh (R)", refresh.X + 10, refresh.Y + 6, MenuTheme.TextPrimary);
 
         _ui.DrawCenteredText(
             spriteBatch,
             $"Player {_client.PlayerId}  |  Up/Down highlight  |  Esc quit",
             screenWidth / 2,
-            RenderConstants.DefaultWindowHeight - 24,
-            MutedText,
-            0.85f);
+            UiLayout.LogicalHeight - 28,
+            MenuTheme.TextMuted);
     }
 
     private void RefreshCityList()
@@ -275,6 +327,7 @@ public sealed class MeetingScene : IScene
         _context.Audio.Play(SoundId.Click);
         _selectedCityIndex = cityIndex;
         var city = _cities[cityIndex];
+        _context.SelectedCity = city.CityName;
         _client.ApplyToCity(city.CityId);
         _chatLog.Append(
             city.NeedsMayor
@@ -304,6 +357,11 @@ public sealed class MeetingScene : IScene
                     _context.NetworkClient = _client;
                     return SceneTransition.Interview;
                 case GameClientEventKind.StateGame:
+                    if (_client.SpawnState is { } spawn && CityCatalog.IsValidCityId(spawn.City))
+                    {
+                        _context.SelectedCity = CityCatalog.GetName(spawn.City);
+                    }
+
                     _context.NetworkClient = _client;
                     return SceneTransition.InGameOnline;
                 case GameClientEventKind.Disconnected:
@@ -321,7 +379,16 @@ public sealed class MeetingScene : IScene
         var roleLabel = packet.NeedsMayor
             ? "Mayor required"
             : $"Commando ({packet.PlayerCount}/{GameConstants.MaxPlayersPerCity})";
-        _cities.Add(new MeetingCityEntry(packet.CityId, name, packet.NeedsMayor, roleLabel));
+        var entry = new MeetingCityEntry(packet.CityId, name, packet.NeedsMayor, roleLabel);
+        var index = _cities.FindIndex(city => city.CityId == packet.CityId);
+        if (index >= 0)
+        {
+            _cities[index] = entry;
+        }
+        else
+        {
+            _cities.Add(entry);
+        }
     }
 
     private bool WasPressed(KeyboardState keyboard, Keys key) =>

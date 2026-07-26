@@ -27,6 +27,8 @@ public sealed class SceneContext
 
     public string ServerHost { get; set; } = "127.0.0.1";
 
+    public int ServerPort { get; set; } = BattleCity.Shared.Constants.NetworkConstants.TcpPort;
+
     public string? LoginStatusMessage { get; set; }
 
     public GameClient? NetworkClient { get; set; }

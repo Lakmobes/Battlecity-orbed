@@ -1,10 +1,9 @@
 using BattleCity.Client.Input;
 using BattleCity.Client.Rendering;
+using BattleCity.Shared.Data;
 
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-
-using BattleCity.Shared.Data;
 
 namespace BattleCity.Client.Scenes;
 
@@ -18,14 +17,14 @@ public sealed class MainMenuScene : IScene
     ];
 
     private readonly SceneContext _context;
-    private readonly ScreenUiRenderer _ui;
+    private readonly TitleScreenRenderer _title;
     private readonly MenuInputReader _input = new();
     private int _selectedIndex;
 
     public MainMenuScene(SceneContext context)
     {
         _context = context;
-        _ui = new ScreenUiRenderer(context.Assets);
+        _title = new TitleScreenRenderer(context.Assets);
     }
 
     public bool DrawsWorld => false;
@@ -34,12 +33,14 @@ public sealed class MainMenuScene : IScene
 
     public void LoadContent()
     {
-        _ui.LoadContent();
+        _title.LoadContent();
         _input.Reset();
     }
 
     public SceneTransition Update(GameTime gameTime, int screenWidth, int screenHeight)
     {
+        _title.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+
         var menuInput = _input.Poll();
         if (menuInput.MoveUpPressed)
         {
@@ -92,15 +93,13 @@ public sealed class MainMenuScene : IScene
 
     public void DrawScreen(SpriteBatch spriteBatch)
     {
-        _ui.DrawBackdrop(spriteBatch, RenderConstants.DefaultWindowWidth, RenderConstants.DefaultWindowHeight);
-        _ui.DrawTitle(spriteBatch, RenderConstants.DefaultWindowWidth);
-        _ui.DrawMenu(
+        _title.DrawMainMenu(
             spriteBatch,
-            RenderConstants.DefaultWindowWidth,
-            RenderConstants.DefaultWindowHeight,
+            UiLayout.LogicalWidth,
+            UiLayout.LogicalHeight,
             MenuItems,
             _selectedIndex,
-            "Up/Down - select   Enter - confirm");
+            "Up / Down to select    Enter to confirm    F11 fullscreen");
     }
 
     public void Dispose()

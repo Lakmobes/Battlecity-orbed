@@ -17,6 +17,7 @@ public static class ItemHealth
             ItemType.Sleeper => 16,
             ItemType.Plasma => 40,
             // Soft placeables die in one laser hit (DamageLaser = 5).
+            ItemType.MedKit => 5,
             ItemType.Mine => 5,
             ItemType.Bomb => 5,
             ItemType.Orb => 5,

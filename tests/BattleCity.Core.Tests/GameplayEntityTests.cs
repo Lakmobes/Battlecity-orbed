@@ -10,6 +10,7 @@ using BattleCity.Core.Ecs.Systems;
 using BattleCity.Core.Gameplay;
 using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
+using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
 
@@ -228,6 +229,34 @@ public class GameplayEntityTests
     }
 
     [Fact]
+    public void DroppingWall_AllowsTileDirectlyBelowExistingWall()
+    {
+        using var simulation = new GameSimulation();
+        GameplayEntityFactory.CreatePlacedItem(simulation.World, ItemType.Wall, 10, 10);
+        GameplayEntityFactory.CreatePlacedItem(simulation.World, ItemType.Wall, 11, 10);
+        GameplayEntityFactory.CreatePlacedItem(simulation.World, ItemType.Wall, 12, 10);
+
+        var tankTopLeft = new Vector2(10 * 48f, 11 * 48f);
+        var player = simulation.CreatePlayerEntity(tankTopLeft);
+
+        Assert.True(ItemDropActions.CanPlaceItem(simulation.World, player, 10, 11, ItemType.Wall));
+        Assert.True(ItemDropActions.CanPlaceItem(simulation.World, player, 11, 11, ItemType.Wall));
+        Assert.True(ItemDropActions.CanPlaceItem(simulation.World, player, 12, 11, ItemType.Wall));
+
+        Assert.True(ItemDropActions.TryDropForEntity(
+            simulation.World,
+            player,
+            tankTopLeft,
+            ItemType.Wall,
+            active: true,
+            out var gridX,
+            out var gridY,
+            tileMap: simulation.TileMap));
+        Assert.Equal(10, gridX);
+        Assert.Equal(11, gridY);
+    }
+
+    [Fact]
     public void DroppingBomb_AllowedWhenTileOccupied()
     {
         using var simulation = new GameSimulation();
@@ -396,6 +425,93 @@ public class GameplayEntityTests
     }
 
     [Fact]
+    public void ItemDropSystem_PicksUpFactoryItemMatchingLoadedCityId()
+    {
+        using var simulation = new GameSimulation();
+        simulation.LoadCityLayout(new CityLayout
+        {
+            CityName = "Buenos Aires",
+            SourcePath = "buenosaires.city",
+            Buildings = [],
+        });
+        Assert.True(CityCatalog.TryGetId("Buenos Aires", out var cityId));
+
+        var tankTopLeft = new Vector2(10 * 48f, 10 * 48f);
+        var player = simulation.CreatePlayerEntity(tankTopLeft);
+        Assert.Equal(cityId, simulation.World.Get<CityAffiliation>(player).CityId);
+
+        var item = GameplayEntityFactory.CreatePlacedItem(
+            simulation.World,
+            ItemType.Flare,
+            10,
+            10,
+            active: false,
+            cityId: cityId);
+
+        ref var input = ref simulation.World.Get<InputCommand>(player);
+        ref var inventory = ref simulation.World.Get<PlayerInventory>(player);
+        inventory.Flare = 0;
+        input.PickUpItemPressed = true;
+
+        ItemDropSystem.Update(simulation.World);
+
+        Assert.False(simulation.World.IsAlive(item));
+        Assert.Equal(1, inventory.Flare);
+    }
+
+    [Fact]
+    public void BombSystem_DamagesTankTouchingBlast()
+    {
+        using var simulation = new GameSimulation();
+        var bot = simulation.CreateBotEntity(new Vector2(10 * 48f, 10 * 48f), cityId: 1);
+        GameplayEntityFactory.CreatePlacedItem(
+            simulation.World,
+            ItemType.Bomb,
+            10,
+            10,
+            active: true,
+            cityId: 0);
+
+        simulation.Tick(EconomyConstants.TimerBomb / 1000f + 0.1f);
+
+        ref var health = ref simulation.World.Get<Health>(bot);
+        Assert.True(health.Current < GameConstants.MaxHealth);
+    }
+
+    [Fact]
+    public void CreatePlayerEntity_SecondPlayerDoesNotReceiveCityOrb()
+    {
+        using var simulation = new GameSimulation();
+        var first = simulation.CreatePlayerEntity(new Vector2(100f, 100f));
+        ref var firstInventory = ref simulation.World.Get<PlayerInventory>(first);
+        firstInventory.Orb = 1;
+
+        var second = simulation.CreatePlayerEntity(new Vector2(200f, 200f));
+
+        Assert.Equal(1, simulation.World.Get<PlayerInventory>(first).Orb);
+        Assert.Equal(0, simulation.World.Get<PlayerInventory>(second).Orb);
+    }
+
+    [Fact]
+    public void CreatePlayerEntity_OnlineCityOverrideStartsWithoutOrb()
+    {
+        using var simulation = new GameSimulation();
+        var player = simulation.CreatePlayerEntity(new Vector2(100f, 100f), cityId: 5);
+        Assert.Equal(5, simulation.World.Get<CityAffiliation>(player).CityId);
+        Assert.Equal(0, simulation.World.Get<PlayerInventory>(player).Orb);
+    }
+
+    [Fact]
+    public void CreateStarterLoadout_StartsWithSingleRocket()
+    {
+        var inventory = PlayerInventory.CreateStarterLoadout();
+        Assert.Equal(1, inventory.Rocket);
+        Assert.Equal(1, inventory.Flare);
+        Assert.Equal(1, inventory.Cloak);
+        Assert.Equal(0, inventory.MedKit);
+    }
+
+    [Fact]
     public void ItemDropFeedback_ReportsOutOfRangeForDefensiveItem()
     {
         using var simulation = new GameSimulation();
@@ -446,5 +562,35 @@ public class GameplayEntityTests
 
         ref var life = ref simulation.World.Get<TankLifeState>(victim);
         Assert.Equal((byte)3, life.KillerCityId);
+    }
+
+    [Fact]
+    public void BulletCollision_HitsWallDuringMuzzleGrace()
+    {
+        using var simulation = new GameSimulation();
+        var player = simulation.CreatePlayerEntity(new Vector2(10 * 48f, 10 * 48f));
+        var wall = GameplayEntityFactory.CreatePlacedItem(
+            simulation.World,
+            ItemType.Wall,
+            12,
+            10,
+            cityId: 0);
+        ref var wallHealth = ref simulation.World.Get<Health>(wall);
+        var healthBefore = wallHealth.Current;
+
+        // Spawn inside the wall tile while grace is still active (point-blank against a wall).
+        var bullet = GameplayEntityFactory.CreateBullet(
+            simulation.World,
+            BulletKind.Laser,
+            new Vector2(12 * 48f + 20f, 10 * 48f + 20f),
+            direction: 8,
+            player);
+        Assert.True(simulation.World.Get<BulletRef>(bullet).CollisionGraceSeconds > 0f);
+
+        BulletCollisionSystem.Resolve(simulation.World, simulation.TileMap);
+
+        Assert.False(simulation.World.IsAlive(bullet));
+        wallHealth = ref simulation.World.Get<Health>(wall);
+        Assert.True(wallHealth.Current < healthBefore);
     }
 }

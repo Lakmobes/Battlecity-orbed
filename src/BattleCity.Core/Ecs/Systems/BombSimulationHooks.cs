@@ -15,4 +15,7 @@ public readonly struct BombSimulationHooks
     public Action<Entity, int, int>? ReportHpChanged { get; init; }
 
     public Action<Entity, byte>? ReportNetworkPlayerKilled { get; init; }
+
+    /// <summary>Authoritative demolish + optional RemBuilding queue (server / city build).</summary>
+    public Action<Entity>? DestroyBuilding { get; init; }
 }

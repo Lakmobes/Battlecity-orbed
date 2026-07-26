@@ -3,43 +3,62 @@ using BattleCity.Shared.Data;
 
 namespace BattleCity.Core.Gameplay;
 
+/// <summary>
+/// Items atlas: columns = <see cref="ItemType"/> (0..11), rows = animation frames (0..3).
+/// Coordinates are legacy 48px cells; <c>WorldSpriteScale</c> maps them to 96px in the PNG.
+/// </summary>
 public static class ItemSprites
 {
     public const string TextureKey = "Sprites/Items";
     public const int WorldSpriteSize = GameConstants.TileSize;
-    public const int DroppedRowY = 42;
+    public const int ColumnCount = 12;
+    public const int FrameCount = 4;
 
-    /// <summary>Legacy <c>CDrawing.cpp</c> item draw nudge (<c>tileY + 10</c>); turrets cancel this with -10.</summary>
-    public const int WorldDrawOffsetY = 10;
+    /// <summary>Slow discrete frame cycle for field item bobbing.</summary>
+    public const float FramesPerSecond = 0.8f;
+
+    /// <summary>PNG cell size when <c>DisplaySettings.WorldSpriteScale == 2</c>.</summary>
+    public const int HdCellSize = WorldSpriteSize * 2;
+
+    /// <summary>Expected PNG size for a tight 12×4 sheet at 2× HD.</summary>
+    public const int ExpectedSheetWidth = ColumnCount * HdCellSize;
+
+    public const int ExpectedSheetHeight = FrameCount * HdCellSize;
+
+    /// <summary>No legacy Y nudge — new sheet is centered on the tile.</summary>
+    public const int WorldDrawOffsetY = 0;
 
     public static (int SourceX, int SourceY) GetWorldSpriteOrigin(ItemType type, int animationFrame = 0)
     {
-        if (type == ItemType.Orb)
-        {
-            return ((int)type * WorldSpriteSize, DroppedRowY + animationFrame * WorldSpriteSize);
-        }
-
-        if (type == ItemType.Bomb)
-        {
-            return (144, 91);
-        }
-
-        return ((int)type * WorldSpriteSize, DroppedRowY);
+        var frame = Math.Clamp(animationFrame, 0, FrameCount - 1);
+        return ((int)type * WorldSpriteSize, frame * WorldSpriteSize);
     }
 
-    /// <summary>32×32 inventory icons (legacy panel uses row 0 of <c>imgItems</c>).</summary>
+    /// <summary>Same atlas as world sprites; inventory uses frame 0.</summary>
     public static (int SourceX, int SourceY) GetInventorySpriteOrigin(ItemType type, bool bombsActivated = true)
     {
-        if (type == ItemType.Bomb && bombsActivated)
-        {
-            return (152, 89);
-        }
-
-        if (type == ItemType.Orb)
-        {
-            return (250, 41);
-        }
-
-        return ((int)type * 32, 0);
+        _ = bombsActivated;
+        return GetWorldSpriteOrigin(type, animationFrame: 0);
     }
+
+    public static int ResolveAnimationFrame(ItemType type, bool active, float timeSeconds)
+    {
+        if (type == ItemType.Bomb && !active)
+        {
+            return 0;
+        }
+
+        if (UsesTurretSheet(type))
+        {
+            return 0;
+        }
+
+        var frame = (int)(timeSeconds * FramesPerSecond) % FrameCount;
+        return frame < 0 ? 0 : frame;
+    }
+
+    public static bool UsesItemSheetAnimation(ItemType type) => !UsesTurretSheet(type);
+
+    public static bool UsesTurretSheet(ItemType type) =>
+        type is ItemType.Turret or ItemType.Sleeper or ItemType.Plasma;
 }

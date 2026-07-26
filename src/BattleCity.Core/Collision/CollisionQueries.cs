@@ -111,8 +111,8 @@ public static class CollisionQueries
             return false;
         }
 
-        return a == CollisionLayer.Player && b == CollisionLayer.Player
-            || a == CollisionLayer.Player && b == CollisionLayer.Building
+        // Tanks pass through each other (legacy CheckPlayerCollision never blocked on other players).
+        return a == CollisionLayer.Player && b == CollisionLayer.Building
             || a == CollisionLayer.Building && b == CollisionLayer.Player
             || a == CollisionLayer.Player && b == CollisionLayer.Item
             || a == CollisionLayer.Item && b == CollisionLayer.Player;
@@ -160,7 +160,11 @@ public static class CollisionQueries
     }
 
     /// <summary>True when <paramref name="bounds"/> overlaps another item collider (not buildings).</summary>
-    public static bool IntersectsItemCollider(World world, Entity self, AxisAlignedBox bounds)
+    public static bool IntersectsItemCollider(
+        World world,
+        Entity self,
+        AxisAlignedBox bounds,
+        Entity ignoreOwner = default)
     {
         var query = new QueryDescription().WithAll<Transform2D, Collider>();
         var blocked = false;
@@ -169,7 +173,10 @@ public static class CollisionQueries
             in query,
             (Entity other, ref Transform2D transform, ref Collider collider) =>
             {
-                if (blocked || other == self || collider.Layer != CollisionLayer.Item)
+                if (blocked
+                    || other == self
+                    || other == ignoreOwner
+                    || collider.Layer != CollisionLayer.Item)
                 {
                     return;
                 }

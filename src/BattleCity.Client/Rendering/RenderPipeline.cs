@@ -62,12 +62,17 @@ public sealed class RenderPipeline
                 context.TileMap,
                 context.World,
                 context.FocusWorldPosition,
-                context.CityCenterWorldPosition);
+                context.HomeCommandCenterGridX,
+                context.HomeCommandCenterGridY);
         }
 
         if (context.PlayerRespawnSeconds.HasValue)
         {
             _deathOverlay.Draw(spriteBatch, context.PlayerRespawnSeconds.Value);
+        }
+        else
+        {
+            _deathOverlay.NotifyHidden();
         }
 
         if (context.ShowResearchCompleteOverlay && !string.IsNullOrWhiteSpace(context.ResearchCompleteOverlayMessage))

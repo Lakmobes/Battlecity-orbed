@@ -18,7 +18,7 @@ public sealed class OrbedOverlayRenderer
 
     public void LoadContent()
     {
-        _font = _assets.LoadFont("Fonts/MenuFont");
+        _font = _assets.LoadFont(LegacySpriteNames.UiFont);
     }
 
     public void Draw(SpriteBatch spriteBatch, string message, bool isVictim)

@@ -5,6 +5,8 @@ namespace BattleCity.Client.Input;
 public struct UiInputState
 {
     public bool ToggleMiniMapPressed;
+    public bool ToggleStatusPanelPressed;
+    public bool ToggleSettingsPressed;
     public int ZoomSteps;
     public bool CameraPanLeft;
     public bool CameraPanRight;

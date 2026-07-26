@@ -75,18 +75,30 @@ public sealed class BuildPreviewRenderer
 
     private void DrawEquipmentIcon(SpriteBatch spriteBatch, int typeCode, int tileX, int tileY, Color tint)
     {
-        var buildingSubType = typeCode % 100;
-        var (offsetX, offsetY) = BuildingCatalog.IsFactory(typeCode) ? (56, 52) : (14, 98);
-        var (sourceX, sourceY) = ItemSprites.GetInventorySpriteOrigin((ItemType)buildingSubType);
+        if (!BuildingCatalog.TryGetEquipmentItemType(typeCode, out var itemType))
+        {
+            return;
+        }
+
+        var isFactory = BuildingCatalog.IsFactory(typeCode);
+        var iconSize = isFactory ? 43 : 24;
+        var (offsetX, offsetY) = isFactory ? (50, 50) : (18, 106);
+        var (sourceX, sourceY) = ItemSprites.GetWorldSpriteOrigin(itemType);
         var items = _assets.Items;
-        var legacySource = new Rectangle(sourceX, sourceY, 32, 32);
+        var legacySource = new Rectangle(
+            sourceX,
+            sourceY,
+            ItemSprites.WorldSpriteSize,
+            ItemSprites.WorldSpriteSize);
 
         WorldSpriteMetrics.DrawLegacySprite(
             spriteBatch,
             items,
-            tileX + WorldSpriteMetrics.Scaled(offsetX),
-            tileY + WorldSpriteMetrics.Scaled(offsetY),
+            tileX + offsetX,
+            tileY + offsetY,
             legacySource,
+            iconSize,
+            iconSize,
             tint);
     }
 }

@@ -59,8 +59,17 @@ public sealed class GameSimulation : IDisposable
     /// <summary>When true, bomb fuse/detonation is deferred to server <c>smExplosion</c>.</summary>
     public bool SuppressLocalBombDetonation { get; set; }
 
+    /// <summary>When true, factory bay spawns are deferred to server AddItem (online clients).</summary>
+    public bool SuppressLocalFactoryProduction { get; set; }
+
     /// <summary>When true, bomb detonations queue network explosion/removal events (server).</summary>
     public bool ReportBombEventsToNetwork { get; set; }
+
+    /// <summary>When true, factory bay spawns enqueue AddItem packets for broadcast.</summary>
+    public bool ReportFactoryItemSpawnsToNetwork { get; set; }
+
+    /// <summary>When true, dying tanks return placeables to factory bays.</summary>
+    public bool ReturnInventoryPlaceablesOnDeath { get; set; } = true;
 
     /// <summary>When true, local player respawn waits for authoritative <c>smWarp</c>.</summary>
     public bool SuppressLocalPlayerRespawn { get; set; }
@@ -82,6 +91,8 @@ public sealed class GameSimulation : IDisposable
     private readonly List<ServerHpPacket> _pendingHpEvents = new();
     private readonly List<PendingExplosionEvent> _pendingExplosionEvents = [];
     private readonly List<PendingRespawnEvent> _pendingRespawnEvents = [];
+    private readonly List<ServerAddItemPacket> _pendingFactoryAddItems = [];
+    private readonly List<ServerBuildingPacket> _pendingBombBuildingRemovals = [];
 
     public GameSoundEvent[] ConsumeSoundEvents() => _audioBuffer.Drain();
 
@@ -89,7 +100,8 @@ public sealed class GameSimulation : IDisposable
     {
         _loadedCity = layout;
 
-        var build = new CityBuildState { CityId = 0 };
+        var cityId = CityCatalog.TryGetId(layout.CityName, out var resolvedCityId) ? resolvedCityId : 0;
+        var build = new CityBuildState { CityId = cityId };
         CityBuildInitializer.InitializeFromLayout(build, layout, _tileMap);
         LevelLoader.SpawnCommandCenter(_world, build.CommandCenterGridX, build.CommandCenterGridY);
         LevelLoader.SpawnRemoteCommandCenters(
@@ -126,7 +138,12 @@ public sealed class GameSimulation : IDisposable
         && gridAnchorY >= otherGridY - 2
         && gridAnchorY <= otherGridY + 2;
 
-    public void SpawnDemoItems(int cityId = 0)
+    public void SpawnDemoItems(int? cityId = null)
+    {
+        SpawnDemoItemsCore(cityId ?? _cityBuild?.CityId ?? 0);
+    }
+
+    private void SpawnDemoItemsCore(int cityId)
     {
         if (_loadedCity is null)
         {
@@ -149,8 +166,22 @@ public sealed class GameSimulation : IDisposable
     public void SpawnDemoTurret(int gridX, int gridY, int cityId = 0) =>
         GameplayEntityFactory.CreatePlacedItem(_world, ItemType.Turret, gridX, gridY, cityId: cityId);
 
-    public Entity CreatePlayerEntity(Vector2 position, int spriteSourceX = 0, bool isMayor = true)
+    public Entity CreatePlayerEntity(
+        Vector2 position,
+        int spriteSourceX = 0,
+        bool isMayor = true,
+        bool isAdmin = false,
+        int? cityId = null)
     {
+        var resolvedCityId = cityId ?? _cityBuild?.CityId ?? 0;
+        var inventory = PlayerInventory.CreateDemoLoadout();
+        // Online joins pass an explicit city id — start without an orb (factory / pickups supply it).
+        // Also refuse a second orb when this city already has one.
+        if (cityId.HasValue || OrbCityRules.CityAlreadyHasOrb(_world, resolvedCityId))
+        {
+            inventory.Orb = 0;
+        }
+
         return _world.Create(
             new Transform2D { Position = position, PreviousPosition = position },
             new Velocity { Value = Vector2.Zero },
@@ -158,7 +189,7 @@ public sealed class GameSimulation : IDisposable
             {
                 TextureKey = "Sprites/Tanks",
                 SourceX = spriteSourceX,
-                SourceY = TankSpriteSelector.GetSourceY(0, 0, isMayor) * GameConstants.TileSize,
+                SourceY = TankSpriteSelector.GetSourceY(resolvedCityId, resolvedCityId, isMayor, isAdmin) * GameConstants.TileSize,
                 Width = GameConstants.TileSize,
                 Height = GameConstants.TileSize,
             },
@@ -175,9 +206,9 @@ public sealed class GameSimulation : IDisposable
             new TankFacing { Direction = 0, TurnCooldownSeconds = 0f },
             new Health { Current = GameConstants.MaxHealth, Max = GameConstants.MaxHealth },
             new TankLifeState { SpawnPosition = position, KillerCityId = EntityCityLookup.UnknownCity },
-            new CityAffiliation { CityId = 0 },
+            new CityAffiliation { CityId = resolvedCityId },
             new MayorStatus { IsMayor = isMayor },
-            PlayerInventory.CreateDemoLoadout(),
+            inventory,
             new WeaponState(),
             new TankStatus(),
             new CityAlertState(),
@@ -187,6 +218,9 @@ public sealed class GameSimulation : IDisposable
 
     public Entity CreateNetworkPlayerEntity(Vector2 position, byte playerId, int cityId = 0, int spriteSourceX = 0)
     {
+        var inventory = PlayerInventory.CreateDemoLoadout();
+        inventory.Orb = 0;
+
         return _world.Create(
             new Transform2D { Position = position, PreviousPosition = position },
             new Velocity { Value = Vector2.Zero },
@@ -212,7 +246,7 @@ public sealed class GameSimulation : IDisposable
             new CityAffiliation { CityId = cityId },
             new MayorStatus { IsMayor = false },
             new NetworkIdentity { PlayerId = playerId },
-            PlayerInventory.CreateDemoLoadout(),
+            inventory,
             new WeaponState(),
             new TankStatus(),
             new CityAlertState(),
@@ -344,7 +378,7 @@ public sealed class GameSimulation : IDisposable
             {
                 TextureKey = "Sprites/Tanks",
                 SourceX = spriteSourceX,
-                SourceY = TankSpriteSelector.EnemyCommandoRow * GameConstants.TileSize,
+                SourceY = TankSpriteSelector.EnemyRegularRow * GameConstants.TileSize,
                 Width = GameConstants.TileSize,
                 Height = GameConstants.TileSize,
             },
@@ -425,8 +459,8 @@ public sealed class GameSimulation : IDisposable
     {
         const float practiceAggroPixels = 720f;
         var spawns = FindPracticeBotSpawns(playerSpawn, count: 2);
-        CreateBotEntity(spawns[0], cityId: 1, spriteSourceX: 48, aggroRangePixels: practiceAggroPixels);
-        CreateBotEntity(spawns[1], cityId: 1, spriteSourceX: 96, aggroRangePixels: practiceAggroPixels);
+        CreateBotEntity(spawns[0], cityId: EntityCityLookup.UnknownCity, spriteSourceX: 48, aggroRangePixels: practiceAggroPixels);
+        CreateBotEntity(spawns[1], cityId: EntityCityLookup.UnknownCity, spriteSourceX: 96, aggroRangePixels: practiceAggroPixels);
     }
 
     private Vector2[] FindPracticeBotSpawns(Vector2 playerSpawn, int count)
@@ -583,7 +617,8 @@ public sealed class GameSimulation : IDisposable
 
     public void Tick(float deltaSeconds)
     {
-        _audioBuffer.Clear();
+        // Do not clear the audio buffer here — network handlers may queue sounds before Tick,
+        // and multi-tick Updates should keep every event until ConsumeSoundEvents drains them.
         TankStatusSystem.Update(_world, deltaSeconds);
         CityAlertSystem.Update(_world, deltaSeconds);
         CityOrbedNotificationSystem.Update(_world, deltaSeconds);
@@ -591,13 +626,26 @@ public sealed class GameSimulation : IDisposable
         InputSystem.Update(_world, deltaSeconds);
         BotAiSystem.UpdateMovement(_world, deltaSeconds);
         MovementSystem.UpdateNonBullets(_world, deltaSeconds);
-        WeaponSystem.Update(_world, deltaSeconds, _audioBuffer, ReportLocalShot);
+        AdvanceAllWeaponTimers(deltaSeconds);
+        WeaponSystem.Update(_world, deltaSeconds, _cityBuild, _audioBuffer, ReportLocalShot);
         BotAiSystem.UpdateFiring(_world, deltaSeconds, _audioBuffer);
         ItemDropSystem.Update(_world, _tileMap, _audioBuffer, SuppressLocalItemDrops, _cityBuild);
         BombSystem.Update(_world, deltaSeconds, _audioBuffer, CreateBombSimulationHooks());
+        ItemAnimationSystem.Update(_world, deltaSeconds);
         BuildingPopulationSystem.Update(_world, deltaSeconds);
+        BuildingAnimationSystem.Update(_world, deltaSeconds);
         ResearchSystem.Update(_world, _cityBuild, deltaSeconds, _audioBuffer);
-        FactoryProductionSystem.Update(_world, _cityBuild, deltaSeconds);
+        if (!SuppressLocalFactoryProduction)
+        {
+            FactoryProductionSystem.Update(
+                _world,
+                _cityBuild,
+                deltaSeconds,
+                allocateNetworkItemId: ReportFactoryItemSpawnsToNetwork ? AllocateNetworkItemId : null,
+                reportSpawn: ReportFactoryItemSpawnsToNetwork
+                    ? packet => _pendingFactoryAddItems.Add(packet)
+                    : null);
+        }
         TurretAiSystem.Update(_world, deltaSeconds, _audioBuffer);
         BulletSystem.PrepareMovement(_world, deltaSeconds);
         MovementSystem.UpdateBullets(_world, deltaSeconds);
@@ -704,6 +752,19 @@ public sealed class GameSimulation : IDisposable
         return true;
     }
 
+    public bool TryConsumeFactoryAddItem(out ServerAddItemPacket addItem)
+    {
+        if (_pendingFactoryAddItems.Count == 0)
+        {
+            addItem = default;
+            return false;
+        }
+
+        addItem = _pendingFactoryAddItems[0];
+        _pendingFactoryAddItems.RemoveAt(0);
+        return true;
+    }
+
     public void ApplyNetworkExplosion(in ServerExplosionPacket packet)
     {
         var center = new Vector2(
@@ -754,23 +815,66 @@ public sealed class GameSimulation : IDisposable
 
     public bool TryGetCityRespawnPosition(int cityId, out Vector2 position, out byte resolvedCityId)
     {
-        resolvedCityId = (byte)Math.Clamp(_cityBuild?.CityId ?? cityId, 0, byte.MaxValue);
+        // Keep the tank's team city; only the spawn position comes from the shared map CC.
+        resolvedCityId = (byte)Math.Clamp(cityId, 0, byte.MaxValue);
 
         if (_cityBuild is not null)
         {
-            if (TryGetCityRespawnPositionFromWorld(out position))
+            if (!TryGetCityRespawnPositionFromWorld(out position))
             {
-                return true;
+                position = CommandCenterLookup.GetRespawnPositionFromGridAnchor(
+                    _cityBuild.CommandCenterGridX,
+                    _cityBuild.CommandCenterGridY);
             }
 
-            position = CommandCenterLookup.GetRespawnPositionFromGridAnchor(
-                _cityBuild.CommandCenterGridX,
-                _cityBuild.CommandCenterGridY);
+            position = FindOpenTankSpawnNear(position);
             return true;
         }
 
         position = _loadedCity?.GetSpawnPosition() ?? Vector2.Zero;
-        return position != Vector2.Zero;
+        if (position != Vector2.Zero)
+        {
+            position = FindOpenTankSpawnNear(position);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Prefer <paramref name="preferred"/> when clear; otherwise spiral outward on the tile grid
+    /// so joins/respawns are not trapped inside walls or other blockers on the CC pad.
+    /// </summary>
+    public Vector2 FindOpenTankSpawnNear(Vector2 preferred)
+    {
+        var snapped = SnapTankToTile(preferred);
+        if (IsOpenTankSpawn(snapped))
+        {
+            return snapped;
+        }
+
+        var tile = GameConstants.TileSize;
+        for (var radius = 1; radius <= 32; radius++)
+        {
+            for (var dy = -radius; dy <= radius; dy++)
+            {
+                for (var dx = -radius; dx <= radius; dx++)
+                {
+                    if (Math.Abs(dx) != radius && Math.Abs(dy) != radius)
+                    {
+                        continue;
+                    }
+
+                    var probe = SnapTankToTile(preferred + new Vector2(dx * tile, dy * tile));
+                    if (IsOpenTankSpawn(probe))
+                    {
+                        return probe;
+                    }
+                }
+            }
+        }
+
+        return snapped;
     }
 
     private bool TryGetCityRespawnPositionFromWorld(out Vector2 position) =>
@@ -782,9 +886,10 @@ public sealed class GameSimulation : IDisposable
                 out position)
             : CommandCenterLookup.TryGetRespawnPosition(_world, out position);
 
-    public void ApplyNetworkHp(in ServerHpPacket packet)
+    public void ApplyNetworkHp(in ServerHpPacket packet, byte localPlayerId = byte.MaxValue)
     {
-        if (!TryGetNetworkPlayerEntity(packet.PlayerId, out var entity)
+        // Local online tanks use InputControlled without NetworkIdentity; resolve like cloak.
+        if (!TryResolvePlayerEntityForNetworkEvent(packet.PlayerId, localPlayerId, out var entity)
             || !_world.Has<Health>(entity))
         {
             return;
@@ -951,7 +1056,13 @@ public sealed class GameSimulation : IDisposable
         }
 
         ref var inventory = ref _world.Get<PlayerInventory>(entity);
-        if (inventory.GetCount(ItemType.Cloak) <= 0 || !inventory.TryConsume(ItemType.Cloak))
+        if (!_world.Has<WeaponState>(entity))
+        {
+            return false;
+        }
+
+        ref var weapons = ref _world.Get<WeaponState>(entity);
+        if (!WeaponActions.TryConsumeCloak(ref weapons, ref inventory, _cityBuild))
         {
             return false;
         }
@@ -1018,11 +1129,10 @@ public sealed class GameSimulation : IDisposable
         }
 
         var itemType = (ItemType)packet.Type;
-        if (TryFindPredictedItemAtGrid(packet.X, packet.Y, itemType, out var predictedEntity))
+        if (TryFindPredictedItemAtGrid(packet.X, packet.Y, itemType, out var predictedEntity)
+            || TryFindPredictedItemNear(packet.X, packet.Y, itemType, maxChebyshev: 2, out predictedEntity))
         {
-            _world.Add(predictedEntity, new NetworkItemRef { ItemId = packet.Id });
-            ref var predictedItem = ref _world.Get<PlacedItemRef>(predictedEntity);
-            predictedItem.Active = packet.Active != 0;
+            AttachNetworkIdToPredictedItem(predictedEntity, packet);
             return;
         }
 
@@ -1034,6 +1144,25 @@ public sealed class GameSimulation : IDisposable
             packet.Active != 0,
             cityId: packet.City,
             networkItemId: packet.Id);
+    }
+
+    private void AttachNetworkIdToPredictedItem(Entity predictedEntity, in ServerAddItemPacket packet)
+    {
+        if (!_world.Has<NetworkItemRef>(predictedEntity))
+        {
+            _world.Add(predictedEntity, new NetworkItemRef { ItemId = packet.Id });
+        }
+
+        ref var predictedItem = ref _world.Get<PlacedItemRef>(predictedEntity);
+        predictedItem.GridX = packet.X;
+        predictedItem.GridY = packet.Y;
+        predictedItem.Active = packet.Active != 0;
+        predictedItem.CityId = packet.City;
+
+        var position = PlacedItemPlacement.GridToWorldPosition(packet.X, packet.Y);
+        ref var transform = ref _world.Get<Transform2D>(predictedEntity);
+        transform.Position = position;
+        transform.PreviousPosition = position;
     }
 
     public bool TryFireShotForNetworkPlayer(byte playerId, in ClientShotPacket request, out ServerShotPacket broadcast)
@@ -1058,6 +1187,7 @@ public sealed class GameSimulation : IDisposable
                 ref life,
                 ref status,
                 request,
+                _cityBuild,
                 _audioBuffer))
         {
             return false;
@@ -1113,7 +1243,13 @@ public sealed class GameSimulation : IDisposable
                 return false;
             }
         }
-        else if (!ItemPickupActions.TryFindItemAtTank(_world, entity, out itemEntity, out itemType, out _))
+        else if (!ItemPickupActions.TryFindItemAtTank(
+                     _world,
+                     entity,
+                     out itemEntity,
+                     out itemType,
+                     out _,
+                     _cityBuild?.CityId))
         {
             return false;
         }
@@ -1454,7 +1590,13 @@ public sealed class GameSimulation : IDisposable
             });
 
         if (!found
-            || !ItemPickupActions.TryFindItemAtTank(_world, player, out _, out var itemTypeValue, out networkItemId))
+            || !ItemPickupActions.TryFindItemAtTank(
+                _world,
+                player,
+                out _,
+                out var itemTypeValue,
+                out networkItemId,
+                _cityBuild?.CityId))
         {
             return false;
         }
@@ -1510,6 +1652,10 @@ public sealed class GameSimulation : IDisposable
                 if (!consumed)
                 {
                     consumed = inventory.TryConsume(type);
+                    if (consumed)
+                    {
+                        inventory.SelectNextAvailablePlaceable();
+                    }
                 }
             });
 
@@ -1556,7 +1702,23 @@ public sealed class GameSimulation : IDisposable
         {
             SuppressLocalPlayerRespawn = SuppressLocalPlayerRespawn,
             DeferNetworkPlayerRespawn = ReportRespawnEventsToNetwork || DeferRemotePlayerRespawn,
+            OnTankDied = ReturnPlaceablesToFactoriesOnDeath,
+            ResolveRespawnPosition = ResolveEntityRespawnPosition,
         };
+
+    private Vector2? ResolveEntityRespawnPosition(Entity entity)
+    {
+        var cityId = _world.Has<CityAffiliation>(entity)
+            ? _world.Get<CityAffiliation>(entity).CityId
+            : _cityBuild?.CityId ?? 0;
+
+        if (!TryGetCityRespawnPosition(cityId, out var position, out _))
+        {
+            return null;
+        }
+
+        return position;
+    }
 
     private void ProcessNetworkPlayerRespawns()
     {
@@ -1594,6 +1756,7 @@ public sealed class GameSimulation : IDisposable
 
     private bool ApplyDeathToLocalPlayer(byte killerCity, bool syncRespawnTimerWithServer = false)
     {
+        _ = syncRespawnTimerWithServer;
         if (!TryGetLocalPlayerEntity(out var entity))
         {
             return false;
@@ -1604,12 +1767,7 @@ public sealed class GameSimulation : IDisposable
             return true;
         }
 
-        if (syncRespawnTimerWithServer && _world.Get<TankLifeState>(entity).IsDead)
-        {
-            ref var life = ref _world.Get<TankLifeState>(entity);
-            life.RespawnTimerSeconds = GameConstants.TimerRespawn / 1000f;
-        }
-
+        // Already dead: do not re-anchor the countdown (was restarting the full 10s on smDeath).
         return false;
     }
 
@@ -1676,7 +1834,7 @@ public sealed class GameSimulation : IDisposable
 
     private BombSimulationHooks CreateBombSimulationHooks()
     {
-        if (!ReportBombEventsToNetwork && !SuppressLocalBombDetonation)
+        if (!ReportBombEventsToNetwork && !SuppressLocalBombDetonation && _cityBuild is null)
         {
             return default;
         }
@@ -1688,7 +1846,73 @@ public sealed class GameSimulation : IDisposable
             ReportItemRemoved = ReportBombEventsToNetwork ? QueueNetworkBombItemRemoved : null,
             ReportHpChanged = ReportBombEventsToNetwork ? QueueNetworkPlayerHpIfChanged : null,
             ReportNetworkPlayerKilled = ReportBombEventsToNetwork ? ReportNetworkPlayerKilledByBomb : null,
+            DestroyBuilding = _cityBuild is not null || ReportBombEventsToNetwork
+                ? DestroyBuildingFromBomb
+                : null,
         };
+    }
+
+    private void DestroyBuildingFromBomb(Entity entity)
+    {
+        if (!_world.IsAlive(entity) || !_world.Has<BuildingRef>(entity))
+        {
+            return;
+        }
+
+        ref var building = ref _world.Get<BuildingRef>(entity);
+        var population = _world.Has<BuildingState>(entity)
+            ? (byte)Math.Clamp(_world.Get<BuildingState>(entity).Population, 0, byte.MaxValue)
+            : (byte)0;
+        var packet = new ServerBuildingPacket(
+            (byte)Math.Clamp(_cityBuild?.CityId ?? 0, 0, byte.MaxValue),
+            (ushort)building.GridAnchorX,
+            (ushort)building.GridAnchorY,
+            (byte)Math.Max(0, building.MenuIndex + 1),
+            count: 0,
+            building.NetworkId,
+            population);
+
+        if (_cityBuild is not null)
+        {
+            if (building.NetworkId != 0)
+            {
+                BuildingCommandService.TryDemolishByNetworkId(_world, _cityBuild, building.NetworkId);
+            }
+            else
+            {
+                BuildingCommandService.TryDemolishAt(
+                    _world,
+                    _cityBuild,
+                    building.GridAnchorX,
+                    building.GridAnchorY);
+            }
+        }
+        else if (_world.IsAlive(entity))
+        {
+            BuildingPopulationSystem.DetachBeforeDestroy(_world, entity);
+            _world.Destroy(entity);
+        }
+
+        if (!ReportBombEventsToNetwork)
+        {
+            return;
+        }
+
+        _pendingBombBuildingRemovals.Add(packet);
+        _removedBuildingSnapshots.Add(packet);
+    }
+
+    public bool TryConsumeBombBuildingRemoval(out ServerBuildingPacket building)
+    {
+        if (_pendingBombBuildingRemovals.Count == 0)
+        {
+            building = default;
+            return false;
+        }
+
+        building = _pendingBombBuildingRemovals[0];
+        _pendingBombBuildingRemovals.RemoveAt(0);
+        return true;
     }
 
     private void QueueNetworkExplosion(ServerExplosionPacket packet) =>
@@ -1769,7 +1993,78 @@ public sealed class GameSimulation : IDisposable
             _audioBuffer.Play(SoundId.Die, center);
         }
 
+        ReturnPlaceablesToFactoriesOnDeath(entity);
         return true;
+    }
+
+    private void ReturnPlaceablesToFactoriesOnDeath(Entity entity)
+    {
+        if (!ReturnInventoryPlaceablesOnDeath || !_world.Has<PlayerInventory>(entity))
+        {
+            return;
+        }
+
+        ref var inventory = ref _world.Get<PlayerInventory>(entity);
+        var cityId = _world.Has<CityAffiliation>(entity)
+            ? _world.Get<CityAffiliation>(entity).CityId
+            : _cityBuild?.CityId ?? 0;
+
+        foreach (var type in PlayerInventory.SelectableItems)
+        {
+            if (!ItemCatalog.ReturnsToFactoryOnDeath(type))
+            {
+                continue;
+            }
+
+            while (inventory.GetCount(type) > 0)
+            {
+                if (!FactoryProductionSystem.TryFindFactoryBayForProduct(_world, type, out var bayX, out var bayY))
+                {
+                    // No matching factory — drop remaining stock as inactive map items near the tank.
+                    if (!_world.Has<Transform2D>(entity))
+                    {
+                        break;
+                    }
+
+                    var topLeft = _world.Get<Transform2D>(entity).Position;
+                    bayX = (int)(topLeft.X / GameConstants.TileSize);
+                    bayY = (int)(topLeft.Y / GameConstants.TileSize);
+                }
+
+                var networkItemId = ReportFactoryItemSpawnsToNetwork ? AllocateNetworkItemId() : (ushort)0;
+                GameplayEntityFactory.CreatePlacedItem(
+                    _world,
+                    type,
+                    bayX,
+                    bayY,
+                    active: false,
+                    cityId: cityId,
+                    networkItemId: networkItemId);
+
+                if (networkItemId != 0)
+                {
+                    _pendingFactoryAddItems.Add(new ServerAddItemPacket(
+                        (ushort)bayX,
+                        (ushort)bayY,
+                        (byte)Math.Clamp(cityId, 0, byte.MaxValue),
+                        (byte)type,
+                        active: 0,
+                        networkItemId));
+                }
+
+                inventory.TryConsume(type);
+            }
+        }
+
+        inventory.SelectNextAvailablePlaceable();
+    }
+
+    private void AdvanceAllWeaponTimers(float deltaSeconds)
+    {
+        var query = new QueryDescription().WithAll<WeaponState>();
+        _world.Query(
+            in query,
+            (ref WeaponState weapons) => WeaponActions.AdvanceCooldowns(ref weapons, deltaSeconds));
     }
 
     private void AssignNetworkBuildingIds()
@@ -1864,6 +2159,40 @@ public sealed class GameSimulation : IDisposable
 
         entity = foundEntity;
         return found;
+    }
+
+    /// <summary>
+    /// Finds a locally predicted item (no network id) near the authoritative grid so lag
+    /// between client prediction and server placement does not spawn a duplicate.
+    /// </summary>
+    private bool TryFindPredictedItemNear(int gridX, int gridY, ItemType type, int maxChebyshev, out Entity entity)
+    {
+        entity = Entity.Null;
+        var bestDistance = int.MaxValue;
+        var foundEntity = Entity.Null;
+        var query = new QueryDescription().WithAll<PlacedItemRef>();
+
+        _world.Query(
+            in query,
+            (Entity candidate, ref PlacedItemRef item) =>
+            {
+                if (item.Type != type || _world.Has<NetworkItemRef>(candidate))
+                {
+                    return;
+                }
+
+                var distance = Math.Max(Math.Abs(item.GridX - gridX), Math.Abs(item.GridY - gridY));
+                if (distance > maxChebyshev || distance >= bestDistance)
+                {
+                    return;
+                }
+
+                bestDistance = distance;
+                foundEntity = candidate;
+            });
+
+        entity = foundEntity;
+        return bestDistance != int.MaxValue;
     }
 
     private void ApplyOrbStrike(int attackerCityId)
@@ -1966,11 +2295,40 @@ public sealed class GameSimulation : IDisposable
         return found;
     }
 
+    public bool TryGetPlayerCityId(out int cityId)
+    {
+        var query = new QueryDescription().WithAll<InputControlled, CityAffiliation>();
+        var found = false;
+        var resolved = 0;
+        _world.Query(
+            in query,
+            (ref CityAffiliation city) =>
+            {
+                if (found)
+                {
+                    return;
+                }
+
+                resolved = city.CityId;
+                found = true;
+            });
+
+        cityId = resolved;
+        return found;
+    }
+
     public bool TryGetDemoEntityPosition(out Vector2 position) => TryGetPlayerPosition(out position);
 
     public bool TryGetCityBuild(int cityId, out CityBuildState build)
     {
-        if (_cityBuild is not null && _cityBuild.CityId == cityId)
+        if (_cityBuild is null)
+        {
+            build = null!;
+            return false;
+        }
+
+        // Accept the real catalog id, or 0 as the offline/local-home alias used by client scenes.
+        if (_cityBuild.CityId == cityId || cityId == 0)
         {
             build = _cityBuild;
             return true;

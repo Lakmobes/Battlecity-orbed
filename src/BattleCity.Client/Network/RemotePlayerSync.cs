@@ -54,9 +54,23 @@ public sealed class RemotePlayerSync
 
 
 
-    public void SetDisplayName(byte playerId, string displayName) =>
-
+    public void SetDisplayName(byte playerId, string displayName)
+    {
         _displayNames[playerId] = displayName;
+
+        if (!_remotePlayers.TryGetValue(playerId, out var entity)
+            || !_world.Has<SpriteRef>(entity)
+            || !_world.Has<CityAffiliation>(entity)
+            || !_world.Has<MayorStatus>(entity))
+        {
+            return;
+        }
+
+        ref var sprite = ref _world.Get<SpriteRef>(entity);
+        ref var city = ref _world.Get<CityAffiliation>(entity);
+        ref var mayor = ref _world.Get<MayorStatus>(entity);
+        ApplyTankSprite(ref sprite, city.CityId, mayor.IsMayor, playerId);
+    }
 
 
 
@@ -216,7 +230,7 @@ public sealed class RemotePlayerSync
 
         ref var city = ref _world.Get<CityAffiliation>(entity);
 
-        ApplyTankSprite(ref sprite, city.CityId, mayor.IsMayor);
+        ApplyTankSprite(ref sprite, city.CityId, mayor.IsMayor, update.PlayerId);
 
     }
 
@@ -292,7 +306,7 @@ public sealed class RemotePlayerSync
 
         ref var city = ref _world.Get<CityAffiliation>(entity);
 
-        ApplyTankSprite(ref sprite, city.CityId, isMayor);
+        ApplyTankSprite(ref sprite, city.CityId, isMayor, playerId);
 
     }
 
@@ -366,7 +380,7 @@ public sealed class RemotePlayerSync
 
         };
 
-        ApplyTankSprite(ref sprite, cityId, isMayor);
+        ApplyTankSprite(ref sprite, cityId, isMayor, playerId);
 
 
 
@@ -412,11 +426,12 @@ public sealed class RemotePlayerSync
 
 
 
-    private void ApplyTankSprite(ref SpriteRef sprite, int playerCityId, bool isMayor)
+    private void ApplyTankSprite(ref SpriteRef sprite, int playerCityId, bool isMayor, byte playerId)
 
     {
+        var isAdmin = TankSpriteSelector.IsAdminAccount(GetDisplayName(playerId));
 
-        sprite.SourceY = TankSpriteSelector.GetSourceY(ObserverCityId, playerCityId, isMayor)
+        sprite.SourceY = TankSpriteSelector.GetSourceY(ObserverCityId, playerCityId, isMayor, isAdmin)
 
             * GameConstants.TileSize;
 

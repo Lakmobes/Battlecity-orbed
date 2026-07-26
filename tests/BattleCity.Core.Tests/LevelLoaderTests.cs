@@ -30,7 +30,7 @@ public class CityLayoutParserTests
     public void TryParseLine_ResolvesMenuIndexToTypeCode()
     {
         Assert.True(CityLayoutParser.TryParseLine("2 291 304", out var placement));
-        Assert.Equal(2, placement.MenuIndex);
+        Assert.Equal(1, placement.MenuIndex); // city files are 1-based; runtime uses 0-based
         Assert.Equal(291, placement.GridX);
         Assert.Equal(304, placement.GridY);
         Assert.Equal(BuildingCatalog.MenuTypeCodes[1], placement.TypeCode);
@@ -83,6 +83,27 @@ public class BuildingPlacementTests
         Assert.Equal(spriteTopLeft.Y, bounds.Top);
         Assert.Equal(GameConstants.BuildingCollisionSize, bounds.Width);
         Assert.Equal(GameConstants.BuildingCollisionSize, bounds.Height);
+    }
+
+    [Fact]
+    public void BulletHitBoundsMatchSpriteAndPlayerBlocking()
+    {
+        const int gridX = 50;
+        const int gridY = 50;
+        var spriteTopLeft = BuildingPlacement.GridAnchorToWorldPosition(gridX, gridY);
+
+        var researchBullet = BuildingCollision.GetBulletHitBounds(401, gridX, gridY);
+        var researchPlayer = BuildingCollision.GetPlayerBlockingBounds(401, spriteTopLeft);
+        Assert.Equal(researchPlayer.Left, researchBullet.Left);
+        Assert.Equal(researchPlayer.Top, researchBullet.Top);
+        Assert.Equal(researchPlayer.Width, researchBullet.Width);
+        Assert.Equal(researchPlayer.Height, researchBullet.Height);
+
+        var factoryBullet = BuildingCollision.GetBulletHitBounds(109, gridX, gridY);
+        var factoryPlayer = BuildingCollision.GetPlayerBlockingBounds(109, spriteTopLeft);
+        Assert.Equal(factoryPlayer.Left, factoryBullet.Left);
+        Assert.Equal(factoryPlayer.Top, factoryBullet.Top);
+        Assert.Equal(factoryPlayer.Height, factoryBullet.Height);
     }
 
     [Fact]

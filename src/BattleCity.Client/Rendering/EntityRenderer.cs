@@ -4,7 +4,9 @@ using BattleCity.Core.Ai;
 using BattleCity.Core.City;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Ecs.Rendering;
+using BattleCity.Core.Ecs.Systems;
 using BattleCity.Core.Gameplay;
+using BattleCity.Core.Levels;
 using BattleCity.Shared.Data;
 
 using Microsoft.Xna.Framework;
@@ -31,7 +33,8 @@ public sealed class EntityRenderer
 
     private readonly Assets.AssetService _assets;
     private readonly List<DrawableEntity> _buildingDrawList = new(capacity: 128);
-    private readonly List<DrawableEntity> _actorDrawList = new(capacity: 128);
+    private readonly List<DrawableEntity> _itemDrawList = new(capacity: 128);
+    private readonly List<DrawableEntity> _tankDrawList = new(capacity: 32);
     private readonly List<TurretDrawEntry> _turretDrawList = new(capacity: 32);
     private readonly List<DrawableEntity> _bulletDrawList = new(capacity: 64);
     private readonly List<DrawableEntity> _explosionDrawList = new(capacity: 32);
@@ -55,7 +58,7 @@ public sealed class EntityRenderer
 
     public void DrawBuildings(SpriteBatch spriteBatch)
     {
-        EntityDrawSorter.Sort(_buildingDrawList);
+        _buildingDrawList.Sort(static (a, b) => a.SortDepth.CompareTo(b.SortDepth));
         foreach (var building in _buildingDrawList)
         {
             DrawDrawable(spriteBatch, building.Transform, building.Sprite);
@@ -64,25 +67,32 @@ public sealed class EntityRenderer
 
     public void DrawActors(SpriteBatch spriteBatch)
     {
-        EntityDrawSorter.Sort(_actorDrawList);
+        // Legacy CDrawing: items (incl. turrets) then players — tanks always over bay stock.
+        _itemDrawList.Sort(static (a, b) => a.SortDepth.CompareTo(b.SortDepth));
         _turretDrawList.Sort(static (a, b) => a.SortDepth.CompareTo(b.SortDepth));
+        _tankDrawList.Sort(static (a, b) => a.SortDepth.CompareTo(b.SortDepth));
 
         var turretIndex = 0;
-        var entityIndex = 0;
-        while (entityIndex < _actorDrawList.Count || turretIndex < _turretDrawList.Count)
+        var itemIndex = 0;
+        while (itemIndex < _itemDrawList.Count || turretIndex < _turretDrawList.Count)
         {
             if (turretIndex >= _turretDrawList.Count ||
-                (entityIndex < _actorDrawList.Count &&
-                 _actorDrawList[entityIndex].SortDepth <= _turretDrawList[turretIndex].SortDepth))
+                (itemIndex < _itemDrawList.Count &&
+                 _itemDrawList[itemIndex].SortDepth <= _turretDrawList[turretIndex].SortDepth))
             {
-                var drawable = _actorDrawList[entityIndex++];
-                DrawDrawable(spriteBatch, drawable.Transform, drawable.Sprite);
+                var item = _itemDrawList[itemIndex++];
+                DrawDrawable(spriteBatch, item.Transform, item.Sprite);
             }
             else
             {
                 var turret = _turretDrawList[turretIndex++];
                 DrawTurret(spriteBatch, turret.Transform, turret.Item, turret.State);
             }
+        }
+
+        foreach (var tank in _tankDrawList)
+        {
+            DrawDrawable(spriteBatch, tank.Transform, tank.Sprite);
         }
 
         foreach (var bullet in _bulletDrawList)
@@ -98,8 +108,12 @@ public sealed class EntityRenderer
 
     private void CollectDrawablesInternal(World world, CityBuildState? cityBuild, float animationTime, int observerCityId)
     {
+        _ = cityBuild;
+        _ = animationTime;
+
         _buildingDrawList.Clear();
-        _actorDrawList.Clear();
+        _itemDrawList.Clear();
+        _tankDrawList.Clear();
         _turretDrawList.Clear();
         _bulletDrawList.Clear();
         _explosionDrawList.Clear();
@@ -108,21 +122,22 @@ public sealed class EntityRenderer
             in BuildingQuery,
             (ref Transform2D transform, ref SpriteRef sprite, ref BuildingRef building, ref BuildingState state) =>
             {
-                var drawSprite = sprite;
-                if (ResearchVisuals.IsResearchInProgress(cityBuild, building.TypeCode, state.Population, out _))
+                var (sourceX, sourceY) = BuildingSprites.GetSourceOrigin(
+                    building.TypeCode,
+                    state.AnimationFrame);
+                var current = new SpriteRef
                 {
-                    var frameOffset = ResearchVisuals.GetAnimationFrameOffset(animationTime);
-                    drawSprite = new SpriteRef
-                    {
-                        TextureKey = sprite.TextureKey,
-                        SourceX = sprite.SourceX + frameOffset,
-                        SourceY = sprite.SourceY,
-                        Width = sprite.Width,
-                        Height = sprite.Height,
-                    };
-                }
-
-                BuildingDrawSlices.AddDrawables(_buildingDrawList, in transform, in drawSprite, building.TypeCode);
+                    TextureKey = sprite.TextureKey,
+                    SourceX = sourceX,
+                    SourceY = sourceY,
+                    Width = sprite.Width,
+                    Height = sprite.Height,
+                };
+                BuildingDrawSlices.AddDrawables(
+                    _buildingDrawList,
+                    in transform,
+                    in current,
+                    building.TypeCode);
             });
 
         world.Query(
@@ -146,11 +161,37 @@ public sealed class EntityRenderer
                 var drawTransform = transform;
                 if (world.Has<PlacedItemRef>(entity))
                 {
-                    // Legacy CDrawing: tileY + 10 for non-turret items (turrets cancel via -10).
                     drawTransform.Position += new System.Numerics.Vector2(0f, ItemSprites.WorldDrawOffsetY);
                 }
 
-                _actorDrawList.Add(new DrawableEntity(
+                // Legacy draws all tanks after items so bay stock never covers the hull.
+                var drawList = world.Has<TankLifeState>(entity) ? _tankDrawList : _itemDrawList;
+
+                if (world.Has<PlacedItemRef>(entity)
+                    && ItemSprites.UsesItemSheetAnimation(world.Get<PlacedItemRef>(entity).Type))
+                {
+                    ref readonly var item = ref world.Get<PlacedItemRef>(entity);
+                    var frame = ItemSprites.ResolveAnimationFrame(
+                        item.Type,
+                        item.Active,
+                        ItemAnimationSystem.ElapsedSeconds);
+                    var (x0, y0) = ItemSprites.GetWorldSpriteOrigin(item.Type, frame);
+                    var current = new SpriteRef
+                    {
+                        TextureKey = ItemSprites.TextureKey,
+                        SourceX = x0,
+                        SourceY = y0,
+                        Width = ItemSprites.WorldSpriteSize,
+                        Height = ItemSprites.WorldSpriteSize,
+                    };
+                    drawList.Add(new DrawableEntity(
+                        DrawableEntity.ComputeSortDepth(in drawTransform, in current),
+                        drawTransform,
+                        current));
+                    return;
+                }
+
+                drawList.Add(new DrawableEntity(
                     DrawableEntity.ComputeSortDepth(in drawTransform, in sprite),
                     drawTransform,
                     sprite));
@@ -208,18 +249,20 @@ public sealed class EntityRenderer
 
     private static bool ShouldDrawTurret(in PlacedItemRef item, in TurretState turret, int observerCityId)
     {
+        // Factory-bay stock must always render — pickups are otherwise invisible on the pad.
         if (!item.Active)
         {
-            return false;
+            return true;
         }
 
-        // Sleepers are always visible to the owning city; enemies only see them once woken.
-        if (item.Type == ItemType.Sleeper && !turret.HasTarget && item.CityId != observerCityId)
+        // Friendly city always sees its own turrets.
+        if (item.CityId == observerCityId)
         {
-            return false;
+            return true;
         }
 
-        return true;
+        // Enemies only see turrets once they are in firing range (HasTarget).
+        return turret.HasTarget;
     }
 
     private void DrawTurret(
@@ -229,8 +272,7 @@ public sealed class EntityRenderer
         TurretState turret)
     {
         var drawX = (int)transform.Position.X;
-        var drawY = (int)transform.Position.Y
-            + WorldSpriteMetrics.Scaled(TurretSprites.VerticalDrawOffset);
+        var drawY = (int)transform.Position.Y + TurretSprites.VerticalDrawOffset;
         var row = TurretSprites.GetSheetRow(item.Type);
         var baseTexture = _assets.LoadTexture(TurretSprites.BaseTextureKey);
         var headTexture = _assets.LoadTexture(TurretSprites.HeadTextureKey);
@@ -241,6 +283,7 @@ public sealed class EntityRenderer
             row * spriteSize,
             spriteSize,
             spriteSize);
+        // Legacy CDrawing: head column is Angle/22.5 (16 dirs), not fireDirection/2.
         var headOrientation = TurretTargeting.AngleDegreesToHeadOrientation(turret.AimAngleDegrees);
         var headSource = new Rectangle(
             headOrientation * spriteSize,

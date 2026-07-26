@@ -15,7 +15,6 @@ namespace BattleCity.Client.Rendering;
 
 public sealed class BuildingOverlayRenderer
 {
-    private const int LegacyItemIconSize = 32;
     private const int LegacyNumberSize = 16;
 
     private static readonly Arch.Core.QueryDescription BuildingQuery =
@@ -83,31 +82,45 @@ public sealed class BuildingOverlayRenderer
 
     private static void DrawEquipmentIcon(SpriteBatch spriteBatch, Texture2D items, int typeCode, int tileX, int tileY)
     {
-        var buildingSubType = typeCode % 100;
-        var (offsetX, offsetY) = BuildingCatalog.IsFactory(typeCode)
-            ? (56, 52)
-            : (14, 98);
+        if (!TryGetEquipmentItemType(typeCode, out var itemType))
+        {
+            return;
+        }
 
-        var (sourceX, sourceY) = ItemSprites.GetInventorySpriteOrigin((ItemType)buildingSubType);
-        var legacySource = new Rectangle(sourceX, sourceY, LegacyItemIconSize, LegacyItemIconSize);
+        // Full item cell is 48px; research bay needs half-size, factory ~90%.
+        var isFactory = BuildingCatalog.IsFactory(typeCode);
+        var iconSize = isFactory ? 43 : 24;
+        var (offsetX, offsetY) = isFactory ? (50, 50) : (18, 106);
+
+        var (sourceX, sourceY) = ItemSprites.GetWorldSpriteOrigin(itemType);
+        var legacySource = new Rectangle(
+            sourceX,
+            sourceY,
+            ItemSprites.WorldSpriteSize,
+            ItemSprites.WorldSpriteSize);
 
         WorldSpriteMetrics.DrawLegacySprite(
             spriteBatch,
             items,
-            tileX + WorldSpriteMetrics.Scaled(offsetX),
-            tileY + WorldSpriteMetrics.Scaled(offsetY),
+            tileX + offsetX,
+            tileY + offsetY,
             legacySource,
+            iconSize,
+            iconSize,
             Color.White);
     }
 
+    private static bool TryGetEquipmentItemType(int typeCode, out ItemType itemType) =>
+        BuildingCatalog.TryGetEquipmentItemType(typeCode, out itemType);
+
     private static void DrawFactoryStock(SpriteBatch spriteBatch, Texture2D numbers, int tileX, int tileY, int itemsLeft)
     {
-        DrawTwoDigitNumber(spriteBatch, numbers, tileX + WorldSpriteMetrics.Scaled(56), tileY + WorldSpriteMetrics.Scaled(84), itemsLeft);
+        DrawTwoDigitNumber(spriteBatch, numbers, tileX + 56, tileY + 84, itemsLeft);
     }
 
     private static void DrawResearchTimer(SpriteBatch spriteBatch, Texture2D numbers, int tileX, int tileY, int seconds)
     {
-        DrawTwoDigitNumber(spriteBatch, numbers, tileX + WorldSpriteMetrics.Scaled(56), tileY + WorldSpriteMetrics.Scaled(68), seconds);
+        DrawTwoDigitNumber(spriteBatch, numbers, tileX + 56, tileY + 68, seconds);
     }
 
     private static void DrawTwoDigitNumber(SpriteBatch spriteBatch, Texture2D numbers, int x, int y, int value)
@@ -115,7 +128,7 @@ public sealed class BuildingOverlayRenderer
         var clamped = Math.Clamp(value, 0, 99);
         var tens = clamped / 10;
         var ones = clamped % 10;
-        var digitSpacing = WorldSpriteMetrics.Scaled(16);
+        const int digitSpacing = 16;
         var legacyDigit = new Rectangle(0, 0, LegacyNumberSize, LegacyNumberSize);
 
         WorldSpriteMetrics.DrawLegacySprite(
@@ -153,11 +166,11 @@ public sealed class BuildingOverlayRenderer
 
         return buildingType switch
         {
-            2 => (tileX + WorldSpriteMetrics.Scaled(96), tileY + WorldSpriteMetrics.Scaled(33), 0),
-            3 => (tileX + WorldSpriteMetrics.Scaled(92), tileY + WorldSpriteMetrics.Scaled(92), 0),
-            1 => (tileX + WorldSpriteMetrics.Scaled(96), tileY + WorldSpriteMetrics.Scaled(48), 0),
-            4 => (tileX + WorldSpriteMetrics.Scaled(96), tileY + WorldSpriteMetrics.Scaled(90), 0),
-            _ => (tileX + WorldSpriteMetrics.Scaled(96), tileY + WorldSpriteMetrics.Scaled(49), GameConstants.TileSize),
+            2 => (tileX + 96, tileY + 33, 0),
+            3 => (tileX + 92, tileY + 92, 0),
+            1 => (tileX + 96, tileY + 48, 0),
+            4 => (tileX + 96, tileY + 90, 0),
+            _ => (tileX + 96, tileY + 49, GameConstants.TileSize),
         };
     }
 }

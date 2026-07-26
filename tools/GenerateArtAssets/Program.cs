@@ -304,25 +304,25 @@ internal static class Program
 
     private static void GenerateTanks(string path)
     {
+        // Matches TankSpriteSelector: TeamRegular, TeamMayor, EnemyRegular, EnemyMayor, Admin.
         const int cols = 16;
-        const int rows = 50;
+        const int rows = 5;
         const int tile = 48;
         using var image = new Image<Rgba32>(cols * tile, rows * tile);
         Fill(image, Magenta);
 
         var palettes = new[]
         {
-            new Rgba32(70, 170, 90, 255),
-            new Rgba32(220, 190, 60, 255),
-            new Rgba32(200, 70, 70, 255),
-            new Rgba32(170, 90, 200, 255),
+            new Rgba32(70, 170, 90, 255),   // team regular
+            new Rgba32(220, 190, 60, 255),  // team mayor
+            new Rgba32(200, 70, 70, 255),   // enemy regular
+            new Rgba32(170, 90, 200, 255),  // enemy mayor
+            new Rgba32(80, 220, 255, 255),  // admin
         };
 
         for (var row = 0; row < rows; row++)
         {
-            var type = row % 4;
-            var shade = (byte)Math.Clamp(20 + (row / 4) * 3, 0, 60);
-            var body = OffsetColor(palettes[type], shade);
+            var body = palettes[row];
             var track = OffsetColor(body, -35);
             for (var col = 0; col < cols; col++)
             {

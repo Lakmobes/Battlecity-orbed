@@ -5,9 +5,16 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace BattleCity.Client.Rendering;
 
-/// <summary>Transparent compass overlay pointing toward the command center.</summary>
+/// <summary>
+/// Dual compass: outer ring points to the nearest other CC (orbable city),
+/// inner ring points to the home command center. Uses <see cref="HudSpriteNames.CompassRing"/>.
+/// </summary>
 public sealed class UnderAttackPanelRenderer
 {
+    private static readonly Color HomeArrowColor = new(120, 200, 255);
+    private static readonly Color OrbArrowColor = new(255, 180, 70);
+    private static readonly Color AttackArrowColor = Color.Red;
+
     private readonly AssetService _assets;
     private SpriteFont? _font;
 
@@ -18,7 +25,7 @@ public sealed class UnderAttackPanelRenderer
 
     public void LoadContent()
     {
-        _font = _assets.LoadFont("Fonts/MenuFont");
+        _font = _assets.LoadFont(LegacySpriteNames.UiFont);
     }
 
     public void Draw(SpriteBatch spriteBatch, in RenderContext context)
@@ -28,55 +35,28 @@ public sealed class UnderAttackPanelRenderer
             return;
         }
 
-        var bounds = ModernHudLayout.CompassBounds;
-        var ring = _assets.HudCompassRing;
-        if (ring != _assets.Pixel)
-        {
-            spriteBatch.Draw(ring, bounds, Color.White);
-        }
-        else
-        {
-            HudOverlayHelper.DrawPanel(
-                spriteBatch,
-                _assets,
-                bounds,
-                new Color(8, 12, 24, 150));
-        }
+        var outerBounds = ModernHudLayout.CompassBounds;
+        var innerBounds = ModernHudLayout.CompassInnerBounds;
+        DrawRing(spriteBatch, outerBounds, new Color(255, 255, 255, 230));
+        DrawRing(spriteBatch, innerBounds, new Color(180, 220, 255, 240));
 
-        var center = new Vector2(bounds.Center.X, bounds.Center.Y);
+        var center = new Vector2(outerBounds.Center.X, outerBounds.Center.Y);
         var playerCenter = ToNumerics(context.FocusWorldPosition);
-        var cityCenter = ToNumerics(context.CityCenterWorldPosition);
-        var glyph = CompassArrowHelper.GetDirectionGlyph(playerCenter, cityCenter);
-        var arrowRadians = CompassArrowHelper.ComputeArrowRadians(playerCenter, cityCenter);
-        var arrowColor = context is { IsUnderAttack: true, UnderAttackFlashVisible: true }
-            ? Color.Red
-            : new Color(120, 200, 255);
+        var homeCenter = ToNumerics(context.CityCenterWorldPosition);
+        var homeRadians = CompassArrowHelper.ComputeArrowRadians(playerCenter, homeCenter);
+        var homeColor = context is { IsUnderAttack: true, UnderAttackFlashVisible: true }
+            ? AttackArrowColor
+            : HomeArrowColor;
 
-        DrawCompassArrow(spriteBatch, _assets.Pixel, center, arrowRadians, arrowColor);
+        if (context.NearestOrbableCityWorldPosition is { } orbTarget)
+        {
+            var orbRadians = CompassArrowHelper.ComputeArrowRadians(playerCenter, ToNumerics(orbTarget));
+            DrawCompassArrow(spriteBatch, _assets.Pixel, center, orbRadians, OrbArrowColor, tipLength: 42f, wingLength: 16f);
+            DrawCornerLabel(spriteBatch, outerBounds, "ORB", OrbArrowColor, topLeft: false);
+        }
 
-        var labelScale = new Vector2(0.7f, 0.7f);
-        var labelSize = _font.MeasureString(glyph) * labelScale;
-        spriteBatch.DrawString(
-            _font,
-            glyph,
-            center - labelSize / 2f + new Vector2(0, 10),
-            arrowColor,
-            0f,
-            Vector2.Zero,
-            labelScale,
-            SpriteEffects.None,
-            0f);
-
-        spriteBatch.DrawString(
-            _font,
-            "CC",
-            new Vector2(bounds.X + 8, bounds.Y + 6),
-            new Color(180, 180, 200),
-            0f,
-            Vector2.Zero,
-            new Vector2(0.6f, 0.6f),
-            SpriteEffects.None,
-            0f);
+        DrawCompassArrow(spriteBatch, _assets.Pixel, center, homeRadians, homeColor, tipLength: 22f, wingLength: 10f);
+        DrawCornerLabel(spriteBatch, outerBounds, "CC", homeColor, topLeft: true);
 
         if (context is { IsUnderAttack: true, UnderAttackFlashVisible: true })
         {
@@ -86,7 +66,7 @@ public sealed class UnderAttackPanelRenderer
             spriteBatch.DrawString(
                 _font,
                 alert,
-                new Vector2(bounds.Center.X - alertSize.X / 2f, bounds.Bottom - 18),
+                new Vector2(outerBounds.Center.X - alertSize.X / 2f, outerBounds.Bottom - 18),
                 Color.Red,
                 0f,
                 Vector2.Zero,
@@ -96,16 +76,58 @@ public sealed class UnderAttackPanelRenderer
         }
     }
 
+    private void DrawRing(SpriteBatch spriteBatch, Rectangle bounds, Color tint)
+    {
+        var ring = _assets.HudCompassRing;
+        if (ring != _assets.Pixel)
+        {
+            spriteBatch.Draw(ring, bounds, tint);
+            return;
+        }
+
+        HudOverlayHelper.DrawPanel(
+            spriteBatch,
+            _assets,
+            bounds,
+            new Color(8, 12, 24, 150));
+    }
+
+    private void DrawCornerLabel(SpriteBatch spriteBatch, Rectangle bounds, string text, Color color, bool topLeft)
+    {
+        if (_font is null)
+        {
+            return;
+        }
+
+        var scale = new Vector2(0.55f, 0.55f);
+        var size = _font.MeasureString(text) * scale;
+        var position = topLeft
+            ? new Vector2(bounds.X + 6, bounds.Y + 4)
+            : new Vector2(bounds.Right - size.X - 6, bounds.Y + 4);
+        spriteBatch.DrawString(
+            _font,
+            text,
+            position,
+            color,
+            0f,
+            Vector2.Zero,
+            scale,
+            SpriteEffects.None,
+            0f);
+    }
+
     private static void DrawCompassArrow(
         SpriteBatch spriteBatch,
         Texture2D pixel,
         Vector2 center,
         float radians,
-        Color color)
+        Color color,
+        float tipLength,
+        float wingLength)
     {
-        var tip = center + new Vector2(MathF.Sin(radians), -MathF.Cos(radians)) * 28f;
-        var left = center + new Vector2(MathF.Sin(radians + 2.6f), -MathF.Cos(radians + 2.6f)) * 14f;
-        var right = center + new Vector2(MathF.Sin(radians - 2.6f), -MathF.Cos(radians - 2.6f)) * 14f;
+        var tip = center + new Vector2(MathF.Sin(radians), -MathF.Cos(radians)) * tipLength;
+        var left = center + new Vector2(MathF.Sin(radians + 2.6f), -MathF.Cos(radians + 2.6f)) * wingLength;
+        var right = center + new Vector2(MathF.Sin(radians - 2.6f), -MathF.Cos(radians - 2.6f)) * wingLength;
 
         DrawLine(spriteBatch, pixel, left, tip, color, 3);
         DrawLine(spriteBatch, pixel, right, tip, color, 3);

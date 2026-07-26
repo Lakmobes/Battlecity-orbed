@@ -4,6 +4,7 @@ using Arch.Core;
 
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Ecs.Systems;
+using BattleCity.Core.Gameplay;
 using BattleCity.Shared.Constants;
 
 namespace BattleCity.Core.Ai;
@@ -101,14 +102,10 @@ public static class TurretTargeting
 
     public static int AngleDegreesToHeadOrientation(float angleDegrees)
     {
-        var orientation = (int)(angleDegrees / 22.5f);
-        orientation %= 16;
-        if (orientation < 0)
-        {
-            orientation += 16;
-        }
-
-        return orientation;
+        // Point the head where the bullet will travel. TurretHead art is compass-ordered
+        // (column 0 = north) while legacy aim 0 fires south — same half-turn offset tanks use.
+        var fireDirection = AngleDegreesToLegacyDirection(angleDegrees);
+        return (fireDirection / 2 + 8) % 16;
     }
 
     public static Vector2 GetTurretWorldCenter(int gridX, int gridY) =>
@@ -116,14 +113,17 @@ public static class TurretTargeting
             gridX * GameConstants.TileSize + GameConstants.TileSize / 2f,
             gridY * GameConstants.TileSize + GameConstants.TileSize / 2f);
 
-    /// <summary>Legacy muzzle flash origin from <c>CItem.cpp</c> (artist-tuned, not the sprite top-left).</summary>
+    /// <summary>
+    /// Muzzle origin for turret fire. Legacy <c>CItem.cpp</c> used <c>grid*48-24</c>, but that
+    /// formula assumes a tank-style center position; item grid coords are already sprite
+    /// top-left (same as remake tanks), so use the shared tank muzzle pivot instead.
+    /// </summary>
     public static Vector2 GetTurretMuzzlePosition(int gridX, int gridY, int direction)
     {
-        var legacyFacing = -direction + 32;
-        var radians = legacyFacing / 16f * MathF.PI;
-        return new Vector2(
-            gridX * GameConstants.TileSize - 24 + 6 + MathF.Sin(radians) * 20f,
-            gridY * GameConstants.TileSize - 24 + 10 + MathF.Cos(radians) * 20f);
+        var topLeft = new Vector2(
+            gridX * GameConstants.TileSize,
+            gridY * GameConstants.TileSize);
+        return WeaponGeometry.GetMuzzleWorldPosition(topLeft, direction);
     }
 
     public static Vector2 GetTankCenter(Vector2 tankTopLeft) =>

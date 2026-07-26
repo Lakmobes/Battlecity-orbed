@@ -16,7 +16,8 @@ public static class ItemPickupActions
         Entity player,
         out Entity itemEntity,
         out ItemType itemType,
-        out ushort networkItemId)
+        out ushort networkItemId,
+        int? mapCityId = null)
     {
         itemEntity = Entity.Null;
         itemType = default;
@@ -45,7 +46,9 @@ public static class ItemPickupActions
                     return;
                 }
 
-                if (item.CityId != cityId)
+                // Own-city items, plus shared-map factory stock tagged with the layout city.
+                if (item.CityId != cityId
+                    && !(mapCityId.HasValue && item.CityId == mapCityId.Value))
                 {
                     return;
                 }
@@ -115,6 +118,22 @@ public static class ItemPickupActions
         Entity itemEntity,
         ItemType itemType)
     {
+        if (itemType == ItemType.Orb)
+        {
+            var cityId = world.Has<CityAffiliation>(player)
+                ? world.Get<CityAffiliation>(player).CityId
+                : 0;
+            // Picking up this city's orb is fine; refuse if another orb already exists for the city.
+            if (OrbCityRules.CityAlreadyHasOrb(
+                    world,
+                    cityId,
+                    exceptOwner: player,
+                    exceptItem: itemEntity))
+            {
+                return false;
+            }
+        }
+
         if (!inventory.TryAdd(itemType))
         {
             return false;

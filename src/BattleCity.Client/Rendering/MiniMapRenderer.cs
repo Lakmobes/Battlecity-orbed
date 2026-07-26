@@ -34,9 +34,12 @@ public sealed class MiniMapRenderer
         TileMap tileMap,
         World world,
         Vector2 focusWorldPosition,
-        Vector2 commandCenterWorldPosition)
+        int homeCommandCenterGridX,
+        int homeCommandCenterGridY)
     {
-        const int mapSize = 240;
+        var radius = RenderConstants.MiniMapRadiusTiles;
+        var tilePixelSize = RenderConstants.MiniMapTilePixelSize;
+        var mapSize = (2 * radius + 1) * tilePixelSize;
         var margin = ModernHudLayout.MiniMapMargin;
         var origin = new Point(margin, margin);
         var background = new Rectangle(origin.X, origin.Y, mapSize, mapSize);
@@ -50,11 +53,7 @@ public sealed class MiniMapRenderer
 
         var centerTileX = (int)focusWorldPosition.X / GameConstants.TileSize;
         var centerTileY = (int)focusWorldPosition.Y / GameConstants.TileSize;
-        var radius = RenderConstants.MiniMapRadiusTiles;
-        var tilePixelSize = RenderConstants.MiniMapTilePixelSize;
         var mapCenter = new Vector2(origin.X + mapSize / 2f, origin.Y + mapSize / 2f);
-        var ownCcTileX = (int)commandCenterWorldPosition.X / GameConstants.TileSize;
-        var ownCcTileY = (int)commandCenterWorldPosition.Y / GameConstants.TileSize;
 
         for (var tileY = centerTileY - radius; tileY <= centerTileY + radius; tileY++)
         {
@@ -66,42 +65,20 @@ public sealed class MiniMapRenderer
                 }
 
                 var terrain = tileMap.Terrain[tileX, tileY];
-                if (terrain is not (TerrainTileType.Lava or TerrainTileType.Rock or TerrainTileType.CityCenter))
+                if (terrain is not (TerrainTileType.Lava or TerrainTileType.Rock))
                 {
-                    continue;
-                }
-
-                if (terrain == TerrainTileType.CityCenter)
-                {
-                    // One marker per city-center footprint (skip interior/edge duplicates).
-                    if (tileX > 0 && tileMap.Terrain[tileX - 1, tileY] == TerrainTileType.CityCenter)
-                    {
-                        continue;
-                    }
-
-                    if (tileY > 0 && tileMap.Terrain[tileX, tileY - 1] == TerrainTileType.CityCenter)
-                    {
-                        continue;
-                    }
-
-                    var isOwn = Math.Abs(tileX - ownCcTileX) <= 2 && Math.Abs(tileY - ownCcTileY) <= 2;
-                    DrawCityCenterMarker(
-                        spriteBatch,
-                        mapCenter,
-                        centerTileX,
-                        centerTileY,
-                        tileX,
-                        tileY,
-                        tilePixelSize,
-                        isOwn ? OwnCcColor : OtherCcColor);
                     continue;
                 }
 
                 var screenX = (int)(mapCenter.X + (tileX - centerTileX) * tilePixelSize);
                 var screenY = (int)(mapCenter.Y + (tileY - centerTileY) * tilePixelSize);
                 var rect = new Rectangle(screenX, screenY, tilePixelSize, tilePixelSize);
-                var color = GetMiniMapColor(terrain);
+                if (!background.Contains(rect))
+                {
+                    continue;
+                }
 
+                var color = GetMiniMapColor(terrain);
                 if (_assets.IsTextureLoaded(LegacySpriteNames.MiniMapColors))
                 {
                     var paletteIndex = terrain == TerrainTileType.Lava ? 0 : 1;
@@ -115,7 +92,17 @@ public sealed class MiniMapRenderer
             }
         }
 
-        DrawBuildings(spriteBatch, world, mapCenter, centerTileX, centerTileY, radius, tilePixelSize);
+        DrawBuildings(
+            spriteBatch,
+            world,
+            mapCenter,
+            centerTileX,
+            centerTileY,
+            radius,
+            tilePixelSize,
+            background,
+            homeCommandCenterGridX,
+            homeCommandCenterGridY);
 
         var playerRect = new Rectangle(
             (int)mapCenter.X - tilePixelSize / 2,
@@ -132,59 +119,86 @@ public sealed class MiniMapRenderer
         int centerTileX,
         int centerTileY,
         int radius,
-        int tilePixelSize)
+        int tilePixelSize,
+        Rectangle clipBounds,
+        int homeCommandCenterGridX,
+        int homeCommandCenterGridY)
     {
         world.Query(
             in BuildingQuery,
-            (ref BuildingRef building, ref Transform2D transform) =>
+            (ref BuildingRef building, ref Transform2D _) =>
             {
-                // CCs already drawn from CityCenter terrain tiles.
-                if (BuildingCatalog.IsCommandCenter(building.TypeCode))
+                // GridAnchor is the SE corner of the 3×3 footprint; center tile is anchor − 1.
+                var footprintCenterX = building.GridAnchorX - 1;
+                var footprintCenterY = building.GridAnchorY - 1;
+                if (Math.Abs(footprintCenterX - centerTileX) > radius + 2
+                    || Math.Abs(footprintCenterY - centerTileY) > radius + 2)
                 {
                     return;
                 }
 
-                var tileX = building.GridAnchorX;
-                var tileY = building.GridAnchorY;
-                if (Math.Abs(tileX - centerTileX) > radius || Math.Abs(tileY - centerTileY) > radius)
-                {
-                    return;
-                }
+                var isCc = BuildingCatalog.IsCommandCenter(building.TypeCode);
+                var isOwnCc = isCc
+                    && building.GridAnchorX == homeCommandCenterGridX
+                    && building.GridAnchorY == homeCommandCenterGridY;
+                var color = isCc
+                    ? (isOwnCc ? OwnCcColor : OtherCcColor)
+                    : BuildingColor;
 
-                var size = tilePixelSize * 2;
-                var screenX = (int)(mapCenter.X + (tileX - centerTileX) * tilePixelSize) - size / 2;
-                var screenY = (int)(mapCenter.Y + (tileY - centerTileY) * tilePixelSize) - size / 2;
-                var rect = new Rectangle(screenX, screenY, size, size);
-                spriteBatch.Draw(_assets.Pixel, rect, BuildingColor);
+                DrawBuildingMarker(
+                    spriteBatch,
+                    mapCenter,
+                    centerTileX,
+                    centerTileY,
+                    footprintCenterX,
+                    footprintCenterY,
+                    tilePixelSize,
+                    color,
+                    usePalette: isCc,
+                    clipBounds);
             });
     }
 
-    private void DrawCityCenterMarker(
+    private void DrawBuildingMarker(
         SpriteBatch spriteBatch,
         Vector2 mapCenter,
         int centerTileX,
         int centerTileY,
-        int tileX,
-        int tileY,
+        int footprintCenterX,
+        int footprintCenterY,
         int tilePixelSize,
-        Color color)
+        Color color,
+        bool usePalette,
+        Rectangle clipBounds)
     {
+        // Legacy DrawMiniMap: every building is a 3×3 marker.
         var size = tilePixelSize * 3;
-        var screenX = (int)(mapCenter.X + (tileX - centerTileX) * tilePixelSize) - size / 2;
-        var screenY = (int)(mapCenter.Y + (tileY - centerTileY) * tilePixelSize) - size / 2;
-        var rect = new Rectangle(screenX, screenY, size, size);
-
-        if (_assets.IsTextureLoaded(LegacySpriteNames.MiniMapColors))
+        var screenX = (int)(mapCenter.X + (footprintCenterX - centerTileX) * tilePixelSize) - size / 2;
+        var screenY = (int)(mapCenter.Y + (footprintCenterY - centerTileY) * tilePixelSize) - size / 2;
+        var rect = ClipToBounds(new Rectangle(screenX, screenY, size, size), clipBounds);
+        if (rect.Width <= 0 || rect.Height <= 0)
         {
-            // Palette: 2 = friendly CC, 3 = enemy CC (legacy DrawMiniMap).
+            return;
+        }
+
+        if (usePalette && _assets.IsTextureLoaded(LegacySpriteNames.MiniMapColors))
+        {
             var paletteIndex = color.R < 150 ? 2 : 3;
             var source = new Rectangle(paletteIndex * 15, 0, 15, 15);
             spriteBatch.Draw(_assets.MiniMapColors, rect, source, Color.White);
+            return;
         }
-        else
-        {
-            spriteBatch.Draw(_assets.Pixel, rect, color);
-        }
+
+        spriteBatch.Draw(_assets.Pixel, rect, color);
+    }
+
+    private static Rectangle ClipToBounds(Rectangle rect, Rectangle bounds)
+    {
+        var left = Math.Max(rect.Left, bounds.Left);
+        var top = Math.Max(rect.Top, bounds.Top);
+        var right = Math.Min(rect.Right, bounds.Right);
+        var bottom = Math.Min(rect.Bottom, bounds.Bottom);
+        return new Rectangle(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
     }
 
     private static Color GetMiniMapColor(TerrainTileType terrain) =>
@@ -192,7 +206,6 @@ public sealed class MiniMapRenderer
         {
             TerrainTileType.Lava => new Color(220, 80, 20),
             TerrainTileType.Rock => new Color(120, 120, 120),
-            TerrainTileType.CityCenter => OtherCcColor,
             _ => Color.Transparent,
         };
 }

@@ -3,6 +3,7 @@ using System.Numerics;
 using Arch.Core;
 
 using BattleCity.Core.Ecs.Components;
+using BattleCity.Core.Ecs.Systems;
 using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
 using BattleCity.Shared.Catalogs;
@@ -120,6 +121,7 @@ public static class BuildingCommandService
         var menuIndex = building.MenuIndex;
         var typeCode = building.TypeCode;
 
+        BuildingPopulationSystem.DetachBeforeDestroy(world, entity);
         world.Destroy(entity);
         RestoreDemolishedPermissions(build, menuIndex, typeCode);
         build.RegisterBuildingRemoved();

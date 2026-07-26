@@ -74,18 +74,34 @@ public class TankSpriteSelectorTests
     [Fact]
     public void GetSourceY_UsesMayorRowForFriendlyMayor()
     {
-        Assert.Equal(TankSpriteSelector.FriendMayorRow, TankSpriteSelector.GetSourceY(0, 0, isMayor: true));
+        Assert.Equal(TankSpriteSelector.TeamMayorRow, TankSpriteSelector.GetSourceY(0, 0, isMayor: true));
     }
 
     [Fact]
-    public void GetSourceY_UsesEnemyCommandoRowForOtherCity()
+    public void GetSourceY_UsesEnemyRegularRowForOtherCity()
     {
-        Assert.Equal(TankSpriteSelector.EnemyCommandoRow, TankSpriteSelector.GetSourceY(0, 1, isMayor: false));
+        Assert.Equal(TankSpriteSelector.EnemyRegularRow, TankSpriteSelector.GetSourceY(0, 1, isMayor: false));
     }
 
     [Fact]
     public void GetSourceY_UsesEnemyMayorRowForOtherCityMayor()
     {
         Assert.Equal(TankSpriteSelector.EnemyMayorRow, TankSpriteSelector.GetSourceY(0, 1, isMayor: true));
+    }
+
+    [Fact]
+    public void GetSourceY_UsesAdminRowRegardlessOfCityOrMayor()
+    {
+        Assert.Equal(
+            TankSpriteSelector.AdminRow,
+            TankSpriteSelector.GetSourceY(0, 1, isMayor: true, isAdmin: true));
+    }
+
+    [Fact]
+    public void IsAdminAccount_MatchesAdminUsername()
+    {
+        Assert.True(TankSpriteSelector.IsAdminAccount("admin"));
+        Assert.True(TankSpriteSelector.IsAdminAccount("Admin"));
+        Assert.False(TankSpriteSelector.IsAdminAccount("player"));
     }
 }
