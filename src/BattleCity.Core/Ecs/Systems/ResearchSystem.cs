@@ -36,11 +36,40 @@ public static class ResearchSystem
         }
 
         _accumulator = 0f;
+        UpdateCity(world, build, audio);
+    }
 
+    /// <summary>Advance research for every city once per poll interval (shared timer).</summary>
+    public static void UpdateAll(
+        World world,
+        IEnumerable<CityBuildState> builds,
+        float deltaSeconds,
+        SimulationAudioBuffer? audio = null)
+    {
+        _accumulator += deltaSeconds;
+        if (_accumulator < ResearchPollIntervalSeconds)
+        {
+            return;
+        }
+
+        _accumulator = 0f;
+        foreach (var build in builds)
+        {
+            UpdateCity(world, build, audio);
+        }
+    }
+
+    private static void UpdateCity(World world, CityBuildState build, SimulationAudioBuffer? audio)
+    {
         world.Query(
             in BuildingQuery,
             (ref BuildingRef building, ref BuildingState state) =>
             {
+                if (building.CityId != build.CityId)
+                {
+                    return;
+                }
+
                 if (!BuildingCatalog.IsResearch(building.TypeCode)
                     || !BuildingCatalog.TryGetResearchTreeIndex(building.TypeCode, out var treeIndex))
                 {
@@ -81,7 +110,11 @@ public static class ResearchSystem
                 ResearchCompleteNotificationSystem.Trigger(world, build.CityId, treeIndex);
 
                 if (audio is not null
-                    && CommandCenterLookup.TryGetWorldPosition(world, out var ccPosition))
+                    && CommandCenterLookup.TryGetWorldPosition(
+                        world,
+                        build.CommandCenterGridX,
+                        build.CommandCenterGridY,
+                        out var ccPosition))
                 {
                     audio.Play(SoundId.Build, ccPosition);
                 }

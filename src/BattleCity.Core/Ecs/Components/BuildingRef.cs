@@ -8,6 +8,9 @@ public struct BuildingRef
     public int GridAnchorX;
     public int GridAnchorY;
 
+    /// <summary>Owning city id (legacy per-city building lists).</summary>
+    public int CityId;
+
     /// <summary>Legacy network building id (<c>sSMBuild.id</c>); 0 until assigned.</summary>
     public ushort NetworkId;
 }

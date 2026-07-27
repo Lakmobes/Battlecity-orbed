@@ -31,6 +31,11 @@ public class LegacyPacketCodecTests
         Assert.Equal(8, (int)ServerMessageId.StateGame);
         Assert.Equal(18, (int)ServerMessageId.JoinData);
         Assert.Equal(46, (int)ServerMessageId.Update);
+        Assert.Equal(53, (int)ServerMessageId.ClearPlayer);
+        Assert.Equal(56, (int)ServerMessageId.Respawn);
+        Assert.Equal(58, (int)ServerMessageId.UnderAttack);
+        Assert.Equal(61, (int)ServerMessageId.Whisper);
+        Assert.Equal(63, (int)ServerMessageId.Cloak);
     }
 
     [Fact]
@@ -124,7 +129,7 @@ public class LegacyPacketCodecTests
         Assert.Equal(99, ClientDemolishPacket.Read(demolishBuffer).BuildingId);
         Assert.Equal(16, (int)ClientMessageId.Demolish);
         Assert.Equal(46, (int)ClientMessageId.Cloak);
-        Assert.Equal(90, (int)ServerMessageId.Cloak);
+        Assert.Equal(63, (int)ServerMessageId.Cloak);
     }
 
     [Fact]

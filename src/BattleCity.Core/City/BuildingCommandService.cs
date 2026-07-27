@@ -45,7 +45,7 @@ public static class BuildingCommandService
         }
 
         var placement = new CityBuildingPlacement(menuIndex, gridAnchorX, gridAnchorY, typeCode);
-        LevelLoader.SpawnBuilding(world, placement);
+        LevelLoader.SpawnBuilding(world, placement, build.CityId);
         ApplyBuiltPermissions(build, menuIndex, typeCode);
         build.RegisterBuildingPlaced(menuIndex, typeCode);
         return true;
@@ -118,14 +118,50 @@ public static class BuildingCommandService
     private static bool TryDemolishEntity(World world, CityBuildState build, Entity entity)
     {
         ref var building = ref world.Get<BuildingRef>(entity);
+        if (BuildingCatalog.IsCommandCenter(building.TypeCode))
+        {
+            return false;
+        }
+
         var menuIndex = building.MenuIndex;
         var typeCode = building.TypeCode;
+        var cityId = building.CityId;
+
+        // Legacy delBuilding: factories wipe all city products of that type.
+        if (BuildingCatalog.TryGetFactoryProduct(typeCode, out var product))
+        {
+            DeleteItemsByFactory(world, cityId, product);
+        }
 
         BuildingPopulationSystem.DetachBeforeDestroy(world, entity);
         world.Destroy(entity);
         RestoreDemolishedPermissions(build, menuIndex, typeCode);
         build.RegisterBuildingRemoved();
         return true;
+    }
+
+    /// <summary>Legacy <c>CItemList::deleteItemsByFactory</c>.</summary>
+    public static void DeleteItemsByFactory(World world, int cityId, Shared.Data.ItemType product)
+    {
+        var toDestroy = new List<Entity>();
+        var query = new QueryDescription().WithAll<PlacedItemRef>();
+        world.Query(
+            in query,
+            (Entity entity, ref PlacedItemRef item) =>
+            {
+                if (item.CityId == cityId && item.Type == product)
+                {
+                    toDestroy.Add(entity);
+                }
+            });
+
+        foreach (var entity in toDestroy)
+        {
+            if (world.IsAlive(entity))
+            {
+                world.Destroy(entity);
+            }
+        }
     }
 
     private static void ApplyBuiltPermissions(CityBuildState build, int menuIndex, int typeCode)

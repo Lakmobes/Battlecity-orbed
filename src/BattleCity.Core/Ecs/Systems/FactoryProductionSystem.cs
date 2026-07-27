@@ -35,6 +35,11 @@ public static class FactoryProductionSystem
         Func<ushort>? allocateNetworkItemId = null,
         Action<ServerAddItemPacket>? reportSpawn = null)
     {
+        if (build is null)
+        {
+            return;
+        }
+
         _accumulator += deltaSeconds;
         if (_accumulator < ProductionIntervalSeconds)
         {
@@ -42,11 +47,44 @@ public static class FactoryProductionSystem
         }
 
         _accumulator = 0f;
+        UpdateCity(world, build, allocateNetworkItemId, reportSpawn);
+    }
 
+    public static void UpdateAll(
+        World world,
+        IEnumerable<CityBuildState> builds,
+        float deltaSeconds,
+        Func<ushort>? allocateNetworkItemId = null,
+        Action<ServerAddItemPacket>? reportSpawn = null)
+    {
+        _accumulator += deltaSeconds;
+        if (_accumulator < ProductionIntervalSeconds)
+        {
+            return;
+        }
+
+        _accumulator = 0f;
+        foreach (var build in builds)
+        {
+            UpdateCity(world, build, allocateNetworkItemId, reportSpawn);
+        }
+    }
+
+    private static void UpdateCity(
+        World world,
+        CityBuildState build,
+        Func<ushort>? allocateNetworkItemId,
+        Action<ServerAddItemPacket>? reportSpawn)
+    {
         world.Query(
             in BuildingQuery,
             (ref BuildingRef building, ref BuildingState state) =>
             {
+                if (building.CityId != build.CityId)
+                {
+                    return;
+                }
+
                 if (!BuildingCatalog.IsFactory(building.TypeCode)
                     || !BuildingCatalog.TryGetFactoryProduct(building.TypeCode, out var product))
                 {
@@ -59,15 +97,14 @@ public static class FactoryProductionSystem
                 }
 
                 var menuIndex = BuildingCatalog.GetMenuIndex(building.TypeCode);
-                if (build is not null
-                    && (menuIndex < 0
-                        || menuIndex >= build.CanBuild.Length
-                        || build.CanBuild[menuIndex] != 2))
+                if (menuIndex < 0
+                    || menuIndex >= build.CanBuild.Length
+                    || build.CanBuild[menuIndex] != 2)
                 {
                     return;
                 }
 
-                var cityId = build?.CityId ?? 0;
+                var cityId = build.CityId;
                 var capacity = ItemCatalog.MaxCarryCount[(int)product];
                 var held = CountCityProduct(world, cityId, product);
                 state.ItemsLeft = Math.Max(0, capacity - held);
@@ -113,14 +150,13 @@ public static class FactoryProductionSystem
 
     public static int CountCityProduct(World world, int cityId, ItemType product)
     {
-        _ = cityId;
         var count = 0;
 
         world.Query(
             in ItemQuery,
             (ref PlacedItemRef item) =>
             {
-                if (item.Type == product)
+                if (item.Type == product && item.CityId == cityId)
                 {
                     count++;
                 }
@@ -128,9 +164,12 @@ public static class FactoryProductionSystem
 
         world.Query(
             in InventoryQuery,
-            (ref PlayerInventory inventory, ref CityAffiliation _) =>
+            (ref PlayerInventory inventory, ref CityAffiliation city) =>
             {
-                count += inventory.GetCount(product);
+                if (city.CityId == cityId)
+                {
+                    count += inventory.GetCount(product);
+                }
             });
 
         return count;

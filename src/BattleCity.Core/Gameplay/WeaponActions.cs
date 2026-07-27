@@ -67,6 +67,11 @@ public static class WeaponActions
             weapons.RocketCooldownSeconds <= 0f &&
             weapons.LaserCooldownSeconds <= 0f)
         {
+            if (!inventory.TryConsume(ItemType.Rocket))
+            {
+                return false;
+            }
+
             FireSingle(world, owner, tankTopLeft, facing.Direction, BulletKind.Rocket, audio);
             weapons.RocketCooldownSeconds = GameConstants.TimerShootRocket / 1000f;
             weapons.LaserCooldownSeconds = GameConstants.TimerShootRocket / 1000f;

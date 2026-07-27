@@ -43,6 +43,7 @@ public sealed class MeetingScene : IScene
     public void LoadContent()
     {
         _ui.LoadContent();
+        _chatInput.Reset();
         _client.EnterMeetingRoom();
         _chatLog.Append(
             "Welcome to the meeting room. Click a city to apply. Press Enter to chat.",
@@ -342,6 +343,10 @@ public sealed class MeetingScene : IScene
         {
             switch (networkEvent.Kind)
             {
+                case GameClientEventKind.CityListClear:
+                    _cities.Clear();
+                    _selectedCityIndex = 0;
+                    break;
                 case GameClientEventKind.AddRemCity:
                     AddCityEntry(networkEvent.AddRemCity);
                     break;
@@ -352,6 +357,9 @@ public sealed class MeetingScene : IScene
                     break;
                 case GameClientEventKind.MayorInInterview:
                     _chatLog.Append("That city is not accepting applications right now.", ChatColorResolver.System);
+                    break;
+                case GameClientEventKind.MayorDeclined:
+                    _chatLog.Append("The mayor declined your application.", ChatColorResolver.System);
                     break;
                 case GameClientEventKind.Interview:
                     _context.NetworkClient = _client;

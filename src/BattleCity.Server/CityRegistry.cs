@@ -1,3 +1,4 @@
+using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Network.Packets;
 
@@ -5,6 +6,17 @@ namespace BattleCity.Server;
 
 public sealed class CityRegistry
 {
+    /// <summary>Always offer at least this many joinable meeting-room entries.</summary>
+    public const int MinimumJoinableCities = 3;
+
+    /// <summary>
+    /// Preferred empty-city order (legacy starting-CC neighborhood around Buenos Aires).
+    /// </summary>
+    private static readonly byte[] PreferredEmptyCities =
+    [
+        27, 26, 28, 19, 20, 18, 34, 35, 36, 0, 1, 2, 3, 4, 5,
+    ];
+
     private readonly Dictionary<byte, CitySlot> _slots = new();
 
     public CitySlot GetOrCreate(byte cityId) =>
@@ -39,17 +51,24 @@ public sealed class CityRegistry
         byte defaultCityId)
     {
         var inGameCounts = CountInGamePlayersByCity(sessions);
+        var results = new List<ServerAddRemCityPacket>();
         var sent = new HashSet<byte>();
 
-        if (!mayors.HasMayor(defaultCityId))
+        // (a) Every city that already has a mayor and can still take commandos.
+        foreach (var cityId in mayors.GetMayoredCityIds())
         {
-            sent.Add(defaultCityId);
-            yield return new ServerAddRemCityPacket(defaultCityId, ServerAddRemCityPacket.NoMayor, 0);
-        }
+            inGameCounts.TryGetValue(cityId, out var count);
+            if (count >= GameConstants.MaxPlayersPerCity)
+            {
+                continue;
+            }
 
-        foreach (var (cityId, count) in inGameCounts)
-        {
-            if (!mayors.HasMayor(cityId) || count >= GameConstants.MaxPlayersPerCity)
+            if (GetOrCreate(cityId).DenyApplicants)
+            {
+                continue;
+            }
+
+            if (!mayors.TryGetMayorPlayerId(cityId, out var mayorId))
             {
                 continue;
             }
@@ -59,8 +78,43 @@ public sealed class CityRegistry
                 continue;
             }
 
-            mayors.TryGetMayorPlayerId(cityId, out var mayorId);
-            yield return new ServerAddRemCityPacket(cityId, mayorId, (byte)count);
+            results.Add(new ServerAddRemCityPacket(cityId, mayorId, (byte)count));
+        }
+
+        // (b) Enough empty "Mayor required" slots so the list always has ≥ 3 joinable cities.
+        foreach (var cityId in EnumerateEmptyCityCandidates(defaultCityId))
+        {
+            if (results.Count >= MinimumJoinableCities)
+            {
+                break;
+            }
+
+            if (mayors.HasMayor(cityId) || !CityCatalog.IsValidCityId(cityId) || !sent.Add(cityId))
+            {
+                continue;
+            }
+
+            results.Add(new ServerAddRemCityPacket(cityId, ServerAddRemCityPacket.NoMayor, 0));
+        }
+
+        return results;
+    }
+
+    private static IEnumerable<byte> EnumerateEmptyCityCandidates(byte defaultCityId)
+    {
+        yield return defaultCityId;
+
+        foreach (var cityId in PreferredEmptyCities)
+        {
+            if (cityId != defaultCityId)
+            {
+                yield return cityId;
+            }
+        }
+
+        for (var id = 0; id < CityCatalog.Names.Count; id++)
+        {
+            yield return (byte)id;
         }
     }
 

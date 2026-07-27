@@ -5,6 +5,7 @@ using BattleCity.Core.Ecs.Systems;
 using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
 using BattleCity.Core.Network;
+using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
 using BattleCity.Shared.Network.Packets;
@@ -336,7 +337,7 @@ public sealed class CityBuildTests
         build.ResearchStatus[0] = 0;
 
         world.Create(
-            new BuildingRef { TypeCode = 400, MenuIndex = 2, GridAnchorX = 0, GridAnchorY = 0 },
+            new BuildingRef { TypeCode = 400, MenuIndex = 2, GridAnchorX = 0, GridAnchorY = 0, CityId = build.CityId },
             new BuildingState { Population = EconomyConstants.PopulationMaxNonHouse });
 
         for (var i = 0; i < 11; i++)
@@ -345,6 +346,164 @@ public sealed class CityBuildTests
         }
 
         Assert.Equal(-1, build.ResearchStatus[0]);
-        Assert.Equal(1, build.CanBuild[3]);
+        Assert.Equal(1, build.CanBuild[3]); // Laser Factory unlocked
+        Assert.Equal(1, build.CanBuild[6]); // Time Bomb (Cloak) Research unlocked via tree
+        Assert.Equal(1, build.CanBuild[8]); // MedKit Research unlocked via tree
+    }
+
+    [Fact]
+    public void TryDemolishForNetworkPlayer_RefusesCommandCenter()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.LoadCityLayout(new CityLayout
+        {
+            CityName = "Test",
+            SourcePath = "test.city",
+            Buildings = [],
+        });
+        Assert.True(simulation.TryGetCityBuild(0, out var build));
+        simulation.CreateNetworkPlayerEntity(
+            new System.Numerics.Vector2(
+                (build.CommandCenterGridX - 1) * GameConstants.TileSize,
+                (build.CommandCenterGridY - 1) * GameConstants.TileSize),
+            playerId: 1,
+            cityId: 0);
+
+        ushort ccNetworkId = 0;
+        var query = new QueryDescription().WithAll<BuildingRef>();
+        simulation.World.Query(
+            in query,
+            (ref BuildingRef building) =>
+            {
+                if (BuildingCatalog.IsCommandCenter(building.TypeCode) && building.NetworkId != 0)
+                {
+                    ccNetworkId = building.NetworkId;
+                }
+            });
+        Assert.True(ccNetworkId > 0);
+
+        Assert.False(simulation.TryDemolishForNetworkPlayer(
+            1,
+            new ClientDemolishPacket(ccNetworkId),
+            out _));
+    }
+
+    [Fact]
+    public void TryDemolishForNetworkPlayer_RefusesOtherCityBuilding()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.LoadCityLayout(new CityLayout
+        {
+            CityName = "Test",
+            SourcePath = "test.city",
+            Buildings = [],
+        });
+        Assert.True(simulation.TryGetCityBuild(0, out var build));
+        var mayorTileX = build.CommandCenterGridX - 1;
+        var mayorTileY = build.CommandCenterGridY - 1;
+        simulation.CreateNetworkPlayerEntity(
+            new System.Numerics.Vector2(
+                mayorTileX * GameConstants.TileSize,
+                mayorTileY * GameConstants.TileSize),
+            playerId: 1,
+            cityId: 0);
+
+        Assert.True(simulation.TryBuildForNetworkPlayer(
+            1,
+            new ClientBuildPacket(40, 40, buildSlot: 2, isAutoBuild: false),
+            out var placed));
+
+        simulation.CreateNetworkPlayerEntity(
+            new System.Numerics.Vector2(
+                mayorTileX * GameConstants.TileSize,
+                mayorTileY * GameConstants.TileSize),
+            playerId: 2,
+            cityId: 5);
+
+        Assert.False(simulation.TryDemolishForNetworkPlayer(
+            2,
+            new ClientDemolishPacket(placed.Id),
+            out _));
+    }
+
+    [Fact]
+    public void TryPickupItemForNetworkPlayer_RefusesOtherCityItem()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        var owner = simulation.CreateNetworkPlayerEntity(
+            new System.Numerics.Vector2(12 * 48f, 12 * 48f),
+            playerId: 1,
+            cityId: 0);
+        ref var inventory = ref simulation.World.Get<PlayerInventory>(owner);
+        inventory.Bomb = 1;
+        Assert.True(simulation.TryDropItemForNetworkPlayer(1, ItemType.Bomb, active: true, out var dropPacket));
+        simulation.ApplyNetworkAddItem(dropPacket);
+
+        simulation.CreateNetworkPlayerEntity(
+            new System.Numerics.Vector2(12 * 48f, 12 * 48f),
+            playerId: 2,
+            cityId: 5);
+
+        Assert.False(simulation.TryPickupItemForNetworkPlayer(
+            2,
+            new ClientItemPickupPacket(dropPacket.Id, active: 1, itemType: (byte)ItemType.Bomb),
+            out _,
+            out _));
+    }
+
+    [Fact]
+    public void EnsureCityBuild_AllowsPlaceNearThatCitysCommandCenter()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.LoadCityLayout(new CityLayout
+        {
+            CityName = "Test",
+            SourcePath = "test.city",
+            Buildings = [],
+        });
+
+        var otherCity = simulation.EnsureCityBuild(7);
+        otherCity.CommandCenterGridX = 80;
+        otherCity.CommandCenterGridY = 80;
+
+        Assert.True(simulation.TryPlaceBuilding(
+            cityId: 7,
+            buildSlot: 2,
+            gridAnchorX: 90,
+            gridAnchorY: 90,
+            playerCenter: new System.Numerics.Vector2(81 * GameConstants.TileSize, 81 * GameConstants.TileSize)));
+
+        Assert.True(BuildingPlacementValidator.TryFindBuildingAt(simulation.World, 90, 90, out var entity));
+        Assert.Equal(7, simulation.World.Get<BuildingRef>(entity).CityId);
+    }
+
+    [Fact]
+    public void EnsureCityBuild_DifferentCitiesHaveIndependentBuilds()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.LoadCityLayout(new CityLayout
+        {
+            CityName = "Test",
+            SourcePath = "test.city",
+            Buildings = [],
+        });
+
+        var cityA = simulation.EnsureCityBuild(3);
+        var cityB = simulation.EnsureCityBuild(9);
+        cityA.CanBuild[1] = 0;
+        cityB.CanBuild[1] = 1;
+
+        Assert.True(simulation.TryGetCityBuild(3, out var buildA));
+        Assert.True(simulation.TryGetCityBuild(9, out var buildB));
+        Assert.Equal(0, buildA.CanBuild[1]);
+        Assert.Equal(1, buildB.CanBuild[1]);
+        Assert.NotSame(buildA, buildB);
+        Assert.Contains(3, simulation.EnumerateCityBuildIds());
+        Assert.Contains(9, simulation.EnumerateCityBuildIds());
     }
 }

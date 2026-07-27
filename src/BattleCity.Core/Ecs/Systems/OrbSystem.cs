@@ -11,16 +11,29 @@ public static class OrbSystem
     private static readonly QueryDescription OrbQuery =
         new QueryDescription().WithAll<PlacedItemRef>();
 
-    public static bool TryTrigger(World world, CityBuildState build, out int attackerCityId)
+    public static bool TryTrigger(World world, CityBuildState build, out int attackerCityId) =>
+        TryTrigger(world, [build], out _, out attackerCityId);
+
+    /// <summary>
+    /// Scans inactive orbs against every orbable enemy city CC (legacy drop-time check).
+    /// </summary>
+    public static bool TryTrigger(
+        World world,
+        IEnumerable<CityBuildState> cities,
+        out int victimCityId,
+        out int attackerCityId)
     {
+        victimCityId = 0;
         attackerCityId = 0;
 
-        if (!build.IsOrbable)
+        var cityList = cities as IList<CityBuildState> ?? cities.ToList();
+        if (cityList.Count == 0)
         {
             return false;
         }
 
         var triggered = false;
+        var capturedVictimCityId = 0;
         var capturedAttackerCityId = 0;
 
         world.Query(
@@ -32,22 +45,34 @@ public static class OrbSystem
                     return;
                 }
 
-                if (!IsOrbOnCommandCenter(build, item.GridX, item.GridY))
+                foreach (var build in cityList)
                 {
+                    if (!build.IsOrbable || build.CityId == item.CityId)
+                    {
+                        continue;
+                    }
+
+                    if (!IsOrbOnCommandCenter(build, item.GridX, item.GridY))
+                    {
+                        continue;
+                    }
+
+                    capturedVictimCityId = build.CityId;
+                    capturedAttackerCityId = item.CityId;
+                    world.Destroy(entity);
+                    triggered = true;
                     return;
                 }
-
-                capturedAttackerCityId = item.CityId;
-                world.Destroy(entity);
-                triggered = true;
             });
 
-        if (triggered)
+        if (!triggered)
         {
-            attackerCityId = capturedAttackerCityId;
+            return false;
         }
 
-        return triggered;
+        victimCityId = capturedVictimCityId;
+        attackerCityId = capturedAttackerCityId;
+        return true;
     }
 
     private static bool IsOrbOnCommandCenter(CityBuildState build, int gridX, int gridY)

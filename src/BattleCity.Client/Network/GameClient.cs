@@ -44,6 +44,10 @@ public enum GameClientEventKind
     Warp,
     Respawn,
     Orbed,
+    UnderAttack,
+    ChatCommand,
+    ClearPlayer,
+    CityListClear,
     Error,
     Disconnected,
 }
@@ -58,6 +62,9 @@ public readonly struct GameClientEvent
     public GameClientEventKind Kind { get; }
 
     public byte PlayerId { get; init; }
+
+    /// <summary>Legacy chat-command opcode (e.g. 69 = left battlefield).</summary>
+    public byte ChatCommandCode { get; init; }
 
     public ServerStateGamePacket StateGame { get; init; }
 
@@ -650,6 +657,9 @@ public sealed class GameClient : IDisposable
                     Building = ServerBuildingPacket.Read(packet.Payload.Span),
                 });
                 break;
+            case ServerMessageId.UnderAttack:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.UnderAttack));
+                break;
             case ServerMessageId.Death when packet.Payload.Length >= ServerDeathPacket.Size:
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.Death)
                 {
@@ -680,10 +690,26 @@ public sealed class GameClient : IDisposable
                     ChatMessage = ServerChatMessagePacket.Read(packet.Payload.Span),
                 });
                 break;
+            case ServerMessageId.AddRemCity when packet.Payload.Length == 1 && packet.Payload.Span[0] == 255:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.CityListClear));
+                break;
             case ServerMessageId.AddRemCity when packet.Payload.Length >= 2:
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.AddRemCity)
                 {
                     AddRemCity = ServerAddRemCityPacket.Read(packet.Payload.Span),
+                });
+                break;
+            case ServerMessageId.ChatCommand when packet.Payload.Length >= 2:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.ChatCommand)
+                {
+                    PlayerId = packet.Payload.Span[0],
+                    ChatCommandCode = packet.Payload.Span[1],
+                });
+                break;
+            case ServerMessageId.ClearPlayer when packet.Payload.Length >= 1:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.ClearPlayer)
+                {
+                    PlayerId = packet.Payload.Span[0],
                 });
                 break;
             case ServerMessageId.CanBuild when packet.Payload.Length >= ServerCanBuildPacket.Size:

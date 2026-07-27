@@ -1,4 +1,5 @@
 using BattleCity.Shared.Catalogs;
+using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
 
 namespace BattleCity.Core.Ecs.Components;
@@ -50,18 +51,54 @@ public struct PlayerInventory
     public int Plasma;
     public ItemType SelectedItemType;
 
-    /// <summary>Starter kit: laser is always available; inventory starts with rocket, flare, cloak only.</summary>
-    public static PlayerInventory CreateStarterLoadout() =>
-        new()
+    /// <summary>
+    /// Laser is always free. Rocket / cloak / flare are granted only while the matching
+    /// city factory still stands (<c>CanBuild[factory]==2</c>), matching the intended remake spawn rule.
+    /// </summary>
+    public static PlayerInventory CreateLoadoutForCity(CityBuildState? build)
+    {
+        var inventory = new PlayerInventory { SelectedItemType = ItemType.Rocket };
+        if (build is null)
         {
-            Rocket = 1,
-            Flare = 1,
-            Cloak = 1,
-            SelectedItemType = ItemType.Rocket,
-        };
+            return inventory;
+        }
+
+        if (HasBuiltFactory(build, treeIndex: 0))
+        {
+            inventory.Rocket = 1;
+        }
+
+        if (HasBuiltFactory(build, EconomyConstants.CloakResearchTreeIndex))
+        {
+            inventory.Cloak = 1;
+        }
+
+        if (HasBuiltFactory(build, EconomyConstants.FlareResearchTreeIndex))
+        {
+            inventory.Flare = 1;
+        }
+
+        if (inventory.Rocket <= 0)
+        {
+            inventory.SelectedItemType = ItemType.Cloak;
+        }
+
+        return inventory;
+    }
+
+    /// <summary>Empty gear (laser only). Prefer <see cref="CreateLoadoutForCity"/> online/offline with a city.</summary>
+    public static PlayerInventory CreateStarterLoadout() => CreateLoadoutForCity(null);
 
     /// <summary>Obsolete name kept for call sites; same as <see cref="CreateStarterLoadout"/>.</summary>
     public static PlayerInventory CreateDemoLoadout() => CreateStarterLoadout();
+
+    private static bool HasBuiltFactory(CityBuildState build, int treeIndex)
+    {
+        var factoryMenu = BuildingCatalog.GetFactoryMenuIndex(treeIndex);
+        return factoryMenu >= 0
+            && factoryMenu < build.CanBuild.Length
+            && build.CanBuild[factoryMenu] == 2;
+    }
 
     public int GetCount(ItemType type) =>
         type switch

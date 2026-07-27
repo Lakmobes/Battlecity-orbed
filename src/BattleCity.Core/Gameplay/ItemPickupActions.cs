@@ -16,8 +16,7 @@ public static class ItemPickupActions
         Entity player,
         out Entity itemEntity,
         out ItemType itemType,
-        out ushort networkItemId,
-        int? mapCityId = null)
+        out ushort networkItemId)
     {
         itemEntity = Entity.Null;
         itemType = default;
@@ -46,9 +45,7 @@ public static class ItemPickupActions
                     return;
                 }
 
-                // Own-city items, plus shared-map factory stock tagged with the layout city.
-                if (item.CityId != cityId
-                    && !(mapCityId.HasValue && item.CityId == mapCityId.Value))
+                if (item.CityId != cityId)
                 {
                     return;
                 }

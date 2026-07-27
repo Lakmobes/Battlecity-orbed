@@ -14,6 +14,8 @@ public sealed class CityMayorRegistry
 
     public void Assign(byte cityId, byte playerId) => _mayorByCity[cityId] = playerId;
 
+    public IEnumerable<byte> GetMayoredCityIds() => _mayorByCity.Keys;
+
     public void Remove(byte cityId, byte playerId)
     {
         if (_mayorByCity.TryGetValue(cityId, out var mayorId) && mayorId == playerId)

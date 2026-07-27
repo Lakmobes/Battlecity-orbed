@@ -70,7 +70,8 @@ public static class CommandCenterLookup
         int homeGridAnchorX,
         int homeGridAnchorY,
         Vector2 fromWorldCenter,
-        out Vector2 position)
+        out Vector2 position,
+        Func<int, bool>? cityIsOrbable = null)
     {
         var found = false;
         var bestDistance = float.MaxValue;
@@ -86,6 +87,11 @@ public static class CommandCenterLookup
                 }
 
                 if (building.GridAnchorX == homeGridAnchorX && building.GridAnchorY == homeGridAnchorY)
+                {
+                    return;
+                }
+
+                if (cityIsOrbable is not null && !cityIsOrbable(building.CityId))
                 {
                     return;
                 }

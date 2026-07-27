@@ -22,12 +22,9 @@ public static class CityEquipmentRules
             return false;
         }
 
-        if (build.ResearchStatus[treeIndex] != -1)
-        {
-            return false;
-        }
-
         var factoryMenu = BuildingCatalog.GetFactoryMenuIndex(treeIndex);
+        // Match spawn loadout: factory ownership unlocks rechargeable equipment.
+        // Research complete (-1) is preferred but not required once the factory exists.
         return factoryMenu >= 0
             && factoryMenu < build.CanBuild.Length
             && build.CanBuild[factoryMenu] == 2;

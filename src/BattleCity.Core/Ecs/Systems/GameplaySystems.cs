@@ -18,18 +18,18 @@ namespace BattleCity.Core.Ecs.Systems;
 public static class ItemDropSystem
 {
     private static readonly QueryDescription PlayerQuery =
-        new QueryDescription().WithAll<InputControlled, InputCommand, Transform2D, TankFacing, TankLifeState, PlayerInventory, TankStatus, WeaponState>();
+        new QueryDescription().WithAll<InputControlled, InputCommand, Transform2D, TankFacing, TankLifeState, PlayerInventory, TankStatus, WeaponState, CityAffiliation>();
 
     public static void Update(
         World world,
         TileMap? tileMap = null,
         SimulationAudioBuffer? audio = null,
         bool suppressNetworkedActions = false,
-        CityBuildState? cityBuild = null)
+        Func<int, CityBuildState?>? resolveCityBuild = null)
     {
         world.Query(
             in PlayerQuery,
-            (Entity entity, ref InputCommand input, ref Transform2D transform, ref TankFacing facing, ref TankLifeState life, ref PlayerInventory inventory, ref TankStatus status, ref WeaponState weapons) =>
+            (Entity entity, ref InputCommand input, ref Transform2D transform, ref TankFacing facing, ref TankLifeState life, ref PlayerInventory inventory, ref TankStatus status, ref WeaponState weapons, ref CityAffiliation city) =>
             {
                 if (life.IsDead)
                 {
@@ -55,6 +55,8 @@ public static class ItemDropSystem
                 {
                     return;
                 }
+
+                var cityBuild = resolveCityBuild?.Invoke(city.CityId);
 
                 if (input.UseCloakPressed
                     && WeaponActions.TryConsumeCloak(ref weapons, ref inventory, cityBuild))
@@ -101,14 +103,12 @@ public static class ItemDropSystem
 
                 if (input.PickUpItemPressed)
                 {
-                    var mapCityId = cityBuild?.CityId;
                     if (ItemPickupActions.TryFindItemAtTank(
                             world,
                             entity,
                             out var itemEntity,
                             out var itemType,
-                            out _,
-                            mapCityId)
+                            out _)
                         && ItemPickupActions.TryPickUp(world, entity, ref inventory, itemEntity, itemType))
                     {
                         audio?.Play(SoundId.Click, transform.Position);
@@ -116,6 +116,15 @@ public static class ItemDropSystem
                 }
             });
     }
+
+    /// <summary>Backward-compatible overload for tests/call sites that pass a single city build.</summary>
+    public static void Update(
+        World world,
+        TileMap? tileMap,
+        SimulationAudioBuffer? audio,
+        bool suppressNetworkedActions,
+        CityBuildState? cityBuild) =>
+        Update(world, tileMap, audio, suppressNetworkedActions, _ => cityBuild);
 
     private static bool TryDropSelectedItem(
         World world,
@@ -176,7 +185,8 @@ public static class BulletCollisionSystem
         TileMap map,
         SimulationAudioBuffer? audio = null,
         Action<Entity, int, int>? onHealthChanged = null,
-        bool applyDamageToNetworkPlayers = true)
+        bool applyDamageToNetworkPlayers = true,
+        int defendedCityId = 0)
     {
         var hits = new List<Entity>();
 
@@ -219,7 +229,15 @@ public static class BulletCollisionSystem
 
                 // Buildings are handled by TryHitBuilding (population damage). Do not hard-kill
                 // bullets on building colliders — that blocked shots into items on factory bays.
-                if (TryHitBuilding(world, bulletEntity, bounds, transform.PreviousPosition, collider, hits, audio))
+                if (TryHitBuilding(
+                        world,
+                        bulletEntity,
+                        bounds,
+                        transform.PreviousPosition,
+                        collider,
+                        hits,
+                        audio,
+                        defendedCityId))
                 {
                     return;
                 }
@@ -394,7 +412,8 @@ public static class BulletCollisionSystem
         Vector2 previousPosition,
         in Collider collider,
         List<Entity> hits,
-        SimulationAudioBuffer? audio)
+        SimulationAudioBuffer? audio,
+        int defendedCityId)
     {
         var buildingQuery = new QueryDescription().WithAll<BuildingRef, BuildingState, Transform2D>();
         var previousBounds = AxisAlignedBox.FromCollider(previousPosition, collider);
@@ -437,13 +456,13 @@ public static class BulletCollisionSystem
                     && !BuildingCatalog.IsCommandCenter(building.TypeCode)
                     && state.Population <= 0)
                 {
-                    MaybeTriggerUnderAttack(world, bulletEntity, defendedCityId: 0);
+                    MaybeTriggerUnderAttack(world, bulletEntity, defendedCityId);
                     BuildingPopulationSystem.DetachBeforeDestroy(world, entity);
                     world.Destroy(entity);
                 }
                 else if (!ownerIsTurret && !BuildingCatalog.IsCommandCenter(building.TypeCode))
                 {
-                    MaybeTriggerUnderAttack(world, bulletEntity, defendedCityId: 0);
+                    MaybeTriggerUnderAttack(world, bulletEntity, defendedCityId);
                 }
 
                 hits.Add(bulletEntity);

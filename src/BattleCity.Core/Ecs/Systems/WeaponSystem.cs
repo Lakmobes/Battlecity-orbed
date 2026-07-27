@@ -12,19 +12,20 @@ namespace BattleCity.Core.Ecs.Systems;
 public static class WeaponSystem
 {
     private static readonly QueryDescription PlayerQuery =
-        new QueryDescription().WithAll<InputControlled, InputCommand, Transform2D, TankFacing, TankLifeState, WeaponState, PlayerInventory, TankStatus>();
+        new QueryDescription().WithAll<InputControlled, InputCommand, Transform2D, TankFacing, TankLifeState, WeaponState, PlayerInventory, TankStatus, CityAffiliation>();
 
     public static void Update(
         World world,
         float deltaSeconds,
-        CityBuildState? cityBuild = null,
+        Func<int, CityBuildState?>? resolveCityBuild = null,
         SimulationAudioBuffer? audio = null,
         Action<ClientShotPacket>? reportLocalShot = null)
     {
         world.Query(
             in PlayerQuery,
-            (Entity entity, ref InputCommand input, ref Transform2D transform, ref TankFacing facing, ref TankLifeState life, ref WeaponState weapons, ref PlayerInventory inventory, ref TankStatus status) =>
+            (Entity entity, ref InputCommand input, ref Transform2D transform, ref TankFacing facing, ref TankLifeState life, ref WeaponState weapons, ref PlayerInventory inventory, ref TankStatus status, ref CityAffiliation city) =>
             {
+                var cityBuild = resolveCityBuild?.Invoke(city.CityId);
                 if (WeaponActions.TryFireFromInput(
                         world,
                         entity,
@@ -44,4 +45,13 @@ public static class WeaponSystem
                 }
             });
     }
+
+    /// <summary>Backward-compatible overload used by older call sites/tests.</summary>
+    public static void Update(
+        World world,
+        float deltaSeconds,
+        CityBuildState? cityBuild,
+        SimulationAudioBuffer? audio = null,
+        Action<ClientShotPacket>? reportLocalShot = null) =>
+        Update(world, deltaSeconds, _ => cityBuild, audio, reportLocalShot);
 }

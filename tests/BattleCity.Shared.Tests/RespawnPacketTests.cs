@@ -22,7 +22,7 @@ public class RespawnPacketTests
     [Fact]
     public void ServerRespawn_UsesLegacyMessageId()
     {
-        Assert.Equal(83, (int)ServerMessageId.Respawn);
+        Assert.Equal(56, (int)ServerMessageId.Respawn);
     }
 
     [Fact]

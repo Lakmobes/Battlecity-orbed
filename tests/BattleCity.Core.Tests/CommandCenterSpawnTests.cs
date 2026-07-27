@@ -56,4 +56,43 @@ public class CommandCenterSpawnTests
         var openGridY = (int)(open.Y / GameConstants.TileSize);
         Assert.False(openGridX == wallGridX && openGridY == wallGridY);
     }
+
+    [Fact]
+    public void TryGetCityRespawnPosition_UsesDifferentCommandCentersPerCity()
+    {
+        var mapPath = FindLegacyMapDat();
+        if (mapPath is null)
+        {
+            return; // optional asset; skip when not present in CI layouts
+        }
+
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.LoadFromLegacyMapDat(mapPath);
+        simulation.LoadCityLayout(LevelLoader.LoadLegacyCity("Buenos Aires", "demo"));
+
+        Assert.True(simulation.TryGetCityRespawnPosition(0, out var city0, out _));
+        Assert.True(simulation.TryGetCityRespawnPosition(1, out var city1, out _));
+        Assert.True(simulation.TryGetCityRespawnPosition(27, out var city27, out _));
+
+        Assert.NotEqual(city0, city1);
+        Assert.NotEqual(city0, city27);
+        Assert.NotEqual(city1, city27);
+    }
+
+    private static string? FindLegacyMapDat()
+    {
+        var directory = AppContext.BaseDirectory;
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory, "legacy", "data", "map.dat");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = Directory.GetParent(directory)?.FullName;
+        }
+
+        return null;
+    }
 }

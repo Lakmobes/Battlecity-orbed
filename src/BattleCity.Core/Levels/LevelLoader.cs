@@ -3,7 +3,6 @@ using Arch.Core;
 using BattleCity.Core.Collision;
 using BattleCity.Core.Ecs;
 using BattleCity.Core.Ecs.Components;
-using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Constants;
@@ -22,22 +21,23 @@ public static class LevelLoader
         return CityLayoutParser.ParseFile(path, cityName);
     }
 
-    public static void SpawnBuildings(World world, CityLayout layout)
+    public static void SpawnBuildings(World world, CityLayout layout, int cityId = 0)
     {
         foreach (var building in layout.Buildings)
         {
-            SpawnBuilding(world, building);
+            SpawnBuilding(world, building, cityId);
         }
     }
 
-    public static Entity SpawnCommandCenter(World world, int gridAnchorX, int gridAnchorY) =>
+    public static Entity SpawnCommandCenter(World world, int gridAnchorX, int gridAnchorY, int cityId = 0) =>
         SpawnBuilding(
             world,
-            new CityBuildingPlacement(-1, gridAnchorX, gridAnchorY, BuildingCatalog.CommandCenterTypeCode));
+            new CityBuildingPlacement(-1, gridAnchorX, gridAnchorY, BuildingCatalog.CommandCenterTypeCode),
+            cityId);
 
     /// <summary>
     /// Spawns a command-center building on every map city-center tile cluster except the home CC.
-    /// Offline clients do not load other cities' .city files, but CCs should still be visible.
+    /// City ids follow the legacy 63→0 CityCenter scan order.
     /// </summary>
     public static void SpawnRemoteCommandCenters(
         World world,
@@ -45,6 +45,7 @@ public static class LevelLoader
         int homeGridAnchorX,
         int homeGridAnchorY)
     {
+        var citIndex = 63;
         for (var y = 1; y < TileMap.Size - 1; y++)
         {
             for (var x = 1; x < TileMap.Size - 1; x++)
@@ -63,12 +64,15 @@ public static class LevelLoader
 
                 var gridAnchorX = x + GameConstants.BuildingCollisionOffset;
                 var gridAnchorY = y + GameConstants.BuildingCollisionOffset;
+                var cityId = citIndex;
+                citIndex--;
+
                 if (OverlapsFootprint(gridAnchorX, gridAnchorY, homeGridAnchorX, homeGridAnchorY))
                 {
                     continue;
                 }
 
-                SpawnCommandCenter(world, gridAnchorX, gridAnchorY);
+                SpawnCommandCenter(world, gridAnchorX, gridAnchorY, cityId);
             }
         }
     }
@@ -79,7 +83,7 @@ public static class LevelLoader
         && gridAnchorY >= otherGridY - 2
         && gridAnchorY <= otherGridY + 2;
 
-    public static Entity SpawnBuilding(World world, CityBuildingPlacement building)
+    public static Entity SpawnBuilding(World world, CityBuildingPlacement building, int cityId = 0)
     {
         var position = BuildingPlacement.GridAnchorToWorldPosition(building.GridX, building.GridY);
         var animationFrame = Random.Shared.Next(0, 6);
@@ -95,6 +99,7 @@ public static class LevelLoader
                 TypeCode = building.TypeCode,
                 GridAnchorX = building.GridX,
                 GridAnchorY = building.GridY,
+                CityId = cityId,
             },
             new BuildingState
             {

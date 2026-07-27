@@ -50,7 +50,7 @@ public sealed class LoginScene : IScene
     public SceneTransition Update(GameTime gameTime, int screenWidth, int screenHeight)
     {
         _ui.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
-        var menuInput = _menuInput.Poll();
+        var menuInput = _menuInput.Poll(textEntryMode: true);
         var keyboard = Keyboard.GetState();
 
         if (WasPressed(keyboard, Keys.Tab))
@@ -230,16 +230,16 @@ public sealed class LoginScene : IScene
             panel,
             "Multiplayer Login",
             [
-                "Paste the host invite (IP or IP:port)",
+                "Paste the host invite (IP or IP:port) with Ctrl+V",
                 "Guest login: leave user blank or set password to guest",
                 string.Empty,
                 FormatField("Server", _serverInput.Text, mask: false, focused: _activeField == Field.Server),
                 FormatField("Username", _usernameInput.Text, mask: false, focused: _activeField == Field.Username),
                 FormatField("Password", _passwordInput.Text, mask: true, focused: _activeField == Field.Password),
                 string.Empty,
-                _statusMessage ?? "Enter connects   Tab switches field",
+                _statusMessage ?? "Enter connects   Tab / arrows switch field",
             ],
-            "Tab - next field   Enter - connect   F2 - create account   Esc - back");
+            "Tab/arrows - next field   Enter - connect   Ctrl+V - paste   F2 - create account   Esc - back");
     }
 
     private static string FormatField(string label, string value, bool mask, bool focused)

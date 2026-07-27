@@ -20,6 +20,21 @@ public sealed class LoginTextInput
     public void Update()
     {
         var keyboard = Keyboard.GetState();
+        var ctrl = keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
+
+        if (ctrl && WasPressed(keyboard, Keys.V) && NativeClipboard.TryGetText(out var pasted))
+        {
+            _text = Trim(_text + pasted);
+            _previousKeyboard = keyboard;
+            return;
+        }
+
+        // Ignore other keystrokes while Ctrl is held (Ctrl+C / Ctrl+A etc.).
+        if (ctrl)
+        {
+            _previousKeyboard = keyboard;
+            return;
+        }
 
         foreach (var key in keyboard.GetPressedKeys())
         {
@@ -39,7 +54,8 @@ public sealed class LoginTextInput
 
     private void AppendKey(Keys key, KeyboardState keyboard)
     {
-        if (key is Keys.Enter or Keys.Escape or Keys.Tab or Keys.Up or Keys.Down)
+        if (key is Keys.Enter or Keys.Escape or Keys.Tab or Keys.Up or Keys.Down
+            or Keys.LeftControl or Keys.RightControl or Keys.LeftAlt or Keys.RightAlt)
         {
             return;
         }

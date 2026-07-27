@@ -15,12 +15,12 @@ public class CityBuildPopSyncTests
         simulation.TileMap = TileMap.CreateEmpty();
         simulation.LoadCityLayout(BattleCity.Core.Levels.LevelLoader.LoadLegacyCity("Buenos Aires", "demo"));
         var sync = new BattleCity.Server.CityBuildPopSync();
-        sync.Reset(simulation);
+        sync.Reset(simulation, cityId: 0);
 
         Assert.True(simulation.TryGetCityBuild(0, out var build));
         build.CanBuild[1] = 0;
 
-        var changes = sync.CollectCanBuildChanges(simulation).ToList();
+        var changes = sync.CollectCanBuildChanges(simulation, cityId: 0).ToList();
 
         Assert.Contains(changes, packet => packet.BuildSlot == 2 && packet.CanBuildState == 0);
     }

@@ -10,6 +10,7 @@ public sealed class ClientSession : IDisposable
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
     private readonly PacketReceiveBuffer _receiveBuffer = new();
+    private bool _forceDisconnected;
 
     public ClientSession(byte playerId, TcpClient client)
     {
@@ -48,7 +49,7 @@ public sealed class ClientSession : IDisposable
 
     public void Send(byte messageId, ReadOnlySpan<byte> payload)
     {
-        if (!_client.Connected)
+        if (!IsConnected)
         {
             return;
         }
@@ -61,10 +62,12 @@ public sealed class ClientSession : IDisposable
         catch (IOException)
         {
             // Peer disconnected mid-write; removal happens on the next Update.
+            _forceDisconnected = true;
         }
         catch (ObjectDisposedException)
         {
             // Stream already closed.
+            _forceDisconnected = true;
         }
     }
 
@@ -73,25 +76,47 @@ public sealed class ClientSession : IDisposable
 
     public int ReadAvailable()
     {
-        if (!_stream.DataAvailable)
+        if (_forceDisconnected || !_client.Connected)
         {
             return 0;
         }
 
-        var scratch = new byte[512];
-        var read = _stream.Read(scratch, 0, scratch.Length);
-        if (read > 0)
+        try
         {
-            _receiveBuffer.Append(scratch.AsSpan(0, read));
-        }
+            if (!_stream.DataAvailable)
+            {
+                return 0;
+            }
 
-        return read;
+            var scratch = new byte[512];
+            var read = _stream.Read(scratch, 0, scratch.Length);
+            if (read == 0)
+            {
+                // Graceful TCP close (FIN) — TcpClient.Connected can stay true briefly.
+                _forceDisconnected = true;
+                return 0;
+            }
+
+            _receiveBuffer.Append(scratch.AsSpan(0, read));
+            return read;
+        }
+        catch (IOException)
+        {
+            _forceDisconnected = true;
+            return 0;
+        }
+        catch (ObjectDisposedException)
+        {
+            _forceDisconnected = true;
+            return 0;
+        }
     }
 
-    public bool IsConnected => _client.Connected;
+    public bool IsConnected => !_forceDisconnected && _client.Connected;
 
     public void Dispose()
     {
+        _forceDisconnected = true;
         _stream.Dispose();
         _client.Dispose();
     }

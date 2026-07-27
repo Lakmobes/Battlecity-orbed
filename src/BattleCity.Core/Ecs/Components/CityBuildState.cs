@@ -32,8 +32,39 @@ public sealed class CityBuildState
 
     public bool HadOrbFactory { get; set; }
 
+    /// <summary>Successful orbs scored by this city (legacy <c>CCity::Orbs</c>).</summary>
+    public int Orbs { get; set; }
+
     public bool IsOrbable =>
         HadBombFactory || HadOrbFactory || MaxBuildingCount >= EconomyConstants.OrbableSize;
+
+    /// <summary>Legacy <c>CCity::getOrbValue</c> — points awarded when this city is orbed.</summary>
+    public int GetOrbValue()
+    {
+        var points = 0;
+        if (MaxBuildingCount >= EconomyConstants.OrbableSize + 10)
+        {
+            points = 50;
+        }
+        else if (MaxBuildingCount >= EconomyConstants.OrbableSize + 5)
+        {
+            points = 40;
+        }
+        else if (MaxBuildingCount >= EconomyConstants.OrbableSize)
+        {
+            points = 30;
+        }
+        else if (HadOrbFactory)
+        {
+            points = 20;
+        }
+        else if (HadBombFactory)
+        {
+            points = 10;
+        }
+
+        return points + (Orbs * 5);
+    }
 
     public void RegisterBuildingPlaced(int menuIndex, int typeCode)
     {
@@ -43,11 +74,11 @@ public sealed class CityBuildState
             MaxBuildingCount = CurrentBuildingCount;
         }
 
-        if (typeCode == 105)
+        if (typeCode == 101)
         {
             HadBombFactory = true;
         }
-        else if (typeCode == 106)
+        else if (typeCode == 105)
         {
             HadOrbFactory = true;
         }

@@ -391,7 +391,9 @@ public class GameplayEntityTests
         ref var input = ref simulation.World.Get<InputCommand>(player);
         ref var inventory = ref simulation.World.Get<PlayerInventory>(player);
 
+        // Rockets only fire while stopped; moving fires laser without spending rockets.
         input.FireHeld = true;
+        input.Move = 1;
         inventory.Rocket = 1;
 
         simulation.Tick(GameSimulation.FixedDeltaSeconds);
@@ -502,13 +504,22 @@ public class GameplayEntityTests
     }
 
     [Fact]
-    public void CreateStarterLoadout_StartsWithSingleRocket()
+    public void CreateStarterLoadout_StartsLaserOnlyUntilFactoriesExist()
     {
-        var inventory = PlayerInventory.CreateStarterLoadout();
-        Assert.Equal(1, inventory.Rocket);
-        Assert.Equal(1, inventory.Flare);
-        Assert.Equal(1, inventory.Cloak);
-        Assert.Equal(0, inventory.MedKit);
+        var empty = PlayerInventory.CreateStarterLoadout();
+        Assert.Equal(0, empty.Rocket);
+        Assert.Equal(0, empty.Flare);
+        Assert.Equal(0, empty.Cloak);
+
+        var build = new CityBuildState();
+        build.CanBuild[BuildingCatalog.GetFactoryMenuIndex(0)] = 2; // Laser Factory
+        build.CanBuild[BuildingCatalog.GetFactoryMenuIndex(EconomyConstants.CloakResearchTreeIndex)] = 2;
+        build.CanBuild[BuildingCatalog.GetFactoryMenuIndex(EconomyConstants.FlareResearchTreeIndex)] = 2;
+
+        var geared = PlayerInventory.CreateLoadoutForCity(build);
+        Assert.Equal(1, geared.Rocket);
+        Assert.Equal(1, geared.Cloak);
+        Assert.Equal(1, geared.Flare);
     }
 
     [Fact]

@@ -59,7 +59,7 @@ public sealed class CreateAccountScene : IScene
     public SceneTransition Update(GameTime gameTime, int screenWidth, int screenHeight)
     {
         _ui.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
-        var menuInput = _menuInput.Poll();
+        var menuInput = _menuInput.Poll(textEntryMode: true);
         var keyboard = Keyboard.GetState();
 
         if (menuInput.CancelPressed)

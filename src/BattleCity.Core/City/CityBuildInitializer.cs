@@ -1,4 +1,5 @@
 using BattleCity.Core.Ecs.Components;
+using BattleCity.Core.Ecs.Systems;
 using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
 using BattleCity.Shared.Catalogs;
@@ -46,15 +47,12 @@ public static class CityBuildInitializer
             if (BuildingCatalog.TryGetResearchTreeIndex(building.TypeCode, out var treeIndex))
             {
                 build.ResearchStatus[treeIndex] = -1;
-                var factoryIndex = BuildingCatalog.GetFactoryMenuIndex(treeIndex);
-                // Do not reopen a factory that already exists in the layout (CanBuild == 2).
-                if (factoryIndex < build.CanBuild.Length && build.CanBuild[factoryIndex] != 2)
-                {
-                    build.CanBuild[factoryIndex] = 1;
-                }
+                // Full unlock chain (factory + dependent researches), matching live research completion.
+                ResearchSystem.UnlockResearchRewards(build, treeIndex);
             }
 
-            if (building.TypeCode == 103)
+            // Bazooka Factory (101) / Orb Factory (105) — legacy orbability flags.
+            if (building.TypeCode == 101)
             {
                 build.HadBombFactory = true;
             }
@@ -71,8 +69,10 @@ public static class CityBuildInitializer
     /// </summary>
     public static void ResolveCommandCenter(CityBuildState build, CityLayout layout, TileMap tileMap)
     {
-        if (TryResolveByCityIndex(build, tileMap))
+        if (TryGetCommandCenterGridForCity(build.CityId, tileMap, out var gridX, out var gridY))
         {
+            build.CommandCenterGridX = gridX;
+            build.CommandCenterGridY = gridY;
             return;
         }
 
@@ -126,20 +126,19 @@ public static class CityBuildInitializer
         }
     }
 
-    private static bool IsHazardTerrain(TileMap tileMap, int tileX, int tileY)
+    /// <summary>
+    /// Finds the command-center grid anchor for <paramref name="cityId"/> using the legacy
+    /// 63→0 CityCenter scan order (works for any city on the shared world map).
+    /// </summary>
+    public static bool TryGetCommandCenterGridForCity(
+        int cityId,
+        TileMap tileMap,
+        out int gridAnchorX,
+        out int gridAnchorY)
     {
-        if (tileX < 0 || tileY < 0 || tileX >= TileMap.Size || tileY >= TileMap.Size)
-        {
-            return true;
-        }
-
-        var terrain = tileMap.Terrain[tileX, tileY];
-        return terrain is TerrainTileType.Lava or TerrainTileType.Rock;
-    }
-
-    private static bool TryResolveByCityIndex(CityBuildState build, TileMap tileMap)
-    {
-        if (!CityCatalog.IsValidCityId(build.CityId))
+        gridAnchorX = 0;
+        gridAnchorY = 0;
+        if (!CityCatalog.IsValidCityId(cityId))
         {
             return false;
         }
@@ -154,10 +153,10 @@ public static class CityBuildInitializer
                     continue;
                 }
 
-                if (citIndex == build.CityId)
+                if (citIndex == cityId)
                 {
-                    build.CommandCenterGridX = x + GameConstants.BuildingCollisionOffset;
-                    build.CommandCenterGridY = y + GameConstants.BuildingCollisionOffset;
+                    gridAnchorX = x + GameConstants.BuildingCollisionOffset;
+                    gridAnchorY = y + GameConstants.BuildingCollisionOffset;
                     return true;
                 }
 
@@ -170,6 +169,17 @@ public static class CityBuildInitializer
         }
 
         return false;
+    }
+
+    private static bool IsHazardTerrain(TileMap tileMap, int tileX, int tileY)
+    {
+        if (tileX < 0 || tileY < 0 || tileX >= TileMap.Size || tileY >= TileMap.Size)
+        {
+            return true;
+        }
+
+        var terrain = tileMap.Terrain[tileX, tileY];
+        return terrain is TerrainTileType.Lava or TerrainTileType.Rock;
     }
 
     private static bool IsCityCenterClusterOrigin(TileMap tileMap, int x, int y)

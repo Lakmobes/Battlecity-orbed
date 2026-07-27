@@ -57,6 +57,11 @@ public sealed class RenderContext
     public bool IsChatting { get; init; }
     public string? ChatDraft { get; init; }
 
+    /// <summary>Legacy Personnel dialog: mayor has an applicant waiting.</summary>
+    public bool ShowHirePanel { get; init; }
+    public string? HireApplicantName { get; init; }
+    public bool DenyApplicants { get; init; }
+
     /// <summary>Local observer city for fog-of-war style item visibility (sleepers).</summary>
     public int ObserverCityId { get; init; }
 }

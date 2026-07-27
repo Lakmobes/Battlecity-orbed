@@ -7,41 +7,53 @@ namespace BattleCity.Server;
 /// <summary>Diffs authoritative city build tree and building population for network sync.</summary>
 public sealed class CityBuildPopSync
 {
-    private readonly int[] _canBuild = new int[CityBuildState.MenuSlotCount];
+    private readonly Dictionary<int, int[]> _canBuildByCity = new();
     private readonly Dictionary<ushort, byte> _populations = new();
 
-    public void Reset(GameSimulation simulation)
-    {
-        Array.Clear(_canBuild, 0, _canBuild.Length);
-        _populations.Clear();
+    public void Reset(GameSimulation simulation) => Reset(simulation, cityId: 0);
 
-        if (simulation.TryGetCityBuild(0, out var build))
+    public void Reset(GameSimulation simulation, int cityId)
+    {
+        var snapshot = new int[CityBuildState.MenuSlotCount];
+        if (simulation.TryGetCityBuild(cityId, out var build))
         {
-            build.CanBuild.CopyTo(_canBuild, 0);
+            build.CanBuild.CopyTo(snapshot, 0);
         }
 
+        _canBuildByCity[cityId] = snapshot;
+
+        _populations.Clear();
         foreach (var (buildingId, population) in simulation.CollectBuildingPopulations())
         {
             _populations[buildingId] = population;
         }
     }
 
-    public IEnumerable<ServerCanBuildPacket> CollectCanBuildChanges(GameSimulation simulation)
+    public IEnumerable<ServerCanBuildPacket> CollectCanBuildChanges(GameSimulation simulation) =>
+        CollectCanBuildChanges(simulation, cityId: 0);
+
+    public IEnumerable<ServerCanBuildPacket> CollectCanBuildChanges(GameSimulation simulation, int cityId)
     {
-        if (!simulation.TryGetCityBuild(0, out var build))
+        if (!simulation.TryGetCityBuild(cityId, out var build))
         {
             yield break;
+        }
+
+        if (!_canBuildByCity.TryGetValue(cityId, out var previous))
+        {
+            previous = new int[CityBuildState.MenuSlotCount];
+            _canBuildByCity[cityId] = previous;
         }
 
         for (var menuIndex = 0; menuIndex < build.CanBuild.Length; menuIndex++)
         {
             var value = build.CanBuild[menuIndex];
-            if (_canBuild[menuIndex] == value)
+            if (previous[menuIndex] == value)
             {
                 continue;
             }
 
-            _canBuild[menuIndex] = value;
+            previous[menuIndex] = value;
             yield return ServerCanBuildPacket.FromMenuIndex(menuIndex, value);
         }
     }
@@ -68,9 +80,12 @@ public sealed class CityBuildPopSync
         }
     }
 
-    public IEnumerable<ServerCanBuildPacket> CreateCanBuildSnapshot(GameSimulation simulation)
+    public IEnumerable<ServerCanBuildPacket> CreateCanBuildSnapshot(GameSimulation simulation) =>
+        CreateCanBuildSnapshot(simulation, cityId: 0);
+
+    public IEnumerable<ServerCanBuildPacket> CreateCanBuildSnapshot(GameSimulation simulation, int cityId)
     {
-        if (!simulation.TryGetCityBuild(0, out var build))
+        if (!simulation.TryGetCityBuild(cityId, out var build))
         {
             yield break;
         }

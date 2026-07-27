@@ -63,6 +63,8 @@ public sealed class InGameOnlineScene : IScene
     private bool _deathReported;
     private byte? _pendingApplicantId;
     private string? _pendingApplicantName;
+    private bool _denyApplicants;
+    private KeyboardState _previousKeyboard;
     private bool _returnToMeeting;
     private bool _keepNetworkClientOnDispose;
     private readonly InGameChatLog _chatLog = new();
@@ -120,11 +122,12 @@ public sealed class InGameOnlineScene : IScene
         ApplyPendingNetworkEvents();
 
         NumericsVector2 spawn;
+        var localCityId = _client.SpawnState?.City ?? 0;
         if (_client.SpawnState is { } stateGame)
         {
             spawn = new NumericsVector2(stateGame.X, stateGame.Y);
         }
-        else if (_simulation.TryGetCityRespawnPosition(0, out var fallbackSpawn, out _))
+        else if (_simulation.TryGetCityRespawnPosition(localCityId, out var fallbackSpawn, out _))
         {
             spawn = fallbackSpawn;
         }
@@ -135,12 +138,12 @@ public sealed class InGameOnlineScene : IScene
 
         spawn = _simulation.FindOpenTankSpawnNear(spawn);
 
-        var localCityId = _client.SpawnState?.City ?? 0;
         if (CityCatalog.IsValidCityId(localCityId))
         {
             _context.SelectedCity = CityCatalog.GetName(localCityId);
         }
 
+        _simulation.EnsureCityBuild(localCityId);
         _simulation.CreatePlayerEntity(
             spawn,
             isMayor: false,
@@ -199,6 +202,24 @@ public sealed class InGameOnlineScene : IScene
         }
 
         var keyboard = Keyboard.GetState();
+
+        // Legacy Personnel "not recruiting" checkbox (cmIsHiring).
+        if (_client.IsMayor
+            && !_chatInput.IsActive
+            && !_showSettingsMenu
+            && keyboard.IsKeyDown(Keys.N)
+            && !_previousKeyboard.IsKeyDown(Keys.N))
+        {
+            _denyApplicants = !_denyApplicants;
+            _client.SetDenyApplicants(_denyApplicants);
+            InGameChatService.AppendSystem(
+                _chatLog,
+                _denyApplicants
+                    ? "Not hiring: ON — new applicants are auto-rejected."
+                    : "Not hiring: OFF — applicants can interview again.");
+        }
+
+        _previousKeyboard = keyboard;
 
         var worldWidth = UiLayout.WorldViewportWidth;
         _camera.SetViewport(UiLayout.LogicalWidth, UiLayout.LogicalHeight);
@@ -352,6 +373,19 @@ public sealed class InGameOnlineScene : IScene
                         networkEvent.PlayerData.Index,
                         networkEvent.PlayerData.Name);
                     break;
+                case GameClientEventKind.ChatCommand when networkEvent.ChatCommandCode == 69:
+                    // Legacy 'E' — player left the battlefield.
+                    {
+                        var leftName = _remotePlayers.GetDisplayName(networkEvent.PlayerId)
+                            ?? $"Player{networkEvent.PlayerId}";
+                        _remotePlayers.Remove(networkEvent.PlayerId);
+                        InGameChatService.AppendSystem(_chatLog, $"{leftName} has left");
+                    }
+
+                    break;
+                case GameClientEventKind.ClearPlayer:
+                    _remotePlayers.Remove(networkEvent.PlayerId);
+                    break;
                 case GameClientEventKind.AddItem:
                     _simulation.ApplyNetworkAddItem(networkEvent.AddItem);
                     break;
@@ -363,12 +397,16 @@ public sealed class InGameOnlineScene : IScene
                     break;
                 case GameClientEventKind.PickedUp:
                     _simulation.ApplyNetworkPickedUp(networkEvent.PickedUp);
+                    _context.Audio.Play(SoundId.Click);
                     break;
                 case GameClientEventKind.NewBuilding:
                     _simulation.ApplyNetworkNewBuilding(networkEvent.Building);
                     break;
                 case GameClientEventKind.RemoveBuilding:
                     _simulation.ApplyNetworkRemoveBuilding(networkEvent.Building);
+                    break;
+                case GameClientEventKind.UnderAttack:
+                    _simulation.ApplyNetworkUnderAttack();
                     break;
                 case GameClientEventKind.CanBuild:
                     _simulation.ApplyNetworkCanBuild(networkEvent.CanBuild);
@@ -388,11 +426,6 @@ public sealed class InGameOnlineScene : IScene
                     break;
                 case GameClientEventKind.Cloak:
                     _simulation.ApplyNetworkCloak(networkEvent.Cloak.PlayerId, _client.PlayerId);
-                    if (networkEvent.Cloak.PlayerId == _client.PlayerId)
-                    {
-                        _simulation.TryConsumeLocalPlayerItem(ItemType.Cloak);
-                    }
-
                     break;
                 case GameClientEventKind.Explosion:
                     _simulation.ApplyNetworkExplosion(networkEvent.Explosion);
@@ -477,12 +510,24 @@ public sealed class InGameOnlineScene : IScene
                     _pendingApplicantId = networkEvent.MayorHire.ApplicantPlayerId;
                     _pendingApplicantName = _remotePlayers.GetDisplayName(networkEvent.MayorHire.ApplicantPlayerId)
                         ?? $"Player{networkEvent.MayorHire.ApplicantPlayerId}";
+                    if (_denyApplicants)
+                    {
+                        // Legacy auto-decline when "not recruiting" is checked.
+                        _client.DeclineApplicant();
+                        _pendingApplicantId = null;
+                        _pendingApplicantName = null;
+                        InGameChatService.AppendSystem(
+                            _chatLog,
+                            "Auto-rejected applicant (Not hiring is ON).");
+                        break;
+                    }
+
                     InGameChatService.AppendSystem(
                         _chatLog,
                         $"{_pendingApplicantName} is applying to join your city.");
                     InGameChatService.AppendSystem(
                         _chatLog,
-                        "Enter=Accept  Esc=Decline  Chat=Talk to applicant");
+                        "Personnel: Enter=Welcome  Esc=Reject  N=Toggle not hiring");
                     break;
                 case GameClientEventKind.Comms:
                     AppendInterviewComms(networkEvent.ChatMessage);
@@ -494,6 +539,11 @@ public sealed class InGameOnlineScene : IScene
                     _simulation.ApplyNetworkOrb(
                         networkEvent.Orbed.VictimCity,
                         networkEvent.Orbed.OrberCity);
+                    if (GetLocalCityId() == networkEvent.Orbed.VictimCity)
+                    {
+                        AbandonCityToLobby();
+                    }
+
                     break;
                 case GameClientEventKind.Disconnected:
                     return;
@@ -572,8 +622,7 @@ public sealed class InGameOnlineScene : IScene
 
         _useCloakPressedLastFrame = gameplay.UseCloakPressed;
 
-        if (!_simulation.TryGetPlayerInventory(out var inventory)
-            || inventory.GetCount(ItemType.Cloak) <= 0)
+        if (!_simulation.CanLocalPlayerCloak())
         {
             return;
         }
@@ -619,7 +668,7 @@ public sealed class InGameOnlineScene : IScene
             return;
         }
 
-        if (!ui.MouseLeftClicked || !_simulation.TryGetCityBuild(0, out var build))
+        if (!ui.MouseLeftClicked || !_simulation.TryGetCityBuild(GetLocalCityId(), out var build))
         {
             return;
         }
@@ -694,7 +743,7 @@ public sealed class InGameOnlineScene : IScene
     {
         _showBuildPreview = false;
 
-        if (_buildModeSlot == 0 || !ui.PointerOverWorld || !_simulation.TryGetCityBuild(0, out var build))
+        if (_buildModeSlot == 0 || !ui.PointerOverWorld || !_simulation.TryGetCityBuild(GetLocalCityId(), out var build))
         {
             return;
         }
@@ -728,7 +777,7 @@ public sealed class InGameOnlineScene : IScene
             return;
         }
 
-        _simulation.TryGetCityBuild(0, out var cityBuild);
+        _simulation.TryGetCityBuild(GetLocalCityId(), out var cityBuild);
 
         if (gameplay.DropSelectedItemPressed && inventory.GetCount(inventory.SelectedItemType) > 0)
         {
@@ -794,7 +843,7 @@ public sealed class InGameOnlineScene : IScene
         var cloakRecharge = 0f;
         var flareRecharge = 0f;
         CityBuildState? cityBuild = null;
-        if (_simulation.TryGetCityBuild(0, out var buildState))
+        if (_simulation.TryGetCityBuild(GetLocalCityId(), out var buildState))
         {
             cityBuild = buildState;
         }
@@ -870,7 +919,8 @@ public sealed class InGameOnlineScene : IScene
                     homeCityForCompass.CommandCenterGridX,
                     homeCityForCompass.CommandCenterGridY,
                     new NumericsVector2(_cameraFocus.X, _cameraFocus.Y),
-                    out var orbTarget))
+                    out var orbTarget,
+                    cityId => _simulation.TryGetCityBuild(cityId, out var orbBuild) && orbBuild.IsOrbable))
             {
                 nearestOrbableCity = new Vector2(orbTarget.X, orbTarget.Y);
             }
@@ -926,6 +976,9 @@ public sealed class InGameOnlineScene : IScene
             ChatLines = _chatLog.Lines,
             IsChatting = _chatInput.IsActive,
             ChatDraft = _chatInput.Draft,
+            ShowHirePanel = _pendingApplicantId.HasValue && _client.IsMayor,
+            HireApplicantName = _pendingApplicantName,
+            DenyApplicants = _denyApplicants,
             ObserverCityId = observerCityId,
             ShowSettingsMenu = _showSettingsMenu,
             SettingsSelectedIndex = _settingsSelectedIndex,

@@ -21,7 +21,7 @@ public sealed class MenuInputReader
         _primed = true;
     }
 
-    public MenuInputState Poll()
+    public MenuInputState Poll(bool textEntryMode = false)
     {
         var keyboard = Keyboard.GetState();
         if (!_primed)
@@ -30,11 +30,15 @@ public sealed class MenuInputReader
             _primed = true;
         }
 
+        // WASD / Space fight letter and space typing in login/account fields.
         var state = new MenuInputState
         {
-            MoveUpPressed = WasPressed(keyboard, Keys.Up) || WasPressed(keyboard, Keys.W),
-            MoveDownPressed = WasPressed(keyboard, Keys.Down) || WasPressed(keyboard, Keys.S),
-            ConfirmPressed = WasPressed(keyboard, Keys.Enter) || WasPressed(keyboard, Keys.Space),
+            MoveUpPressed = WasPressed(keyboard, Keys.Up)
+                || (!textEntryMode && WasPressed(keyboard, Keys.W)),
+            MoveDownPressed = WasPressed(keyboard, Keys.Down)
+                || (!textEntryMode && WasPressed(keyboard, Keys.S)),
+            ConfirmPressed = WasPressed(keyboard, Keys.Enter)
+                || (!textEntryMode && WasPressed(keyboard, Keys.Space)),
             CancelPressed = WasPressed(keyboard, Keys.Escape),
         };
 

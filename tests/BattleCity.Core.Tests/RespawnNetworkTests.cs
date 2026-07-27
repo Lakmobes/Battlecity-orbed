@@ -128,6 +128,25 @@ public class RespawnNetworkTests
 
         Assert.Equal(0.5f, life.RespawnTimerSeconds);
     }
+
+    [Fact]
+    public void ApplyPlayerDeath_OnlineClientClearsPlaceablesWithoutRespawningThem()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.ReturnInventoryPlaceablesOnDeath = false;
+        simulation.ReportFactoryItemSpawnsToNetwork = false;
+        var entity = simulation.CreatePlayerEntity(Vector2.Zero);
+        ref var inventory = ref simulation.World.Get<PlayerInventory>(entity);
+        inventory.Wall = 3;
+        inventory.Turret = 2;
+
+        simulation.ApplyPlayerDeath(new ServerDeathPacket(playerId: 1, deathType: 0, killerCity: 2), localPlayerId: 1);
+
+        Assert.Equal(0, inventory.Wall);
+        Assert.Equal(0, inventory.Turret);
+        Assert.False(simulation.TryConsumeFactoryAddItem(out _));
+    }
 }
 
 internal static class CityLayoutTestHelper

@@ -22,6 +22,14 @@ public sealed class InGameChatInput
         _textInput.SetText(string.Empty);
     }
 
+    /// <summary>Snapshot the current keyboard so a held Enter from a prior scene does not open chat.</summary>
+    public void Reset()
+    {
+        Close();
+        _previousKeyboard = Keyboard.GetState();
+        _openedThisFrame = false;
+    }
+
     public ChatInputUpdate Update(KeyboardState keyboard)
     {
         _openedThisFrame = false;

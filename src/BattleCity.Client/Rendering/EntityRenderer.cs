@@ -161,6 +161,12 @@ public sealed class EntityRenderer
                 var drawTransform = transform;
                 if (world.Has<PlacedItemRef>(entity))
                 {
+                    ref readonly var placed = ref world.Get<PlacedItemRef>(entity);
+                    if (!ShouldDrawMineOrDfg(world, in placed, observerCityId))
+                    {
+                        return;
+                    }
+
                     drawTransform.Position += new System.Numerics.Vector2(0f, ItemSprites.WorldDrawOffsetY);
                 }
 
@@ -263,6 +269,49 @@ public sealed class EntityRenderer
 
         // Enemies only see turrets once they are in firing range (HasTarget).
         return turret.HasTarget;
+    }
+
+    /// <summary>
+    /// Legacy DrawItems: active enemy mines/DFGs stay hidden unless the observer is driving over them.
+    /// Inactive (factory bay) stock is always visible.
+    /// </summary>
+    private static bool ShouldDrawMineOrDfg(World world, in PlacedItemRef item, int observerCityId)
+    {
+        if (item.Type is not (ItemType.Mine or ItemType.Dfg))
+        {
+            return true;
+        }
+
+        if (!item.Active || item.CityId == observerCityId)
+        {
+            return true;
+        }
+
+        return ObserverOverlapsItem(world, item.GridX, item.GridY, observerCityId);
+    }
+
+    private static bool ObserverOverlapsItem(World world, int gridX, int gridY, int observerCityId)
+    {
+        var triggerBounds = MineSystem.GetMineTriggerBounds(gridX, gridY);
+        var overlapping = false;
+        var tankQuery = new QueryDescription().WithAll<Transform2D, TankLifeState, CityAffiliation>();
+        world.Query(
+            in tankQuery,
+            (ref Transform2D transform, ref TankLifeState life, ref CityAffiliation city) =>
+            {
+                if (overlapping || life.IsDead || city.CityId != observerCityId)
+                {
+                    return;
+                }
+
+                var tankCenter = TurretTargeting.GetTankCenter(transform.Position);
+                if (triggerBounds.ContainsPoint(tankCenter))
+                {
+                    overlapping = true;
+                }
+            });
+
+        return overlapping;
     }
 
     private void DrawTurret(

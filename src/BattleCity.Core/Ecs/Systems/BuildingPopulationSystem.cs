@@ -19,7 +19,7 @@ public static class BuildingPopulationSystem
     private static readonly QueryDescription BuildingQuery =
         new QueryDescription().WithAll<BuildingRef, BuildingState>();
 
-    private readonly record struct BuildingEntry(Entity Entity, ushort NetworkId, int TypeCode);
+    private readonly record struct BuildingEntry(Entity Entity, ushort NetworkId, int TypeCode, int CityId);
 
     public static void Update(World world, float deltaSeconds)
     {
@@ -41,7 +41,7 @@ public static class BuildingPopulationSystem
                     return;
                 }
 
-                entries.Add(new BuildingEntry(entity, building.NetworkId, building.TypeCode));
+                entries.Add(new BuildingEntry(entity, building.NetworkId, building.TypeCode, building.CityId));
             });
 
         foreach (var entry in entries)
@@ -149,7 +149,9 @@ public static class BuildingPopulationSystem
     {
         foreach (var entry in entries)
         {
-            if (!BuildingCatalog.IsHouse(entry.TypeCode) || !world.IsAlive(entry.Entity))
+            if (!BuildingCatalog.IsHouse(entry.TypeCode)
+                || entry.CityId != workerBuilding.CityId
+                || !world.IsAlive(entry.Entity))
             {
                 continue;
             }

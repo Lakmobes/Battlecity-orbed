@@ -98,6 +98,60 @@ public sealed class UiRenderer
         {
             DrawSettingsMenu(spriteBatch, in context);
         }
+
+        if (context.ShowHirePanel)
+        {
+            DrawHirePanel(spriteBatch, in context);
+        }
+    }
+
+    private void DrawHirePanel(SpriteBatch spriteBatch, in RenderContext context)
+    {
+        if (_font is null)
+        {
+            return;
+        }
+
+        var name = string.IsNullOrWhiteSpace(context.HireApplicantName)
+            ? "Applicant"
+            : context.HireApplicantName!;
+        var panelWidth = 420;
+        var panelHeight = 168;
+        var panel = new Rectangle(
+            (UiLayout.LogicalWidth - panelWidth) / 2,
+            (UiLayout.LogicalHeight - panelHeight) / 2 - 40,
+            panelWidth,
+            panelHeight);
+        HudOverlayHelper.DrawPanel(spriteBatch, _assets, panel, MenuTheme.PanelFill);
+
+        var title = "Personnel";
+        var titleSize = _font.MeasureString(title);
+        spriteBatch.DrawString(
+            _font,
+            title,
+            new Vector2(panel.Center.X - titleSize.X / 2f, panel.Y + 16),
+            MenuTheme.TextAccent);
+
+        spriteBatch.DrawString(
+            _font,
+            $"{name} wants to join your city.",
+            new Vector2(panel.X + 24, panel.Y + 52),
+            MenuTheme.TextPrimary);
+
+        spriteBatch.DrawString(
+            _font,
+            "Enter = Welcome    Esc = Reject",
+            new Vector2(panel.X + 24, panel.Y + 84),
+            MenuTheme.TextMuted);
+
+        var denyLabel = context.DenyApplicants
+            ? "[N] Not hiring: ON (auto-reject)"
+            : "[N] Not hiring: OFF";
+        spriteBatch.DrawString(
+            _font,
+            denyLabel,
+            new Vector2(panel.X + 24, panel.Y + 116),
+            context.DenyApplicants ? new Color(255, 180, 90) : MenuTheme.TextMuted);
     }
 
     private void DrawHamburger(SpriteBatch spriteBatch, bool highlighted)
