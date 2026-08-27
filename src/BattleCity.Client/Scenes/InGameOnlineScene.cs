@@ -1076,6 +1076,17 @@ public sealed class InGameOnlineScene : IScene
     {
         _showVirtualCursor = ui.ShowVirtualCursor;
         _virtualCursorLogical = ui.MouseLogicalPosition;
+        if (ui.GamepadJustConnected)
+        {
+            InGameChatService.AppendSystem(
+                _chatLog,
+                "Controller connected. RS click toggles pointer mode for building.");
+        }
+
+        if (ui.GamepadJustDisconnected)
+        {
+            InGameChatService.AppendSystem(_chatLog, "Controller disconnected.");
+        }
     }
 
     private void AbandonCityToLobby()

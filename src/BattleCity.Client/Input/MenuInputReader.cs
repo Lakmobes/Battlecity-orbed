@@ -34,6 +34,11 @@ public sealed class MenuInputReader
             _primed = true;
         }
 
+        if (gamePad.IsConnected != _previousGamePad.IsConnected)
+        {
+            _previousGamePad = gamePad;
+        }
+
         // WASD / Space fight letter and space typing in login/account fields.
         // Gamepad A/B stay available so pads can confirm/cancel without the keyboard.
         var state = new MenuInputState

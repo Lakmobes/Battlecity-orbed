@@ -26,6 +26,7 @@ namespace BattleCity.Client.Input;
 /// <item><term>Context / build menu</term><description>B (pointer mode)</description></item>
 /// <item><term>Menu navigate</term><description>D-pad / left stick</description></item>
 /// <item><term>Menu confirm / cancel</term><description>A / B</description></item>
+/// <item><term>Hotplug</term><description>Connect/disconnect clears pointer mode; no phantom button edges</description></item>
 /// </list>
 /// </summary>
 public static class GameplayGamepadMap

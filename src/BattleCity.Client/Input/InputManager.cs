@@ -26,6 +26,18 @@ public sealed class InputManager
         var keyboard = Keyboard.GetState();
         var mouse = Mouse.GetState();
         var gamePad = GamePad.GetState(GameplayGamepadMap.Player);
+        GamepadHotplug.Apply(
+            _previousGamePad.IsConnected,
+            gamePad.IsConnected,
+            ref _pointerMode,
+            out var gamepadJustConnected,
+            out var gamepadJustDisconnected);
+        if (gamepadJustConnected || gamepadJustDisconnected)
+        {
+            // Sync previous so reconnect/disconnect never synthesizes button edges.
+            _previousGamePad = gamePad;
+        }
+
         var cameraPan = keyboard.IsKeyDown(GameplayInputMap.CameraPanModifier);
 
         var turn = 0;
@@ -174,6 +186,8 @@ public sealed class InputManager
             PointerOverUiPanel = pointerOverUiPanel,
             PointerOverWorld = pointerOverWorld,
             ShowVirtualCursor = _pointerMode && gamePad.IsConnected,
+            GamepadJustConnected = gamepadJustConnected,
+            GamepadJustDisconnected = gamepadJustDisconnected,
         };
 
         _previousKeyboard = keyboard;
