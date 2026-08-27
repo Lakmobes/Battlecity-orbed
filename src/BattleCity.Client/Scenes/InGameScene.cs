@@ -51,6 +51,8 @@ public sealed class InGameScene : IScene
     private int _buildPreviewTypeCode;
     private bool _buildPreviewIsValid;
     private bool _buildPreviewIsDemolish;
+    private bool _showVirtualCursor;
+    private Vector2 _virtualCursorLogical;
     private bool _loaded;
     private readonly InGameChatLog _chatLog = new();
     private readonly InGameChatInput _chatInput = new();
@@ -132,10 +134,18 @@ public sealed class InGameScene : IScene
                 playerPosition.Y + GameConstants.TileSize / 2f);
         }
 
+        var deltaSeconds = (float)gameTime.ElapsedGameTime.TotalSeconds;
+
         // Settings must win over chat so Enter confirms the settings item instead of opening chat.
         if (_showSettingsMenu)
         {
-            var settingsFrame = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+            var settingsFrame = _input.Poll(
+                _camera,
+                playerCenter,
+                worldWidth,
+                _context.Presentation,
+                deltaSeconds);
+            CaptureVirtualCursor(settingsFrame.Ui);
             if (HandleSettingsInput(settingsFrame.Ui, out var leaveToMenu) && leaveToMenu)
             {
                 _context.Audio.StopEngine();
@@ -156,7 +166,13 @@ public sealed class InGameScene : IScene
 
             if (!_chatInput.IsActive)
             {
-                var frameInput = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+                var frameInput = _input.Poll(
+                    _camera,
+                    playerCenter,
+                    worldWidth,
+                    _context.Presentation,
+                    deltaSeconds);
+                CaptureVirtualCursor(frameInput.Ui);
                 if (HandleSettingsInput(frameInput.Ui, out var leaveToMenu))
                 {
                     if (leaveToMenu)
@@ -482,6 +498,8 @@ public sealed class InGameScene : IScene
             IsChatting = _chatInput.IsActive,
             ChatDraft = _chatInput.Draft,
             ObserverCityId = _simulation.TryGetPlayerCityId(out var observerCityId) ? observerCityId : 0,
+            ShowVirtualCursor = _showVirtualCursor,
+            VirtualCursorLogical = _virtualCursorLogical,
         };
     }
 
@@ -526,26 +544,37 @@ public sealed class InGameScene : IScene
         }
 
         if (menu.ConfirmPressed)
+        {
+            switch (_settingsSelectedIndex)
             {
-                switch (_settingsSelectedIndex)
-                {
-                    case 0:
-                        _showSettingsMenu = false;
-                        break;
-                    case 1:
-                        _showStatusPanel = !_showStatusPanel;
-                        break;
-                    case 2:
-                        _showMiniMap = !_showMiniMap;
-                        break;
-                    case 3:
-                    case 4:
-                        leaveToMenu = true;
-                        break;
-                }
+                case 0:
+                    _showSettingsMenu = false;
+                    break;
+                case 1:
+                    _showStatusPanel = !_showStatusPanel;
+                    break;
+                case 2:
+                    _showMiniMap = !_showMiniMap;
+                    break;
+                case 3:
+                case 4:
+                    leaveToMenu = true;
+                    break;
             }
+        }
+
+        if (menu.CancelPressed)
+        {
+            _showSettingsMenu = false;
+        }
 
         return true;
+    }
+
+    private void CaptureVirtualCursor(UiInputState ui)
+    {
+        _showVirtualCursor = ui.ShowVirtualCursor;
+        _virtualCursorLogical = ui.MouseLogicalPosition;
     }
 
     private void ApplyUiInput(UiInputState ui, GameTime gameTime)

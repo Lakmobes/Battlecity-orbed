@@ -103,6 +103,27 @@ public sealed class UiRenderer
         {
             DrawHirePanel(spriteBatch, in context);
         }
+
+        if (context.ShowVirtualCursor)
+        {
+            DrawVirtualCursor(spriteBatch, context.VirtualCursorLogical);
+        }
+    }
+
+    private void DrawVirtualCursor(SpriteBatch spriteBatch, Vector2 logicalPosition)
+    {
+        var pixel = _assets.Pixel;
+        var x = (int)logicalPosition.X;
+        var y = (int)logicalPosition.Y;
+        const int arm = 7;
+        const int thickness = 2;
+        var fill = MenuTheme.TextAccent;
+        var outline = new Color(0, 0, 0, 200);
+
+        spriteBatch.Draw(pixel, new Rectangle(x - arm - 1, y - thickness / 2 - 1, arm * 2 + 3, thickness + 2), outline);
+        spriteBatch.Draw(pixel, new Rectangle(x - thickness / 2 - 1, y - arm - 1, thickness + 2, arm * 2 + 3), outline);
+        spriteBatch.Draw(pixel, new Rectangle(x - arm, y - thickness / 2, arm * 2 + 1, thickness), fill);
+        spriteBatch.Draw(pixel, new Rectangle(x - thickness / 2, y - arm, thickness, arm * 2 + 1), fill);
     }
 
     private void DrawHirePanel(SpriteBatch spriteBatch, in RenderContext context)

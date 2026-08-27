@@ -54,6 +54,8 @@ public sealed class InGameOnlineScene : IScene
     private int _buildPreviewTypeCode;
     private bool _buildPreviewIsValid;
     private bool _buildPreviewIsDemolish;
+    private bool _showVirtualCursor;
+    private Vector2 _virtualCursorLogical;
     private float _animationTime;
     private bool _loaded;
     private float _updateSendCooldown;
@@ -235,11 +237,18 @@ public sealed class InGameOnlineScene : IScene
         }
 
         // Settings must win over chat so Esc / Enter are not stolen by chat or leave-to-menu.
+        var deltaSeconds = (float)gameTime.ElapsedGameTime.TotalSeconds;
         var networkGameplay = default(GameplayInputState);
         var hasNetworkGameplay = false;
         if (_showSettingsMenu)
         {
-            var settingsFrame = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+            var settingsFrame = _input.Poll(
+                _camera,
+                playerCenter,
+                worldWidth,
+                _context.Presentation,
+                deltaSeconds);
+            CaptureVirtualCursor(settingsFrame.Ui);
             if (HandleSettingsInput(settingsFrame.Ui, out var leaveToMenu, out var abandonCity))
             {
                 if (abandonCity)
@@ -265,7 +274,13 @@ public sealed class InGameOnlineScene : IScene
 
             if (!_chatInput.IsActive)
             {
-                var frameInput = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+                var frameInput = _input.Poll(
+                    _camera,
+                    playerCenter,
+                    worldWidth,
+                    _context.Presentation,
+                    deltaSeconds);
+                CaptureVirtualCursor(frameInput.Ui);
                 if (HandleSettingsInput(frameInput.Ui, out var leaveToMenu, out var abandonCity))
                 {
                     if (abandonCity)
@@ -982,6 +997,8 @@ public sealed class InGameOnlineScene : IScene
             ObserverCityId = observerCityId,
             ShowSettingsMenu = _showSettingsMenu,
             SettingsSelectedIndex = _settingsSelectedIndex,
+            ShowVirtualCursor = _showVirtualCursor,
+            VirtualCursorLogical = _virtualCursorLogical,
         };
     }
 
@@ -1047,7 +1064,18 @@ public sealed class InGameOnlineScene : IScene
             }
         }
 
+        if (menu.CancelPressed)
+        {
+            _showSettingsMenu = false;
+        }
+
         return true;
+    }
+
+    private void CaptureVirtualCursor(UiInputState ui)
+    {
+        _showVirtualCursor = ui.ShowVirtualCursor;
+        _virtualCursorLogical = ui.MouseLogicalPosition;
     }
 
     private void AbandonCityToLobby()

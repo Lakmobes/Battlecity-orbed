@@ -17,7 +17,7 @@
     <ProjectReference Include="..\BattleCity.Shared\BattleCity.Shared.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(EnableMGCBItems)' != 'false'">
     <MonoGameContentReference Include="Content\Content.mgcb" />
   </ItemGroup>
 
