@@ -7,7 +7,8 @@ namespace BattleCity.Client.Rendering;
 
 /// <summary>
 /// Dual compass: outer ring points to the nearest other CC (orbable city),
-/// inner ring points to the home command center. Uses <see cref="HudSpriteNames.CompassRing"/>.
+/// inner ring points to the home command center. Uses legacy 8-sector arrow
+/// sprites (<c>imgArrows</c> / <c>imgArrowsRed</c>) for home direction (**P-2**).
 /// </summary>
 public sealed class UnderAttackPanelRenderer
 {
@@ -43,22 +44,22 @@ public sealed class UnderAttackPanelRenderer
         var center = new Vector2(outerBounds.Center.X, outerBounds.Center.Y);
         var playerCenter = ToNumerics(context.FocusWorldPosition);
         var homeCenter = ToNumerics(context.CityCenterWorldPosition);
-        var homeRadians = CompassArrowHelper.ComputeArrowRadians(playerCenter, homeCenter);
-        var homeColor = context is { IsUnderAttack: true, UnderAttackFlashVisible: true }
-            ? AttackArrowColor
-            : HomeArrowColor;
+        var homeIndex = CompassArrowHelper.ComputeArrowIndex(playerCenter, homeCenter);
+        var underAttackFlash = context is { IsUnderAttack: true, UnderAttackFlashVisible: true };
+        var homeColor = underAttackFlash ? AttackArrowColor : HomeArrowColor;
 
         if (context.NearestOrbableCityWorldPosition is { } orbTarget)
         {
-            var orbRadians = CompassArrowHelper.ComputeArrowRadians(playerCenter, ToNumerics(orbTarget));
+            var orbIndex = CompassArrowHelper.ComputeArrowIndex(playerCenter, ToNumerics(orbTarget));
+            var orbRadians = CompassArrowHelper.RadiansFromArrowIndex(orbIndex);
             DrawCompassArrow(spriteBatch, _assets.Pixel, center, orbRadians, OrbArrowColor, tipLength: 42f, wingLength: 16f);
             DrawCornerLabel(spriteBatch, outerBounds, "ORB", OrbArrowColor, topLeft: false);
         }
 
-        DrawCompassArrow(spriteBatch, _assets.Pixel, center, homeRadians, homeColor, tipLength: 22f, wingLength: 10f);
+        DrawLegacyHomeArrow(spriteBatch, center, homeIndex, underAttackFlash, homeColor);
         DrawCornerLabel(spriteBatch, outerBounds, "CC", homeColor, topLeft: true);
 
-        if (context is { IsUnderAttack: true, UnderAttackFlashVisible: true })
+        if (underAttackFlash)
         {
             var alert = "ATTACK";
             var alertScale = new Vector2(0.65f, 0.65f);
@@ -74,6 +75,37 @@ public sealed class UnderAttackPanelRenderer
                 SpriteEffects.None,
                 0f);
         }
+    }
+
+    private void DrawLegacyHomeArrow(
+        SpriteBatch spriteBatch,
+        Vector2 center,
+        int arrowIndex,
+        bool useRedSheet,
+        Color fallbackColor)
+    {
+        var sheet = useRedSheet ? _assets.HudCompassArrowsRed : _assets.HudCompassArrows;
+        if (sheet != _assets.Pixel
+            && sheet.Width >= CompassArrowHelper.LegacyArrowFrameSize * CompassArrowHelper.LegacyArrowFrameCount)
+        {
+            var frame = CompassArrowHelper.ToLegacyArrowFrame(arrowIndex);
+            var source = new Rectangle(
+                frame * CompassArrowHelper.LegacyArrowFrameSize,
+                0,
+                CompassArrowHelper.LegacyArrowFrameSize,
+                CompassArrowHelper.LegacyArrowFrameSize);
+            var destSize = 48;
+            var dest = new Rectangle(
+                (int)center.X - destSize / 2,
+                (int)center.Y - destSize / 2,
+                destSize,
+                destSize);
+            spriteBatch.Draw(sheet, dest, source, Color.White);
+            return;
+        }
+
+        var radians = CompassArrowHelper.RadiansFromArrowIndex(arrowIndex);
+        DrawCompassArrow(spriteBatch, _assets.Pixel, center, radians, fallbackColor, tipLength: 22f, wingLength: 10f);
     }
 
     private void DrawRing(SpriteBatch spriteBatch, Rectangle bounds, Color tint)

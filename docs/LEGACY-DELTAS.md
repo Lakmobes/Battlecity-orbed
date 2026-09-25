@@ -48,8 +48,14 @@ These differ from a naive port of legacy formulas because the rewrite’s coordi
 Tracked in [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) and [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md):
 
 - `smFinance` (only if scope expands)
-- Broader packet audit for unhandled admin/turret packets
-- Optional: legacy 8-sector compass sprites (**P-2**)
+- Optional starting-city / admin-edit account tools (`cmChangeStartingCity`, `cmAdminEdit`)
+- ~~Admin ban-list / news over the wire~~ — fixed (**Phase 39**, `/bans` `/unban` `/news` `/setnews`; Host still lists/unbans via SQLite)
+- ~~Admin spawn-item / shutdown~~ — fixed (**Phase 38**, `/spawn` `/shutdown`)
+- ~~Server.Host ban-list / unban UI~~ — fixed (**Phase 37**)
+- ~~Admin join/warp/summon~~ — fixed (**Phase 36**, `/city` `/warp` `/summon`)
+- ~~Admin kick/ban~~ — fixed (**Phase 34**, `/kick` `/ban`)
+- ~~Packet audit hire/roster/successor gaps~~ — fixed (**Phase 33**)
+- ~~8-sector compass sprites (**P-2**)~~ — fixed (**Phase 35**)
 - ~~Multi-city layout~~ — fixed 2026-09-08 (**C-1**, CC-only MP)
 - ~~Meeting-room city list~~ — fixed 2026-09-08 (**C-2**, **C-3**)
 - ~~Spawn/compass/death-camera mismatch~~ — fixed 2026-09-08

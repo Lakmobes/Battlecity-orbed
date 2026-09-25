@@ -9,7 +9,7 @@ For developers and contributors, also see [PROJECT-STATUS.md](PROJECT-STATUS.md)
 | Folder | Run this |
 |--------|----------|
 | `Client/` | `BattleCity.Client.exe` — the game |
-| `Server/` | `BattleCity.Server.Host.exe` — Start/Stop, invite copy, admin toggles |
+| `Server/` | `BattleCity.Server.Host.exe` — Start/Stop, invite copy, admin toggles, ban list / unban |
 
 No Visual Studio required. Windows x64.
 

@@ -77,7 +77,7 @@
 | ~~**S-3**~~ | Spawning | Death camera wrong CC | **Done 2026-09-08** — filters by home grid |
 | ~~**S-4**~~ | Spawning | Centroid `GetSpawnPosition` join fallback | **Done 2026-09-08** — removed from join/respawn paths |
 | ~~**P-1**~~ | Compass | Offline orb arrow unfiltered | **Done 2026-09-08** — `IsOrbable` filter |
-| **P-2** | Compass | Continuous rotation vs legacy **8 discrete** sprites (HUD choice — document only unless parity requested) | Low |
+| **P-2** | Compass | Continuous rotation vs legacy **8 discrete** sprites | **Done** — home arrow uses `imgArrows` / `imgArrowsRed` 8-sector frames |
 
 ---
 
@@ -223,7 +223,7 @@ City[citIndex]->y = (512*48) - (32 + (citIndex / 8 * 64) + 1) * 48;
 
 **Phase P-A — Tie compass to spawn reference (P0)** — **DONE 2026-09-08**  
 **Phase P-B — Offline orb filter (P1)** — **DONE 2026-09-08**  
-**Phase P-C — Optional legacy 8-sector regression (P2)** — open (HUD choice)
+**Phase P-C — Optional legacy 8-sector regression (P2)** — **DONE** (`UnderAttackPanelRenderer` + `CompassArrows.png`)
 
 ---
 
@@ -242,7 +242,7 @@ Progress as of **2026-09-08**: cities + spawn/compass audit items complete.
 | 7 | P-1 | Offline orb compass filter | Small | **Done** |
 | 8 | S-4 | Remove centroid spawn fallback | Small | **Done** |
 | 9 | C-3 | Randomize `startingCity` from BA neighborhood | Small | **Done** |
-| 10 | P-2 | Optional 8-sector compass sprites | Low | Open (HUD choice) |
+| 10 | P-2 | Optional 8-sector compass sprites | Low | **Done** |
 
 ### Definition of done (overall)
 

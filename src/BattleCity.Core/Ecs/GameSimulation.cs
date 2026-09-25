@@ -397,6 +397,35 @@ public sealed class GameSimulation : IDisposable
         return true;
     }
 
+    /// <summary>Admin warp/summon — set position without the client anti-cheat distance gate.</summary>
+    public bool TryForceNetworkPlayerPosition(byte playerId, Vector2 position)
+    {
+        if (!TryGetNetworkPlayerEntity(playerId, out var entity))
+        {
+            return false;
+        }
+
+        ref var transform = ref _world.Get<Transform2D>(entity);
+        transform.Position = position;
+        transform.PreviousPosition = position;
+
+        if (_world.Has<Velocity>(entity))
+        {
+            ref var velocity = ref _world.Get<Velocity>(entity);
+            velocity.Value = Vector2.Zero;
+        }
+
+        if (_world.Has<TankLifeState>(entity))
+        {
+            ref var life = ref _world.Get<TankLifeState>(entity);
+            life.IsDead = false;
+            life.RespawnTimerSeconds = 0f;
+            life.SpawnPosition = position;
+        }
+
+        return true;
+    }
+
     public void SetNetworkPlayerMayor(byte playerId, bool isMayor)
     {
         if (!TryGetNetworkPlayerEntity(playerId, out var entity))
@@ -860,6 +889,50 @@ public sealed class GameSimulation : IDisposable
             new Vector2(packet.X, packet.Y),
             packet.City,
             playWarpAudio: true);
+    }
+
+    /// <summary>
+    /// Admin <c>/city</c> rejoin: warp + reset inventory/city affiliation to match a fresh server spawn.
+    /// </summary>
+    public void ApplyAdminCityRejoin(in ServerStateGamePacket packet, bool isMayor, bool isAdmin)
+    {
+        if (!TryGetLocalPlayerEntity(out var entity))
+        {
+            ApplyNetworkWarp(packet);
+            return;
+        }
+
+        var cityId = packet.City;
+        EnsureCityBuild(cityId);
+        TryGetCityBuild(cityId, out var cityBuild);
+        var inventory = PlayerInventory.CreateLoadoutForCity(cityBuild);
+        inventory.Orb = 0;
+
+        var position = new Vector2(packet.X, packet.Y);
+        ApplyRespawnState(entity, position, cityId, playWarpAudio: true);
+
+        if (_world.Has<PlayerInventory>(entity))
+        {
+            _world.Set(entity, inventory);
+        }
+
+        if (_world.Has<MayorStatus>(entity))
+        {
+            _world.Get<MayorStatus>(entity).IsMayor = isMayor;
+        }
+
+        if (_world.Has<SpriteRef>(entity))
+        {
+            ref var sprite = ref _world.Get<SpriteRef>(entity);
+            sprite.SourceY = TankSpriteSelector.GetSourceY(cityId, cityId, isMayor, isAdmin)
+                * GameConstants.TileSize;
+        }
+
+        if (_world.Has<Health>(entity))
+        {
+            ref var health = ref _world.Get<Health>(entity);
+            health.Current = health.Max;
+        }
     }
 
     public void ApplyNetworkRespawn(byte playerId)
@@ -1411,6 +1484,36 @@ public sealed class GameSimulation : IDisposable
             request.Active,
             (byte)itemType);
         _audioBuffer.Play(SoundId.Click, _world.Get<Transform2D>(entity).Position);
+        return true;
+    }
+
+    /// <summary>Admin spawn: grant one item into the player's inventory (legacy <c>cmAdmin</c> 7).</summary>
+    public bool TryAdminSpawnItemForNetworkPlayer(
+        byte playerId,
+        ItemType type,
+        out ServerPickedUpPacket pickedUpPacket)
+    {
+        pickedUpPacket = default;
+
+        if (!Enum.IsDefined(typeof(ItemType), (int)type))
+        {
+            return false;
+        }
+
+        if (!TryGetNetworkPlayerEntity(playerId, out var entity)
+            || !_world.Has<PlayerInventory>(entity))
+        {
+            return false;
+        }
+
+        ref var inventory = ref _world.Get<PlayerInventory>(entity);
+        if (!inventory.TryAdd(type))
+        {
+            return false;
+        }
+
+        var itemId = AllocateNetworkItemId();
+        pickedUpPacket = new ServerPickedUpPacket(itemId, active: 0, (byte)type);
         return true;
     }
 

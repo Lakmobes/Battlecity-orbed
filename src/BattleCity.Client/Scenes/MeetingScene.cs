@@ -388,6 +388,44 @@ public sealed class MeetingScene : IScene
 
                     _context.NetworkClient = _client;
                     return SceneTransition.InGameOnline;
+                case GameClientEventKind.Kicked:
+                    {
+                        var verb = networkEvent.KickCommand == BattleCity.Shared.Network.AdminCommands.Ban
+                            ? "banned"
+                            : "kicked";
+                        _chatLog.Append($"You have been {verb} by an admin.", ChatColorResolver.System);
+                    }
+
+                    break;
+                case GameClientEventKind.AdminAction:
+                    {
+                        var admin = networkEvent.AdminAction;
+                        var verb = admin.Command == BattleCity.Shared.Network.AdminCommands.Ban
+                            ? "banned"
+                            : "kicked";
+                        _chatLog.Append(
+                            $"Player{admin.TargetPlayerId} has been {verb} by Player{admin.AdminPlayerId}",
+                            ChatColorResolver.System);
+                    }
+
+                    break;
+                case GameClientEventKind.AppendNews:
+                    {
+                        var news = networkEvent.NewsText;
+                        if (!string.IsNullOrWhiteSpace(news))
+                        {
+                            foreach (var line in news.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+                            {
+                                var trimmed = line.TrimEnd();
+                                if (trimmed.Length > 0)
+                                {
+                                    _chatLog.Append(trimmed, ChatColorResolver.System);
+                                }
+                            }
+                        }
+                    }
+
+                    break;
                 case GameClientEventKind.Disconnected:
                     _context.NetworkClient = null;
                     return SceneTransition.MainMenu;

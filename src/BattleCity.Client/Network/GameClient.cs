@@ -50,6 +50,10 @@ public enum GameClientEventKind
     ChatCommand,
     ClearPlayer,
     CityListClear,
+    AdminAction,
+    BanEntry,
+    AppendNews,
+    Kicked,
     Error,
     Disconnected,
 }
@@ -119,6 +123,15 @@ public readonly struct GameClientEvent
     public ServerItemLifePacket ItemLife { get; init; }
 
     public ServerPromotionPacket Promotion { get; init; }
+
+    public ServerAdminPacket AdminAction { get; init; }
+
+    public ServerBanPacket BanEntry { get; init; }
+
+    public string NewsText { get; init; } = string.Empty;
+
+    /// <summary>Legacy <c>smKicked</c> payload command byte (Kick/Ban) when present.</summary>
+    public byte KickCommand { get; init; }
 
     public char ErrorCode { get; init; }
 }
@@ -325,6 +338,71 @@ public sealed class GameClient : IDisposable
         Span<byte> payload = stackalloc byte[1];
         payload[0] = deny ? (byte)1 : (byte)0;
         Send(ClientMessageId.IsHiring, payload);
+    }
+
+    /// <summary>Legacy <c>cmSuccessor</c> — mayor designates heir player id (0 clears).</summary>
+    public void SendSuccessor(byte successorPlayerId)
+    {
+        if (!IsInGame || !IsMayor)
+        {
+            return;
+        }
+
+        Span<byte> payload = stackalloc byte[1];
+        payload[0] = successorPlayerId;
+        Send(ClientMessageId.Successor, payload);
+    }
+
+    /// <summary>Legacy <c>cmAdmin</c> — kick/ban/warp/summon/join/spawn/shutdown/bans/news.</summary>
+    public void SendAdmin(byte targetPlayerId, byte command)
+    {
+        if (!IsAdmin)
+        {
+            return;
+        }
+
+        Span<byte> payload = stackalloc byte[ClientAdminPacket.Size];
+        new ClientAdminPacket(targetPlayerId, command).Write(payload);
+        Send(ClientMessageId.Admin, payload);
+    }
+
+    /// <summary>Legacy <c>cmAdmin</c> 9 — unban by account name (remake extension: name after packet).</summary>
+    public void SendAdminUnban(string username)
+    {
+        if (!IsAdmin || string.IsNullOrWhiteSpace(username))
+        {
+            return;
+        }
+
+        username = username.Trim();
+        var nameBytes = System.Text.Encoding.ASCII.GetBytes(username);
+        var nameLength = Math.Min(nameBytes.Length, 15);
+        Span<byte> payload = stackalloc byte[ClientAdminPacket.Size + nameLength + 1];
+        new ClientAdminPacket(0, AdminCommands.Unban).Write(payload);
+        nameBytes.AsSpan(0, nameLength).CopyTo(payload.Slice(ClientAdminPacket.Size));
+        payload[ClientAdminPacket.Size + nameLength] = 0;
+        Send(ClientMessageId.Admin, payload);
+    }
+
+    /// <summary>Legacy <c>cmChangeNews</c> — replace server news (max 240 chars).</summary>
+    public void SendChangeNews(string news)
+    {
+        if (!IsAdmin)
+        {
+            return;
+        }
+
+        news ??= string.Empty;
+        if (news.Length > 240)
+        {
+            news = news[..240];
+        }
+
+        var bytes = System.Text.Encoding.ASCII.GetBytes(news);
+        Span<byte> payload = stackalloc byte[bytes.Length + 1];
+        bytes.CopyTo(payload);
+        payload[bytes.Length] = 0;
+        Send(ClientMessageId.ChangeNews, payload);
     }
 
     public void FirePlayer(byte targetPlayerId)
@@ -543,7 +621,15 @@ public sealed class GameClient : IDisposable
 
                 if (pending.Kind == GameClientEventKind.Error)
                 {
-                    LastError = $"Server rejected login ({pending.ErrorCode}).";
+                    LastError = pending.ErrorCode switch
+                    {
+                        'X' => "This account is banned.",
+                        'B' => "Wrong password.",
+                        'C' => "Account not found.",
+                        'E' => "Account already logged in.",
+                        'F' => "Server version mismatch. Update the client.",
+                        _ => $"Server rejected login ({pending.ErrorCode}).",
+                    };
                     _events.Clear();
                     return false;
                 }
@@ -791,6 +877,35 @@ public sealed class GameClient : IDisposable
                 IsInGame = false;
                 SpawnState = null;
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.Fired));
+                break;
+            case ServerMessageId.Kicked:
+                IsInGame = false;
+                IsMayor = false;
+                SpawnState = null;
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.Kicked)
+                {
+                    KickCommand = packet.Payload.Length > 0
+                        ? packet.Payload.Span[0]
+                        : AdminCommands.Kick,
+                });
+                break;
+            case ServerMessageId.Admin when packet.Payload.Length >= ServerAdminPacket.Size:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.AdminAction)
+                {
+                    AdminAction = ServerAdminPacket.Read(packet.Payload.Span),
+                });
+                break;
+            case ServerMessageId.Ban when packet.Payload.Length >= ServerBanPacket.Size:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.BanEntry)
+                {
+                    BanEntry = ServerBanPacket.Read(packet.Payload.Span),
+                });
+                break;
+            case ServerMessageId.AppendNews when packet.Payload.Length > 0:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.AppendNews)
+                {
+                    NewsText = System.Text.Encoding.ASCII.GetString(packet.Payload.Span).TrimEnd('\0'),
+                });
                 break;
             case ServerMessageId.Interview:
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.Interview));

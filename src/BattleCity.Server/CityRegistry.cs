@@ -224,6 +224,9 @@ public sealed class CitySlot
 
     public byte? HiringApplicantId { get; set; }
 
+    /// <summary>Designated mayor heir (legacy <c>CCity::Successor</c> player id).</summary>
+    public byte? SuccessorPlayerId { get; set; }
+
     /// <summary>When true, the mayor auto-declines new applicants (legacy notHiring).</summary>
     public bool DenyApplicants { get; set; }
 }

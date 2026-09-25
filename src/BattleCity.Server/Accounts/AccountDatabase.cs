@@ -280,6 +280,125 @@ public sealed class AccountDatabase : IDisposable
             seedAdmin.CommandText = "UPDATE accounts SET is_admin = 1 WHERE username = 'admin';";
             seedAdmin.ExecuteNonQuery();
         }
+
+        using var bans = _connection.CreateCommand();
+        bans.CommandText = """
+            CREATE TABLE IF NOT EXISTS bans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL COLLATE NOCASE,
+                reason TEXT NOT NULL,
+                banned_by TEXT NOT NULL,
+                created_utc TEXT NOT NULL
+            );
+            """;
+        bans.ExecuteNonQuery();
+
+        using var bansIndex = _connection.CreateCommand();
+        bansIndex.CommandText = "CREATE INDEX IF NOT EXISTS idx_bans_username ON bans(username);";
+        bansIndex.ExecuteNonQuery();
+    }
+
+    public bool IsBanned(string username)
+    {
+        username = NormalizeUsername(username);
+        if (string.IsNullOrEmpty(username))
+        {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            using var command = _connection.CreateCommand();
+            command.CommandText = "SELECT 1 FROM bans WHERE username = $username LIMIT 1;";
+            command.Parameters.AddWithValue("$username", username);
+            return command.ExecuteScalar() is not null;
+        }
+    }
+
+    public bool TryAddBan(string username, string bannedBy, string reason)
+    {
+        username = NormalizeUsername(username);
+        if (string.IsNullOrEmpty(username))
+        {
+            return false;
+        }
+
+        bannedBy = string.IsNullOrWhiteSpace(bannedBy) ? "admin" : bannedBy.Trim();
+        reason = string.IsNullOrWhiteSpace(reason) ? "banned" : reason.Trim();
+
+        lock (_sync)
+        {
+            if (IsBannedUnlocked(username))
+            {
+                return true;
+            }
+
+            using var insert = _connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO bans (username, reason, banned_by, created_utc)
+                VALUES ($username, $reason, $bannedBy, $createdUtc);
+                """;
+            insert.Parameters.AddWithValue("$username", username);
+            insert.Parameters.AddWithValue("$reason", reason);
+            insert.Parameters.AddWithValue("$bannedBy", bannedBy);
+            insert.Parameters.AddWithValue("$createdUtc", DateTime.UtcNow.ToString("O"));
+            insert.ExecuteNonQuery();
+            return true;
+        }
+    }
+
+    public IReadOnlyList<BanRecord> ListBans()
+    {
+        lock (_sync)
+        {
+            using var command = _connection.CreateCommand();
+            command.CommandText = """
+                SELECT id, username, reason, banned_by, created_utc
+                FROM bans
+                ORDER BY datetime(created_utc) DESC, id DESC;
+                """;
+
+            var results = new List<BanRecord>();
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                results.Add(new BanRecord
+                {
+                    Id = reader.GetInt64(0),
+                    Username = reader.GetString(1),
+                    Reason = reader.GetString(2),
+                    BannedBy = reader.GetString(3),
+                    CreatedUtc = reader.GetString(4),
+                });
+            }
+
+            return results;
+        }
+    }
+
+    public bool TryRemoveBan(string username)
+    {
+        username = NormalizeUsername(username);
+        if (string.IsNullOrEmpty(username))
+        {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            using var delete = _connection.CreateCommand();
+            delete.CommandText = "DELETE FROM bans WHERE username = $username;";
+            delete.Parameters.AddWithValue("$username", username);
+            return delete.ExecuteNonQuery() > 0;
+        }
+    }
+
+    private bool IsBannedUnlocked(string username)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM bans WHERE username = $username LIMIT 1;";
+        command.Parameters.AddWithValue("$username", username);
+        return command.ExecuteScalar() is not null;
     }
 
     private static string NormalizeUsername(string username) => username.Trim();

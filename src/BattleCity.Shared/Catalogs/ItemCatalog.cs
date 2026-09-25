@@ -42,6 +42,95 @@ public static class ItemCatalog
 
     public static string GetName(Data.ItemType type) => Names[(int)type];
 
+    /// <summary>
+    /// Resolves an item type from a numeric id (0–11) or a display/enum name prefix
+    /// (e.g. "wall", "med", "laser", "cloak", "cougar").
+    /// </summary>
+    public static bool TryParse(string text, out Data.ItemType type)
+    {
+        type = default;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        text = text.Trim();
+        if (int.TryParse(text, out var id)
+            && id >= 0
+            && id < Names.Count
+            && Enum.IsDefined(typeof(Data.ItemType), id))
+        {
+            type = (Data.ItemType)id;
+            return true;
+        }
+
+        if (Enum.TryParse(text, ignoreCase: true, out Data.ItemType byEnum)
+            && Enum.IsDefined(byEnum))
+        {
+            type = byEnum;
+            return true;
+        }
+
+        // Common aliases that differ from legacy display names.
+        if (text.Equals("cloak", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("laser", StringComparison.OrdinalIgnoreCase))
+        {
+            type = Data.ItemType.Cloak;
+            return true;
+        }
+
+        if (text.Equals("rocket", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("missile", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("cougar", StringComparison.OrdinalIgnoreCase))
+        {
+            type = Data.ItemType.Rocket;
+            return true;
+        }
+
+        if (text.Equals("flare", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("walkie", StringComparison.OrdinalIgnoreCase))
+        {
+            type = Data.ItemType.Flare;
+            return true;
+        }
+
+        if (text.Equals("sleeper", StringComparison.OrdinalIgnoreCase))
+        {
+            type = Data.ItemType.Sleeper;
+            return true;
+        }
+
+        if (text.Equals("plasma", StringComparison.OrdinalIgnoreCase))
+        {
+            type = Data.ItemType.Plasma;
+            return true;
+        }
+
+        Data.ItemType? match = null;
+        for (var i = 0; i < Names.Count; i++)
+        {
+            if (!Names[i].StartsWith(text, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (match.HasValue)
+            {
+                return false; // ambiguous prefix
+            }
+
+            match = (Data.ItemType)i;
+        }
+
+        if (!match.HasValue)
+        {
+            return false;
+        }
+
+        type = match.Value;
+        return true;
+    }
+
     /// <summary>Gear used via hotkeys/fire; may also be dropped/picked up (except laser).</summary>
     public static bool IsGear(Data.ItemType type) =>
         type is Data.ItemType.Cloak

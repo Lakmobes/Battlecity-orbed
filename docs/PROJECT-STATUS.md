@@ -89,8 +89,7 @@ Share `dist/BattleCity-win-x64.zip`. Host runs `Server/BattleCity.Server.Host.ex
 
 ## Suggested next work
 
-1. Broader packet audit: `ServerMessageId` vs handlers in `GameServer`
-2. Optional: legacy 8-sector compass sprites (**P-2**)
+1. Optional: starting-city admin edit / account editor (`cmChangeStartingCity`, `cmAdminEdit`)
 
 See [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) for the full backlog.
 

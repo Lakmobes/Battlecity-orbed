@@ -1226,3 +1226,123 @@ public readonly struct ServerPromotionPacket
         buffer[1 + written] = 0;
     }
 }
+
+/// <summary>Legacy <c>cmAdmin</c> — admin action (kick/ban/…).</summary>
+public readonly struct ClientAdminPacket
+{
+    public const int Size = 3;
+
+    public ClientAdminPacket(ushort targetId, byte command)
+    {
+        TargetId = targetId;
+        Command = command;
+    }
+
+    public ushort TargetId { get; }
+
+    public byte Command { get; }
+
+    public static ClientAdminPacket Read(ReadOnlySpan<byte> buffer) =>
+        new(
+            BinaryPrimitives.ReadUInt16LittleEndian(buffer),
+            buffer[2]);
+
+    public void Write(Span<byte> buffer)
+    {
+        BinaryPrimitives.WriteUInt16LittleEndian(buffer, TargetId);
+        buffer[2] = Command;
+    }
+}
+
+/// <summary>Legacy <c>smAdmin</c> — announce admin kick/ban to peers.</summary>
+public readonly struct ServerAdminPacket
+{
+    public const int Size = 5;
+
+    public ServerAdminPacket(ushort adminPlayerId, ushort targetPlayerId, byte command)
+    {
+        AdminPlayerId = adminPlayerId;
+        TargetPlayerId = targetPlayerId;
+        Command = command;
+    }
+
+    public ushort AdminPlayerId { get; }
+
+    public ushort TargetPlayerId { get; }
+
+    public byte Command { get; }
+
+    public static ServerAdminPacket Read(ReadOnlySpan<byte> buffer) =>
+        new(
+            BinaryPrimitives.ReadUInt16LittleEndian(buffer),
+            BinaryPrimitives.ReadUInt16LittleEndian(buffer.Slice(2)),
+            buffer[4]);
+
+    public void Write(Span<byte> buffer)
+    {
+        BinaryPrimitives.WriteUInt16LittleEndian(buffer, AdminPlayerId);
+        BinaryPrimitives.WriteUInt16LittleEndian(buffer.Slice(2), TargetPlayerId);
+        buffer[4] = Command;
+    }
+}
+
+/// <summary>
+/// Legacy <c>smBan</c> / <c>sSMBan</c>.
+/// Remake maps <see cref="IpAddress"/> to banned-by (no IP column in SQLite bans).
+/// </summary>
+public readonly struct ServerBanPacket
+{
+    public const int AccountSize = 16;
+    public const int IpAddressSize = 16;
+    public const int ReasonSize = 31;
+    public const int Size = AccountSize + IpAddressSize + ReasonSize;
+
+    public ServerBanPacket(string account, string ipAddress, string reason)
+    {
+        Account = account;
+        IpAddress = ipAddress;
+        Reason = reason;
+    }
+
+    public string Account { get; }
+
+    public string IpAddress { get; }
+
+    public string Reason { get; }
+
+    public static ServerBanPacket Read(ReadOnlySpan<byte> buffer) =>
+        new(
+            ReadFixedAscii(buffer.Slice(0, AccountSize)),
+            ReadFixedAscii(buffer.Slice(AccountSize, IpAddressSize)),
+            ReadFixedAscii(buffer.Slice(AccountSize + IpAddressSize, ReasonSize)));
+
+    public void Write(Span<byte> buffer)
+    {
+        WriteFixedAscii(buffer.Slice(0, AccountSize), Account);
+        WriteFixedAscii(buffer.Slice(AccountSize, IpAddressSize), IpAddress);
+        WriteFixedAscii(buffer.Slice(AccountSize + IpAddressSize, ReasonSize), Reason);
+    }
+
+    private static string ReadFixedAscii(ReadOnlySpan<byte> buffer)
+    {
+        var length = buffer.IndexOf((byte)0);
+        if (length < 0)
+        {
+            length = buffer.Length;
+        }
+
+        return Encoding.ASCII.GetString(buffer[..length]);
+    }
+
+    private static void WriteFixedAscii(Span<byte> destination, string value)
+    {
+        destination.Clear();
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        var bytes = Encoding.ASCII.GetBytes(value);
+        bytes.AsSpan(0, Math.Min(bytes.Length, destination.Length)).CopyTo(destination);
+    }
+}
