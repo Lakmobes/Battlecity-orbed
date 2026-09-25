@@ -12,6 +12,7 @@ using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Chat;
+using BattleCity.Shared.Gameplay;
 using BattleCity.Shared.Network;
 using BattleCity.Shared.Network.Packets;
 
@@ -20,12 +21,12 @@ namespace BattleCity.Server;
 public sealed class GameServer : IDisposable
 {
     public const int MaxPlayers = 32;
-    private const byte DefaultCityId = 0;
 
     private readonly GameSimulation _simulation = new();
     private readonly Dictionary<byte, ClientSession> _sessions = new();
     private readonly object _sync = new();
     private readonly AccountDatabase _accounts;
+    private readonly ServerNewsStore _news;
 
     private TcpListener? _listener;
     private readonly CityMayorRegistry _mayors = new();
@@ -33,13 +34,15 @@ public sealed class GameServer : IDisposable
     private readonly CityBuildPopSync _buildPopSync = new();
     private readonly FactoryItemCountSync _factoryItemCountSync = new();
     private byte _nextPlayerId = 1;
-    private CityLayout? _cityLayout;
+    private bool _worldReady;
     private bool _started;
+    private bool _shutdownRequested;
 
     public GameServer(string databasePath)
     {
         DatabasePath = databasePath;
         _accounts = new AccountDatabase(databasePath);
+        _news = new ServerNewsStore(databasePath);
     }
 
     public GameServer()
@@ -59,6 +62,8 @@ public sealed class GameServer : IDisposable
 
     public GameSimulation Simulation => _simulation;
 
+    /// <param name="cityName">Ignored — multiplayer boots CC-only from map.dat (legacy MP).</param>
+    /// <param name="cityDesign">Ignored — demo layouts are offline-only.</param>
     public void Start(string host, int port, string cityName = "Buenos Aires", string cityDesign = "demo")
     {
         if (_started)
@@ -66,19 +71,25 @@ public sealed class GameServer : IDisposable
             return;
         }
 
+        _ = cityName;
+        _ = cityDesign;
+
         _simulation.TileMap = LoadTileMap();
-        _cityLayout = LevelLoader.LoadLegacyCity(cityName, cityDesign);
-        _simulation.LoadCityLayout(_cityLayout);
-        _simulation.SpawnDemoItems(DefaultCityId);
+        var ccCount = _simulation.LoadMultiplayerWorld();
+        _worldReady = true;
         _simulation.AssignNetworkItemIds();
         _simulation.NetworkPlayersUseLocalBulletDamage = false;
         _simulation.NetworkPlayersUseLocalHealthDeath = false;
         _simulation.ReportBombEventsToNetwork = true;
         _simulation.ReportFactoryItemSpawnsToNetwork = true;
+        _simulation.ReportItemLifeToNetwork = true;
         _simulation.ReportRespawnEventsToNetwork = true;
         _simulation.ReturnInventoryPlaceablesOnDeath = true;
         _buildPopSync.Reset(_simulation);
         _factoryItemCountSync.Reset(_simulation);
+        _cities.ResetStartingCity();
+        Console.WriteLine($"Multiplayer world: {ccCount} command centers (CC-only, no demo.city)");
+        Console.WriteLine($"Meeting room starting city: {_cities.StartingCityId}");
 
         BoundHost = string.IsNullOrWhiteSpace(host) ? "0.0.0.0" : host.Trim();
         var listenAddress = BoundHost is "0.0.0.0" or "*"
@@ -162,7 +173,14 @@ public sealed class GameServer : IDisposable
         BroadcastPendingDeathEvents();
         BroadcastPendingRespawnEvents();
         BroadcastPendingHpEvents();
+        BroadcastPendingItemLifeEvents();
         RemoveDisconnectedSessions();
+
+        if (_shutdownRequested)
+        {
+            _shutdownRequested = false;
+            Stop();
+        }
     }
 
     public void Dispose()
@@ -179,6 +197,7 @@ public sealed class GameServer : IDisposable
             return false;
         }
 
+        List<ClientSession>? updated = null;
         lock (_sync)
         {
             foreach (var session in _sessions.Values)
@@ -190,11 +209,29 @@ public sealed class GameServer : IDisposable
 
                 session.IsAdmin = isAdmin
                     || string.Equals(username, "admin", StringComparison.OrdinalIgnoreCase);
+                updated ??= [];
+                updated.Add(session);
+            }
+        }
+
+        // Push admin bit so live clients can use /kick etc. without relogin.
+        if (updated is not null)
+        {
+            Span<byte> loginCorrect = stackalloc byte[2];
+            foreach (var session in updated)
+            {
+                loginCorrect[0] = session.PlayerId;
+                loginCorrect[1] = (byte)(1 | (session.IsAdmin ? 2 : 0));
+                session.SendServer(ServerMessageId.LoginCorrect, loginCorrect);
             }
         }
 
         return true;
     }
+
+    public bool TryUnbanAccount(string username) => _accounts.TryRemoveBan(username);
+
+    public IReadOnlyList<BanRecord> ListBans() => _accounts.ListBans();
 
     private void AcceptPendingConnections()
     {
@@ -261,6 +298,11 @@ public sealed class GameServer : IDisposable
             while (session.ReceiveBuffer.TryRead(out var packet))
             {
                 HandlePacket(session, packet);
+                // Ban/shutdown may remove the session mid-loop; stop reading its buffer.
+                if (!_sessions.ContainsKey(session.PlayerId))
+                {
+                    break;
+                }
             }
         }
     }
@@ -347,6 +389,9 @@ public sealed class GameServer : IDisposable
             case ClientMessageId.IsHiring:
                 HandleIsHiring(session, packet.Payload.Span);
                 break;
+            case ClientMessageId.Successor:
+                HandleSuccessor(session, packet.Payload.Span);
+                break;
             case ClientMessageId.Fired:
                 HandleFired(session, packet.Payload.Span);
                 break;
@@ -358,6 +403,12 @@ public sealed class GameServer : IDisposable
                 break;
             case ClientMessageId.Whisper:
                 HandleWhisper(session, packet.Payload.Span);
+                break;
+            case ClientMessageId.Admin:
+                HandleAdmin(session, packet.Payload.Span);
+                break;
+            case ClientMessageId.ChangeNews:
+                HandleChangeNews(session, packet.Payload.Span);
                 break;
             case ClientMessageId.TcpPing:
                 session.SendServer(ServerMessageId.TcpPong, " "u8);
@@ -401,12 +452,24 @@ public sealed class GameServer : IDisposable
             displayName = string.IsNullOrWhiteSpace(username)
                 ? $"Guest{session.PlayerId}"
                 : username;
+            if (_accounts.IsBanned(displayName))
+            {
+                session.SendServer(ServerMessageId.Error, "X"u8);
+                return;
+            }
+
             town = "Buenos Aires";
             session.IsGuest = true;
             session.RegisteredUsername = null;
         }
         else
         {
+            if (_accounts.IsBanned(username))
+            {
+                session.SendServer(ServerMessageId.Error, "X"u8);
+                return;
+            }
+
             var result = _accounts.TryLogin(
                 username,
                 password,
@@ -448,6 +511,8 @@ public sealed class GameServer : IDisposable
         loginCorrect[1] = (byte)(1 | (session.IsAdmin ? 2 : 0));
         session.SendServer(ServerMessageId.LoginCorrect, loginCorrect);
 
+        SendNews(session);
+
         Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
         WritePlayerDataPacket(playerData, session);
         BroadcastLobbyExcept(session.PlayerId, ServerMessageId.PlayerData, playerData);
@@ -463,6 +528,8 @@ public sealed class GameServer : IDisposable
     /// <summary>Legacy <c>SendCurrentPlayers</c> — existing roster + points for the joiner.</summary>
     private void SendCurrentPlayers(ClientSession joiner)
     {
+        Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
+        Span<byte> points = stackalloc byte[ServerPointsUpdatePacket.Size];
         foreach (var other in GetLobbySessions())
         {
             if (other.PlayerId == joiner.PlayerId || other.State < PlayerSessionState.LoggedIn)
@@ -470,11 +537,9 @@ public sealed class GameServer : IDisposable
                 continue;
             }
 
-            Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
             WritePlayerDataPacket(playerData, other);
             joiner.SendServer(ServerMessageId.PlayerData, playerData);
 
-            Span<byte> points = stackalloc byte[ServerPointsUpdatePacket.Size];
             CreatePointsUpdatePacket(other).Write(points);
             joiner.SendServer(ServerMessageId.PointsUpdate, points);
         }
@@ -574,9 +639,10 @@ public sealed class GameServer : IDisposable
         Span<byte> clearList = stackalloc byte[1];
         clearList[0] = 255;
         session.SendServer(ServerMessageId.AddRemCity, clearList);
-        foreach (var entry in _cities.BuildCityList(_mayors, GetLobbySessions(), DefaultCityId))
+
+        Span<byte> payload = stackalloc byte[3];
+        foreach (var entry in _cities.BuildCityList(_mayors, GetLobbySessions()))
         {
-            Span<byte> payload = stackalloc byte[3];
             entry.Write(payload);
             session.SendServer(ServerMessageId.AddRemCity, payload);
         }
@@ -587,6 +653,13 @@ public sealed class GameServer : IDisposable
         if (session.State is not (PlayerSessionState.Meeting or PlayerSessionState.LoggedIn)
             || payload.Length == 0)
         {
+            return;
+        }
+
+        if (IsSessionBanned(session))
+        {
+            session.SendServer(ServerMessageId.Error, "X"u8);
+            RemoveSession(session.PlayerId);
             return;
         }
 
@@ -839,15 +912,43 @@ public sealed class GameServer : IDisposable
 
         NotifyPlayerLeftBattlefield(session);
 
+        var slot = _cities.GetOrCreate(session.CityId);
+        if (slot.SuccessorPlayerId == session.PlayerId)
+        {
+            slot.SuccessorPlayerId = null;
+        }
+
+        // Applicant who somehow leaves mid-interview (or was the hiring target).
+        CancelInterviewForApplicant(session.PlayerId);
+
         if (session.IsMayor)
         {
-            _mayors.Remove(session.CityId, session.PlayerId);
+            // Mayor leaving must release a stuck interview applicant.
+            if (slot.HiringApplicantId.HasValue
+                && TryGetSession(slot.HiringApplicantId.Value, out var applicant))
+            {
+                slot.HiringApplicantId = null;
+                if (applicant.State == PlayerSessionState.Interview)
+                {
+                    applicant.State = PlayerSessionState.Meeting;
+                    applicant.SendServer(ServerMessageId.MayorDeclined, " "u8);
+                }
+            }
+            else
+            {
+                slot.HiringApplicantId = null;
+            }
+
+            // Notify client IsMayor=false before transferring (TransferMayor promotes successor).
+            SetMayor(session, isMayor: false);
             TransferMayor(session.CityId, excludedPlayerId: session.PlayerId);
+            slot.SuccessorPlayerId = null;
         }
 
         _simulation.TryRemoveNetworkPlayer(session.PlayerId);
         session.State = PlayerSessionState.Meeting;
         session.IsMayor = false;
+        session.HasCityAssignment = false;
         BroadcastCityListToMeetingClients();
     }
 
@@ -888,6 +989,17 @@ public sealed class GameServer : IDisposable
         }
     }
 
+    private bool IsSessionBanned(ClientSession session)
+    {
+        if (!string.IsNullOrEmpty(session.RegisteredUsername)
+            && _accounts.IsBanned(session.RegisteredUsername))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrEmpty(session.DisplayName) && _accounts.IsBanned(session.DisplayName);
+    }
+
     private IEnumerable<ClientSession> GetLobbySessions()
     {
         lock (_sync)
@@ -903,8 +1015,15 @@ public sealed class GameServer : IDisposable
 
     private void JoinGame(ClientSession session)
     {
-        if (_cityLayout is null || !session.HasCityAssignment)
+        if (!_worldReady || !session.HasCityAssignment)
         {
+            return;
+        }
+
+        if (IsSessionBanned(session))
+        {
+            session.SendServer(ServerMessageId.Error, "X"u8);
+            RemoveSession(session.PlayerId);
             return;
         }
 
@@ -913,10 +1032,18 @@ public sealed class GameServer : IDisposable
         {
             spawn = openSpawn;
         }
+        else if (CityBuildInitializer.TryGetCommandCenterGridForCity(
+                     session.CityId,
+                     _simulation.TileMap,
+                     out var gridX,
+                     out var gridY))
+        {
+            spawn = _simulation.FindOpenTankSpawnNear(
+                CommandCenterLookup.GetRespawnPositionFromGridAnchor(gridX, gridY));
+        }
         else
         {
-            spawn = _cityLayout.GetSpawnPosition();
-            spawn = _simulation.FindOpenTankSpawnNear(spawn);
+            spawn = Vector2.Zero;
         }
 
         _simulation.CreateNetworkPlayerEntity(spawn, session.PlayerId, session.CityId);
@@ -938,6 +1065,8 @@ public sealed class GameServer : IDisposable
             session.CityId).Write(joinData);
         BroadcastExcept(session.PlayerId, ServerMessageId.JoinData, joinData);
 
+        Span<byte> existingJoin = stackalloc byte[ServerJoinDataPacket.Size];
+        Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
         foreach (var other in GetInGameSessions())
         {
             if (other.PlayerId == session.PlayerId)
@@ -945,7 +1074,6 @@ public sealed class GameServer : IDisposable
                 continue;
             }
 
-            Span<byte> existingJoin = stackalloc byte[ServerJoinDataPacket.Size];
             new ServerJoinDataPacket(
                 other.PlayerId,
                 mayor: other.IsMayor ? (byte)1 : (byte)0,
@@ -954,7 +1082,6 @@ public sealed class GameServer : IDisposable
 
             if (_simulation.TryGetNetworkPlayerSnapshot(other.PlayerId, out var snapshot))
             {
-                Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
                 snapshot.ToPacket().Write(updatePayload);
                 session.SendServer(ServerMessageId.Update, updatePayload);
             }
@@ -963,11 +1090,33 @@ public sealed class GameServer : IDisposable
         SendJoinWorldSnapshot(session);
         SendCanBuildSnapshot(session);
         SendFactoryItemCountSnapshot(session);
+        SendPlayerDataSnapshot(session);
         SendPointsSnapshot(session);
         BroadcastPointsUpdate(session);
+
+        Span<byte> joinerPlayerData = stackalloc byte[ServerPlayerDataPacket.Size];
+        WritePlayerDataPacket(joinerPlayerData, session);
+        BroadcastExcept(session.PlayerId, ServerMessageId.PlayerData, joinerPlayerData);
+
         BroadcastCityListToMeetingClients();
 
         Console.WriteLine($"Player {session.DisplayName} joined at ({spawn.X}, {spawn.Y})");
+    }
+
+    /// <summary>Legacy roster names for players already on the battlefield.</summary>
+    private void SendPlayerDataSnapshot(ClientSession session)
+    {
+        Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
+        foreach (var other in GetInGameSessions())
+        {
+            if (other.PlayerId == session.PlayerId)
+            {
+                continue;
+            }
+
+            WritePlayerDataPacket(playerData, other);
+            session.SendServer(ServerMessageId.PlayerData, playerData);
+        }
     }
 
     private void SendCanBuildSnapshot(ClientSession session)
@@ -977,11 +1126,11 @@ public sealed class GameServer : IDisposable
             return;
         }
 
+        Span<byte> canBuildPayload = stackalloc byte[ServerCanBuildPacket.Size];
         foreach (var packet in _buildPopSync.CreateCanBuildSnapshot(_simulation, session.CityId))
         {
-            Span<byte> payload = stackalloc byte[ServerCanBuildPacket.Size];
-            packet.Write(payload);
-            session.SendServer(ServerMessageId.CanBuild, payload);
+            packet.Write(canBuildPayload);
+            session.SendServer(ServerMessageId.CanBuild, canBuildPayload);
         }
 
         _buildPopSync.Reset(_simulation, session.CityId);
@@ -989,9 +1138,9 @@ public sealed class GameServer : IDisposable
 
     private void SendFactoryItemCountSnapshot(ClientSession session)
     {
+        Span<byte> payload = stackalloc byte[ServerItemCountPacket.Size];
         foreach (var packet in _factoryItemCountSync.CreateItemCountSnapshot(_simulation))
         {
-            Span<byte> payload = stackalloc byte[ServerItemCountPacket.Size];
             packet.Write(payload);
             session.SendServer(ServerMessageId.ItemCount, payload);
         }
@@ -1001,29 +1150,29 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastBuildPopSync()
     {
+        Span<byte> canBuildPayload = stackalloc byte[ServerCanBuildPacket.Size];
         foreach (var cityId in _simulation.EnumerateCityBuildIds())
         {
             foreach (var packet in _buildPopSync.CollectCanBuildChanges(_simulation, cityId))
             {
-                Span<byte> payload = stackalloc byte[ServerCanBuildPacket.Size];
-                packet.Write(payload);
-                BroadcastCanBuild(payload, cityId);
+                packet.Write(canBuildPayload);
+                BroadcastCanBuild(canBuildPayload, cityId);
             }
         }
 
+        Span<byte> popPayload = stackalloc byte[ServerUpdatePopPacket.Size];
         foreach (var packet in _buildPopSync.CollectPopulationChanges(_simulation))
         {
-            Span<byte> payload = stackalloc byte[ServerUpdatePopPacket.Size];
-            packet.Write(payload);
-            BroadcastAll(ServerMessageId.UpdatePop, payload);
+            packet.Write(popPayload);
+            BroadcastAll(ServerMessageId.UpdatePop, popPayload);
         }
     }
 
     private void BroadcastFactoryItemCountSync()
     {
+        Span<byte> payload = stackalloc byte[ServerItemCountPacket.Size];
         foreach (var packet in _factoryItemCountSync.CollectItemCountChanges(_simulation))
         {
-            Span<byte> payload = stackalloc byte[ServerItemCountPacket.Size];
             packet.Write(payload);
             BroadcastAll(ServerMessageId.ItemCount, payload);
         }
@@ -1031,9 +1180,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastFactoryAddItems()
     {
+        Span<byte> payload = stackalloc byte[ServerAddItemPacket.Size];
         while (_simulation.TryConsumeFactoryAddItem(out var addItem))
         {
-            Span<byte> payload = stackalloc byte[ServerAddItemPacket.Size];
             addItem.Write(payload);
             BroadcastAll(ServerMessageId.AddItem, payload);
         }
@@ -1068,25 +1217,24 @@ public sealed class GameServer : IDisposable
         var snapshot = new JoinWorldSnapshot();
         _simulation.CollectJoinSnapshot(snapshot);
 
+        Span<byte> buildingPayload = stackalloc byte[ServerBuildingPacket.Size];
         foreach (var removed in snapshot.RemovedBuildings)
         {
-            Span<byte> payload = stackalloc byte[ServerBuildingPacket.Size];
-            removed.Write(payload);
-            session.SendServer(ServerMessageId.RemBuilding, payload);
+            removed.Write(buildingPayload);
+            session.SendServer(ServerMessageId.RemBuilding, buildingPayload);
         }
 
         foreach (var building in snapshot.Buildings)
         {
-            Span<byte> payload = stackalloc byte[ServerBuildingPacket.Size];
-            building.Write(payload);
-            session.SendServer(ServerMessageId.NewBuilding, payload);
+            building.Write(buildingPayload);
+            session.SendServer(ServerMessageId.NewBuilding, buildingPayload);
         }
 
+        Span<byte> itemPayload = stackalloc byte[ServerAddItemPacket.Size];
         foreach (var item in snapshot.Items)
         {
-            Span<byte> payload = stackalloc byte[ServerAddItemPacket.Size];
-            item.Write(payload);
-            session.SendServer(ServerMessageId.AddItem, payload);
+            item.Write(itemPayload);
+            session.SendServer(ServerMessageId.AddItem, itemPayload);
         }
     }
 
@@ -1415,6 +1563,309 @@ public sealed class GameServer : IDisposable
         recipient.SendServer(ServerMessageId.Whisper, packet[..length]);
     }
 
+    private void HandleAdmin(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsAdmin || payload.Length < ClientAdminPacket.Size)
+        {
+            return;
+        }
+
+        var request = ClientAdminPacket.Read(payload);
+        switch (request.Command)
+        {
+            case AdminCommands.JoinCity:
+                ApplyAdminJoinCity(session, (byte)Math.Min(request.TargetId, (ushort)byte.MaxValue));
+                break;
+            case AdminCommands.Shutdown:
+                ApplyAdminShutdown(session);
+                break;
+            case AdminCommands.SpawnItem:
+                ApplyAdminSpawnItem(session, request.TargetId);
+                break;
+            case AdminCommands.RequestBans:
+                ApplyAdminRequestBans(session);
+                break;
+            case AdminCommands.Unban:
+                ApplyAdminUnban(session, request.TargetId, payload);
+                break;
+            case AdminCommands.RequestNews:
+                ApplyAdminRequestNews(session);
+                break;
+            case AdminCommands.Warp:
+            case AdminCommands.Summon:
+            case AdminCommands.Kick:
+            case AdminCommands.Ban:
+                if (request.TargetId is 0 or > byte.MaxValue)
+                {
+                    return;
+                }
+
+                var targetId = (byte)request.TargetId;
+                if (targetId == session.PlayerId || !TryGetSession(targetId, out var target))
+                {
+                    return;
+                }
+
+                if (target.IsAdmin && request.Command is AdminCommands.Kick or AdminCommands.Ban)
+                {
+                    return;
+                }
+
+                switch (request.Command)
+                {
+                    case AdminCommands.Warp:
+                        ApplyAdminWarp(session, target);
+                        break;
+                    case AdminCommands.Summon:
+                        ApplyAdminSummon(session, target);
+                        break;
+                    case AdminCommands.Kick:
+                        ApplyAdminKickOrBan(session, target, AdminCommands.Kick, banAccount: false);
+                        break;
+                    case AdminCommands.Ban:
+                        ApplyAdminKickOrBan(session, target, AdminCommands.Ban, banAccount: true);
+                        break;
+                }
+
+                break;
+        }
+    }
+
+    private void ApplyAdminShutdown(ClientSession admin)
+    {
+        Console.WriteLine($"Shutdown::{admin.DisplayName}");
+        // Defer Stop() until after the current ReadSessions/Update pass so we don't
+        // dispose sockets mid-iteration.
+        _shutdownRequested = true;
+    }
+
+    private void ApplyAdminSpawnItem(ClientSession admin, ushort itemTypeId)
+    {
+        if (!admin.IsInGame || !Enum.IsDefined(typeof(ItemType), (int)itemTypeId))
+        {
+            return;
+        }
+
+        var itemType = (ItemType)itemTypeId;
+        if (!_simulation.TryAdminSpawnItemForNetworkPlayer(admin.PlayerId, itemType, out var pickedUp))
+        {
+            return;
+        }
+
+        Console.WriteLine($"Spawn Item::{admin.DisplayName}::{itemTypeId}");
+        Span<byte> pickedUpPayload = stackalloc byte[ServerPickedUpPacket.Size];
+        pickedUp.Write(pickedUpPayload);
+        admin.SendServer(ServerMessageId.PickedUp, pickedUpPayload);
+    }
+
+    private void ApplyAdminRequestBans(ClientSession admin)
+    {
+        Console.WriteLine($"Request Bans::{admin.DisplayName}");
+        var bans = _accounts.ListBans();
+        Span<byte> payload = stackalloc byte[ServerBanPacket.Size];
+        foreach (var ban in bans)
+        {
+            // Remake: IpAddress field carries BannedBy (no IP column in SQLite bans).
+            new ServerBanPacket(ban.Username, ban.BannedBy, ban.Reason).Write(payload);
+            admin.SendServer(ServerMessageId.Ban, payload);
+        }
+    }
+
+    private void ApplyAdminUnban(ClientSession admin, ushort banIndex, ReadOnlySpan<byte> payload)
+    {
+        string? username = null;
+        if (payload.Length > ClientAdminPacket.Size)
+        {
+            username = ReadNullTerminatedAscii(payload.Slice(ClientAdminPacket.Size));
+        }
+
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            var bans = _accounts.ListBans();
+            if (banIndex >= bans.Count)
+            {
+                return;
+            }
+
+            username = bans[banIndex].Username;
+        }
+
+        if (!_accounts.TryRemoveBan(username))
+        {
+            return;
+        }
+
+        Console.WriteLine($"Unban::{admin.DisplayName}::{username}");
+    }
+
+    private void ApplyAdminRequestNews(ClientSession admin)
+    {
+        Console.WriteLine($"Request News::{admin.DisplayName}");
+        SendNews(admin);
+    }
+
+    private void HandleChangeNews(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsAdmin)
+        {
+            return;
+        }
+
+        var news = ReadNullTerminatedAscii(payload);
+        if (news.Length > ServerNewsStore.MaxNewsLength)
+        {
+            return;
+        }
+
+        if (!_news.TrySetNews(news))
+        {
+            return;
+        }
+
+        Console.WriteLine($"ChangeNews::{session.DisplayName}");
+        // Push updated news to the editing admin (legacy smAppendNews).
+        SendNews(session);
+    }
+
+    private void SendNews(ClientSession session)
+    {
+        var news = _news.News;
+        if (string.IsNullOrEmpty(news))
+        {
+            return;
+        }
+
+        // Legacy SendNews chunks ~220 bytes; admin news is capped at 240.
+        const int chunkSize = 220;
+        var bytes = System.Text.Encoding.ASCII.GetBytes(news);
+        for (var offset = 0; offset < bytes.Length; offset += chunkSize)
+        {
+            var length = Math.Min(chunkSize, bytes.Length - offset);
+            session.SendServer(ServerMessageId.AppendNews, bytes.AsSpan(offset, length));
+        }
+    }
+
+    private static string ReadNullTerminatedAscii(ReadOnlySpan<byte> buffer)
+    {
+        var length = buffer.IndexOf((byte)0);
+        if (length < 0)
+        {
+            length = buffer.Length;
+        }
+
+        if (length <= 0)
+        {
+            return string.Empty;
+        }
+
+        return System.Text.Encoding.ASCII.GetString(buffer[..length]).Trim();
+    }
+
+    private void ApplyAdminJoinCity(ClientSession admin, byte cityId)
+    {
+        if (!admin.IsInGame || !CityCatalog.IsValidCityId(cityId))
+        {
+            return;
+        }
+
+        Console.WriteLine($"JoinCity::{admin.DisplayName}::{cityId}");
+        LeaveGame(admin);
+        admin.CityId = cityId;
+        admin.HasCityAssignment = true;
+        JoinGame(admin);
+    }
+
+    private void ApplyAdminWarp(ClientSession admin, ClientSession target)
+    {
+        if (!admin.IsInGame || !target.IsInGame)
+        {
+            return;
+        }
+
+        if (!_simulation.TryGetNetworkPlayerPosition(target.PlayerId, out var destination))
+        {
+            return;
+        }
+
+        Console.WriteLine($"Warp::{admin.DisplayName}::{target.DisplayName}");
+        TeleportNetworkPlayer(admin, destination);
+    }
+
+    private void ApplyAdminSummon(ClientSession admin, ClientSession target)
+    {
+        if (!admin.IsInGame || !target.IsInGame)
+        {
+            return;
+        }
+
+        if (!_simulation.TryGetNetworkPlayerPosition(admin.PlayerId, out var destination))
+        {
+            return;
+        }
+
+        Console.WriteLine($"Summon::{admin.DisplayName}::{target.DisplayName}");
+        TeleportNetworkPlayer(target, destination);
+    }
+
+    private void TeleportNetworkPlayer(ClientSession player, Vector2 destination)
+    {
+        if (!_simulation.TryForceNetworkPlayerPosition(player.PlayerId, destination))
+        {
+            return;
+        }
+
+        Span<byte> warp = stackalloc byte[ServerStateGamePacket.Size];
+        new ServerStateGamePacket(
+            (ushort)Math.Clamp((int)destination.X, 0, ushort.MaxValue),
+            (ushort)Math.Clamp((int)destination.Y, 0, ushort.MaxValue),
+            player.CityId).Write(warp);
+        player.SendServer(ServerMessageId.Warp, warp);
+
+        if (_simulation.TryGetNetworkPlayerSnapshot(player.PlayerId, out var snapshot))
+        {
+            Span<byte> update = stackalloc byte[ServerUpdatePacket.Size];
+            snapshot.ToPacket().Write(update);
+            BroadcastAll(ServerMessageId.Update, update);
+        }
+    }
+
+    private void ApplyAdminKickOrBan(
+        ClientSession admin,
+        ClientSession target,
+        byte command,
+        bool banAccount)
+    {
+        if (banAccount)
+        {
+            var banName = target.RegisteredUsername ?? target.DisplayName;
+            _accounts.TryAddBan(banName, admin.DisplayName, reason: "ban");
+        }
+
+        if (target.IsInGame)
+        {
+            LeaveGame(target);
+        }
+
+        Span<byte> adminPayload = stackalloc byte[ServerAdminPacket.Size];
+        new ServerAdminPacket(admin.PlayerId, target.PlayerId, command).Write(adminPayload);
+        BroadcastExcept(target.PlayerId, ServerMessageId.Admin, adminPayload);
+        BroadcastLobbyExcept(target.PlayerId, ServerMessageId.Admin, adminPayload);
+
+        // Payload byte = Kick/Ban command so the victim can show the correct verb.
+        Span<byte> kicked = stackalloc byte[1];
+        kicked[0] = command;
+        target.SendServer(ServerMessageId.Kicked, kicked);
+        Console.WriteLine(
+            $"{(banAccount ? "Ban" : "Kick")}::{admin.DisplayName}::{target.DisplayName}");
+
+        // Ban must drop the TCP session; otherwise the banned client stays in the lobby
+        // and can rejoin without hitting the login IsBanned check.
+        if (banAccount)
+        {
+            RemoveSession(target.PlayerId);
+        }
+    }
+
     private static string ReadChatPayload(ReadOnlySpan<byte> payload)
     {
         var length = payload.IndexOf((byte)0);
@@ -1430,9 +1881,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingHpEvents()
     {
+        Span<byte> payload = stackalloc byte[ServerHpPacket.Size];
         while (_simulation.TryConsumeNetworkHpEvent(out var hpEvent))
         {
-            Span<byte> payload = stackalloc byte[ServerHpPacket.Size];
             hpEvent.Write(payload);
             BroadcastAll(ServerMessageId.Hp, payload);
         }
@@ -1442,12 +1893,7 @@ public sealed class GameServer : IDisposable
     {
         DeathPointTransfers.Apply(victim, killerCityId, GetInGameSessions(), (session, pointDelta) =>
         {
-            if (pointDelta != 0 && !session.IsGuest && session.RegisteredUsername is not null)
-            {
-                _accounts.AdjustPoints(session.RegisteredUsername, pointDelta);
-            }
-
-            BroadcastPointsUpdate(session);
+            AdjustSessionPoints(session, pointDelta);
         });
     }
 
@@ -1469,11 +1915,50 @@ public sealed class GameServer : IDisposable
         BroadcastAll(ServerMessageId.PointsUpdate, payload);
     }
 
+    private void AdjustSessionPoints(ClientSession session, int delta)
+    {
+        if (delta != 0)
+        {
+            var oldRank = PlayerRankCatalog.GetRank(session.Points);
+            session.Points += delta;
+            var newRank = PlayerRankCatalog.GetRank(session.Points);
+            if (oldRank != newRank)
+            {
+                BroadcastPromotion(session.PlayerId, newRank);
+            }
+
+            if (!session.IsGuest && session.RegisteredUsername is not null)
+            {
+                _accounts.AdjustPoints(session.RegisteredUsername, delta);
+            }
+        }
+
+        BroadcastPointsUpdate(session);
+    }
+
+    private void BroadcastPromotion(byte playerId, string rank)
+    {
+        var packet = new ServerPromotionPacket(playerId, rank);
+        Span<byte> payload = stackalloc byte[packet.GetWriteLength()];
+        packet.Write(payload);
+        BroadcastAll(ServerMessageId.Promotion, payload);
+    }
+
+    private void BroadcastPendingItemLifeEvents()
+    {
+        Span<byte> payload = stackalloc byte[ServerItemLifePacket.Size];
+        while (_simulation.TryConsumeNetworkItemLifeEvent(out var itemLifeEvent))
+        {
+            itemLifeEvent.Write(payload);
+            BroadcastAll(ServerMessageId.ItemLife, payload);
+        }
+    }
+
     private void SendPointsSnapshot(ClientSession session)
     {
+        Span<byte> payload = stackalloc byte[ServerPointsUpdatePacket.Size];
         foreach (var player in GetInGameSessions())
         {
-            Span<byte> payload = stackalloc byte[ServerPointsUpdatePacket.Size];
             CreatePointsUpdatePacket(player).Write(payload);
             session.SendServer(ServerMessageId.PointsUpdate, payload);
         }
@@ -1487,9 +1972,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingDeathEvents()
     {
+        Span<byte> payload = stackalloc byte[ServerDeathPacket.Size];
         while (_simulation.TryConsumeNetworkDeathEvent(out var deathEvent))
         {
-            Span<byte> payload = stackalloc byte[ServerDeathPacket.Size];
             deathEvent.Write(payload);
             BroadcastAll(ServerMessageId.Death, payload);
 
@@ -1504,9 +1989,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingOrbEvents()
     {
+        Span<byte> payload = stackalloc byte[ServerOrbedCityPacket.Size];
         while (_simulation.TryConsumeOrbEvent(out var orbEvent))
         {
-            Span<byte> payload = stackalloc byte[ServerOrbedCityPacket.Size];
             new ServerOrbedCityPacket(
                 (byte)orbEvent.VictimCityId,
                 (byte)orbEvent.AttackerCityId,
@@ -1538,13 +2023,7 @@ public sealed class GameServer : IDisposable
                 continue;
             }
 
-            session.Points += points;
-            if (!session.IsGuest && session.RegisteredUsername is not null)
-            {
-                _accounts.AdjustPoints(session.RegisteredUsername, points);
-            }
-
-            BroadcastPointsUpdate(session);
+            AdjustSessionPoints(session, points);
         }
     }
 
@@ -1560,15 +2039,15 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingExplosionEvents()
     {
+        Span<byte> payload = stackalloc byte[ServerExplosionPacket.Size];
+        Span<byte> removePayload = stackalloc byte[ServerRemoveItemPacket.Size];
         while (_simulation.TryConsumeNetworkExplosionEvent(out var explosionEvent))
         {
-            Span<byte> payload = stackalloc byte[ServerExplosionPacket.Size];
             explosionEvent.Explosion.Write(payload);
             BroadcastAll(ServerMessageId.Explosion, payload);
 
             if (explosionEvent.RemovedItemId != 0)
             {
-                Span<byte> removePayload = stackalloc byte[ServerRemoveItemPacket.Size];
                 new ServerRemoveItemPacket(explosionEvent.RemovedItemId).Write(removePayload);
                 BroadcastAll(ServerMessageId.RemItem, removePayload);
             }
@@ -1577,9 +2056,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingBombBuildingRemovals()
     {
+        Span<byte> payload = stackalloc byte[ServerBuildingPacket.Size];
         while (_simulation.TryConsumeBombBuildingRemoval(out var building))
         {
-            Span<byte> payload = stackalloc byte[ServerBuildingPacket.Size];
             building.Write(payload);
             BroadcastAll(ServerMessageId.RemBuilding, payload);
             BroadcastTeamUnderAttack(building.City);
@@ -1588,9 +2067,11 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingRespawnEvents()
     {
+        Span<byte> warpPayload = stackalloc byte[ServerStateGamePacket.Size];
+        Span<byte> respawnPayload = stackalloc byte[ServerRespawnPacket.Size];
+        Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
         while (_simulation.TryConsumeNetworkRespawnEvent(out var respawnEvent))
         {
-            Span<byte> warpPayload = stackalloc byte[ServerStateGamePacket.Size];
             new ServerStateGamePacket(
                 (ushort)respawnEvent.Position.X,
                 (ushort)respawnEvent.Position.Y,
@@ -1601,13 +2082,11 @@ public sealed class GameServer : IDisposable
                 session.SendServer(ServerMessageId.Warp, warpPayload);
             }
 
-            Span<byte> respawnPayload = stackalloc byte[ServerRespawnPacket.Size];
             new ServerRespawnPacket(respawnEvent.PlayerId).Write(respawnPayload);
             BroadcastExcept(respawnEvent.PlayerId, ServerMessageId.Respawn, respawnPayload);
 
             if (_simulation.TryGetNetworkPlayerSnapshot(respawnEvent.PlayerId, out var snapshot))
             {
-                Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
                 snapshot.ToPacket().Write(updatePayload);
                 BroadcastAll(ServerMessageId.Update, updatePayload);
             }
@@ -1677,6 +2156,11 @@ public sealed class GameServer : IDisposable
         if (session.State == PlayerSessionState.InGame)
         {
             NotifyPlayerLeftBattlefield(session);
+            var slot = _cities.GetOrCreate(session.CityId);
+            if (slot.SuccessorPlayerId == session.PlayerId)
+            {
+                slot.SuccessorPlayerId = null;
+            }
         }
         else if (session.State >= PlayerSessionState.LoggedIn)
         {
@@ -1689,6 +2173,7 @@ public sealed class GameServer : IDisposable
         {
             _mayors.Remove(session.CityId, session.PlayerId);
             TransferMayor(session.CityId, excludedPlayerId: session.PlayerId);
+            _cities.GetOrCreate(session.CityId).SuccessorPlayerId = null;
         }
 
         _simulation.TryRemoveNetworkPlayer(playerId);
@@ -1724,7 +2209,16 @@ public sealed class GameServer : IDisposable
             }
             else
             {
-                session.IsMayor = false;
+                // Joining a city that already has a mayor — demote explicitly so the client
+                // clears IsMayor (e.g. admin /city from a city they previously owned).
+                if (session.IsMayor)
+                {
+                    SetMayor(session, isMayor: false);
+                }
+                else
+                {
+                    session.IsMayor = false;
+                }
             }
 
             return;
@@ -1735,16 +2229,52 @@ public sealed class GameServer : IDisposable
 
     private void TransferMayor(byte cityId, byte excludedPlayerId)
     {
-        foreach (var successor in GetInGameSessions())
-        {
-            if (successor.PlayerId == excludedPlayerId || successor.CityId != cityId)
-            {
-                continue;
-            }
+        var slot = _cities.GetOrCreate(cityId);
+        var roster = GetInGameSessions()
+            .Select(s => (s.PlayerId, s.CityId));
 
-            SetMayor(successor, isMayor: true);
+        if (!MayorSuccessorResolver.TryResolve(
+                cityId,
+                excludedPlayerId,
+                slot.SuccessorPlayerId,
+                roster,
+                out var successorId)
+            || !TryGetSession(successorId, out var successor))
+        {
+            slot.SuccessorPlayerId = null;
             return;
         }
+
+        slot.SuccessorPlayerId = null;
+        SetMayor(successor, isMayor: true);
+    }
+
+    private void HandleSuccessor(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsMayor || !session.IsInGame || payload.Length == 0)
+        {
+            return;
+        }
+
+        var successorId = payload[0];
+        var slot = _cities.GetOrCreate(session.CityId);
+
+        // 0 clears the designated heir (remake convenience; legacy used -1 server-side).
+        if (successorId == 0)
+        {
+            slot.SuccessorPlayerId = null;
+            return;
+        }
+
+        if (successorId == session.PlayerId
+            || !TryGetSession(successorId, out var successor)
+            || !successor.IsInGame
+            || successor.CityId != session.CityId)
+        {
+            return;
+        }
+
+        slot.SuccessorPlayerId = successorId;
     }
 
     private void SetMayor(ClientSession session, bool isMayor)

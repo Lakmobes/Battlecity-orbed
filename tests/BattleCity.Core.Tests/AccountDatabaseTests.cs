@@ -59,4 +59,23 @@ public sealed class AccountDatabaseTests : IDisposable
     {
         Assert.True(AccountDatabase.IsGuestLogin("Guest123", "guest"));
     }
+
+    [Fact]
+    public void Ban_ListAndUnban_RoundTrip()
+    {
+        Assert.True(_accounts.TryAddBan("BadActor", "HostAdmin", "griefing"));
+        Assert.True(_accounts.IsBanned("BadActor"));
+        Assert.True(_accounts.IsBanned("badactor")); // case-insensitive
+
+        var bans = _accounts.ListBans();
+        Assert.Contains(bans, ban =>
+            string.Equals(ban.Username, "BadActor", StringComparison.OrdinalIgnoreCase)
+            && ban.BannedBy == "HostAdmin"
+            && ban.Reason == "griefing");
+
+        Assert.True(_accounts.TryRemoveBan("BadActor"));
+        Assert.False(_accounts.IsBanned("BadActor"));
+        Assert.Empty(_accounts.ListBans());
+        Assert.False(_accounts.TryRemoveBan("BadActor"));
+    }
 }

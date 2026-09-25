@@ -5,17 +5,20 @@ using BattleCity.Client.Rendering;
 
 namespace BattleCity.Client.Scenes;
 
-public sealed class SceneContext
+public sealed class SceneContext : IDisposable
 {
     public SceneContext(AssetService assets, AudioService audio)
     {
         Assets = assets;
         Audio = audio;
+        EmbeddedLocalServer = new EmbeddedLocalServer();
     }
 
     public AssetService Assets { get; }
 
     public AudioService Audio { get; }
+
+    public EmbeddedLocalServer EmbeddedLocalServer { get; }
 
     public string PlayerName { get; set; } = "Guest";
 
@@ -37,4 +40,11 @@ public sealed class SceneContext
     public DisplayPresentation Presentation { get; set; } = DisplayPresentation.Create(
         DisplaySettings.LogicalWidth,
         DisplaySettings.LogicalHeight);
+
+    public void Dispose()
+    {
+        NetworkClient?.Dispose();
+        NetworkClient = null;
+        EmbeddedLocalServer.Dispose();
+    }
 }

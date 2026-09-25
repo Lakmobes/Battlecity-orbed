@@ -60,6 +60,12 @@ public sealed class InterviewScene : IScene
                     _statusMessage = "The interview was cancelled.";
                     _context.NetworkClient = _client;
                     return SceneTransition.Meeting;
+                case GameClientEventKind.Kicked:
+                    _statusMessage = networkEvent.KickCommand == BattleCity.Shared.Network.AdminCommands.Ban
+                        ? "You have been banned by an admin."
+                        : "You have been kicked by an admin.";
+                    _context.NetworkClient = _client;
+                    return SceneTransition.Meeting;
                 case GameClientEventKind.Disconnected:
                     _context.NetworkClient = null;
                     return SceneTransition.MainMenu;

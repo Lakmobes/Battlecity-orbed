@@ -28,3 +28,7 @@ jobs:
 
       - name: Test
         run: dotnet test src/BattleCity.sln --no-build -c Release --verbosity normal
+
+      # Smoke is outside the solution; build+run after unit tests (needs map.dat from checkout).
+      - name: Smoke
+        run: dotnet run --project tools/BattleCity.Smoke/BattleCity.Smoke.csproj -c Release --no-launch-profile

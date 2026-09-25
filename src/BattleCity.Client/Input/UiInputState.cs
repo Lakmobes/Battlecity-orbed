@@ -18,4 +18,13 @@ public struct UiInputState
     public bool MouseRightClicked;
     public bool PointerOverUiPanel;
     public bool PointerOverWorld;
+
+    /// <summary>True when the gamepad virtual cursor should be drawn (pointer mode).</summary>
+    public bool ShowVirtualCursor;
+
+    /// <summary>True on the frame a pad becomes connected (hotplug).</summary>
+    public bool GamepadJustConnected;
+
+    /// <summary>True on the frame a pad becomes disconnected (hotplug).</summary>
+    public bool GamepadJustDisconnected;
 }

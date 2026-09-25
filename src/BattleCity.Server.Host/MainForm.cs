@@ -20,6 +20,9 @@ internal sealed class MainForm : Form
     private readonly ListBox _lanAddresses = new();
     private readonly ListView _players = new();
     private readonly CheckedListBox _accounts = new();
+    private readonly ListView _bans = new();
+    private readonly Button _unbanButton = new();
+    private readonly Button _refreshBansButton = new();
     private readonly Label _adminHint = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new();
 
@@ -27,6 +30,7 @@ internal sealed class MainForm : Form
     private Thread? _tickThread;
     private volatile bool _tickRunning;
     private bool _suppressAccountToggle;
+    private int _banRefreshTicks;
 
     public MainForm()
     {
@@ -40,6 +44,7 @@ internal sealed class MainForm : Form
         WireEvents();
         RefreshLanAddresses();
         ReloadAccounts();
+        ReloadBans();
         UpdateUiState(running: false);
         RefreshShareBox();
     }
@@ -180,11 +185,13 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 5,
             Padding = new Padding(8, 0, 0, 0),
         };
         right.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        right.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
+        right.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        right.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
         right.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.Controls.Add(right, 1, 0);
 
@@ -199,10 +206,60 @@ internal sealed class MainForm : Form
         _accounts.CheckOnClick = true;
         right.Controls.Add(_accounts, 0, 1);
 
-        _adminHint.Text = "Toggle takes effect immediately for online players.\nUsername \"admin\" is always treated as admin.";
+        var bansHeader = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            AutoSize = true,
+            Margin = new Padding(0, 10, 0, 0),
+        };
+        bansHeader.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        bansHeader.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        bansHeader.Controls.Add(new Label
+        {
+            Text = "Banned accounts",
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 4),
+        }, 0, 0);
+
+        var banButtons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            WrapContents = false,
+            Margin = new Padding(0, 0, 0, 4),
+        };
+        _unbanButton.Text = "Unban selected";
+        _unbanButton.Width = 120;
+        _unbanButton.Enabled = false;
+        banButtons.Controls.Add(_unbanButton);
+
+        _refreshBansButton.Text = "Refresh";
+        _refreshBansButton.Width = 80;
+        banButtons.Controls.Add(_refreshBansButton);
+        bansHeader.Controls.Add(banButtons, 0, 1);
+        right.Controls.Add(bansHeader, 0, 2);
+
+        _bans.Dock = DockStyle.Fill;
+        _bans.View = View.Details;
+        _bans.FullRowSelect = true;
+        _bans.GridLines = true;
+        _bans.MultiSelect = false;
+        _bans.HideSelection = false;
+        _bans.Columns.Add("Username", 110);
+        _bans.Columns.Add("By", 90);
+        _bans.Columns.Add("Reason", 70);
+        _bans.Columns.Add("When (UTC)", 140);
+        right.Controls.Add(_bans, 0, 3);
+
+        _adminHint.Text =
+            "Toggle admin takes effect immediately for online players.\n" +
+            "Username \"admin\" is always treated as admin.\n" +
+            "Bans block login (registered name or guest display name).";
         _adminHint.AutoSize = true;
         _adminHint.Margin = new Padding(0, 8, 0, 0);
-        right.Controls.Add(_adminHint, 0, 2);
+        right.Controls.Add(_adminHint, 0, 4);
     }
 
     private void WireEvents()
@@ -212,14 +269,31 @@ internal sealed class MainForm : Form
         _copyInviteButton.Click += (_, _) => CopyInvite();
         _lanAddresses.SelectedIndexChanged += (_, _) => RefreshShareBox();
         _accounts.ItemCheck += OnAccountItemCheck;
+        _unbanButton.Click += (_, _) => UnbanSelected();
+        _refreshBansButton.Click += (_, _) => ReloadBans();
+        _bans.SelectedIndexChanged += (_, _) => UpdateUnbanButtonState();
         FormClosing += (_, _) => StopServer();
 
         _refreshTimer.Interval = 500;
         _refreshTimer.Tick += (_, _) =>
         {
+            if (_server is not null && !_server.IsRunning)
+            {
+                var status = "Server shut down (admin /shutdown).";
+                StopServer();
+                _statusLabel.Text = status;
+                return;
+            }
+
             RefreshLanAddresses();
             RefreshPlayers();
             RefreshShareBox();
+            _banRefreshTicks++;
+            if (_banRefreshTicks >= 10)
+            {
+                _banRefreshTicks = 0;
+                ReloadBans();
+            }
         };
     }
 
@@ -247,6 +321,7 @@ internal sealed class MainForm : Form
             _refreshTimer.Start();
             UpdateUiState(running: true);
             ReloadAccounts();
+            ReloadBans();
             RefreshPlayers();
             RefreshShareBox();
         }
@@ -465,6 +540,141 @@ internal sealed class MainForm : Form
 
         _accounts.EndUpdate();
         _suppressAccountToggle = false;
+    }
+
+    private void ReloadBans()
+    {
+        IReadOnlyList<BanRecord> bans;
+        try
+        {
+            if (_server is not null)
+            {
+                bans = _server.ListBans();
+            }
+            else
+            {
+                using var db = new AccountDatabase(_databasePath);
+                bans = db.ListBans();
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusLabel.Text = $"Ban DB: {ex.Message}";
+            return;
+        }
+
+        var selected = _bans.SelectedItems.Count > 0
+            ? _bans.SelectedItems[0].Text
+            : null;
+
+        _bans.BeginUpdate();
+        _bans.Items.Clear();
+        foreach (var ban in bans)
+        {
+            var when = FormatBanTimestamp(ban.CreatedUtc);
+            var item = new ListViewItem(ban.Username)
+            {
+                Tag = ban.Username,
+            };
+            item.SubItems.Add(ban.BannedBy);
+            item.SubItems.Add(ban.Reason);
+            item.SubItems.Add(when);
+            _bans.Items.Add(item);
+        }
+
+        _bans.EndUpdate();
+
+        if (selected is not null)
+        {
+            foreach (ListViewItem item in _bans.Items)
+            {
+                if (string.Equals(item.Text, selected, StringComparison.OrdinalIgnoreCase))
+                {
+                    item.Selected = true;
+                    item.EnsureVisible();
+                    break;
+                }
+            }
+        }
+
+        UpdateUnbanButtonState();
+    }
+
+    private static string FormatBanTimestamp(string createdUtc)
+    {
+        if (DateTime.TryParse(
+                createdUtc,
+                null,
+                System.Globalization.DateTimeStyles.RoundtripKind,
+                out var parsed))
+        {
+            return parsed.ToUniversalTime().ToString("yyyy-MM-dd HH:mm");
+        }
+
+        return createdUtc;
+    }
+
+    private void UpdateUnbanButtonState() =>
+        _unbanButton.Enabled = _bans.SelectedItems.Count > 0;
+
+    private void UnbanSelected()
+    {
+        if (_bans.SelectedItems.Count == 0)
+        {
+            return;
+        }
+
+        var username = _bans.SelectedItems[0].Tag as string ?? _bans.SelectedItems[0].Text;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            this,
+            $"Remove ban for '{username}'?",
+            "Unban",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+        if (confirm != DialogResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            bool removed;
+            if (_server is not null)
+            {
+                removed = _server.TryUnbanAccount(username);
+            }
+            else
+            {
+                using var db = new AccountDatabase(_databasePath);
+                removed = db.TryRemoveBan(username);
+            }
+
+            if (!removed)
+            {
+                MessageBox.Show(
+                    this,
+                    $"No ban found for '{username}'.",
+                    "Unban",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            else
+            {
+                _statusLabel.Text = $"Unbanned: {username}";
+            }
+
+            ReloadBans();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Unban", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            ReloadBans();
+        }
     }
 
     private void OnAccountItemCheck(object? sender, ItemCheckEventArgs e)

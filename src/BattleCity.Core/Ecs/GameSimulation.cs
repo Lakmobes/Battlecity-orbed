@@ -69,6 +69,9 @@ public sealed class GameSimulation : IDisposable
     /// <summary>When true, factory bay spawns enqueue AddItem packets for broadcast.</summary>
     public bool ReportFactoryItemSpawnsToNetwork { get; set; }
 
+    /// <summary>When true, damaged placeables queue <c>smItemLife</c> burn sync (server).</summary>
+    public bool ReportItemLifeToNetwork { get; set; }
+
     /// <summary>When true, dying tanks return placeables to factory bays.</summary>
     public bool ReturnInventoryPlaceablesOnDeath { get; set; } = true;
 
@@ -90,6 +93,7 @@ public sealed class GameSimulation : IDisposable
     public bool NetworkPlayersUseLocalBulletDamage { get; set; } = true;
 
     private readonly List<ServerHpPacket> _pendingHpEvents = new();
+    private readonly List<ServerItemLifePacket> _pendingItemLifeEvents = [];
     private readonly List<PendingExplosionEvent> _pendingExplosionEvents = [];
     private readonly List<PendingRespawnEvent> _pendingRespawnEvents = [];
     private readonly List<ServerAddItemPacket> _pendingFactoryAddItems = [];
@@ -133,6 +137,40 @@ public sealed class GameSimulation : IDisposable
         _cityBuilds[cityId] = build;
         _cityBuild = build;
         AssignNetworkBuildingIds();
+    }
+
+    /// <summary>
+    /// Multiplayer world boot: every map command center, no <c>.city</c> demo buildings
+    /// (matches legacy MP — cities start with CC only; players build the rest).
+    /// </summary>
+    public int LoadMultiplayerWorld()
+    {
+        _loadedCity = null;
+        _cityBuilds.Clear();
+        _cityBuild = null;
+
+        var ccCount = LevelLoader.SpawnAllCommandCenters(_world, _tileMap);
+        foreach (var (cityId, gridX, gridY) in LevelLoader.EnumerateCommandCenters(_tileMap))
+        {
+            var build = new CityBuildState { CityId = cityId };
+            CityBuildInitializer.ApplyLegacyStartingPermissions(build);
+            build.CommandCenterGridX = gridX;
+            build.CommandCenterGridY = gridY;
+            build.CurrentBuildingCount = 1;
+            build.MaxBuildingCount = 1;
+            _cityBuilds[cityId] = build;
+        }
+
+        AssignNetworkBuildingIds();
+        return ccCount;
+    }
+
+    public int CountBuildingsInWorld()
+    {
+        var count = 0;
+        var query = new QueryDescription().WithAll<BuildingRef>();
+        _world.Query(in query, (ref BuildingRef _) => count++);
+        return count;
     }
 
     private static bool OverlapsBuildingFootprint(int gridAnchorX, int gridAnchorY, int otherGridX, int otherGridY) =>
@@ -356,6 +394,35 @@ public sealed class GameSimulation : IDisposable
         }
 
         position = _world.Get<Transform2D>(entity).Position;
+        return true;
+    }
+
+    /// <summary>Admin warp/summon — set position without the client anti-cheat distance gate.</summary>
+    public bool TryForceNetworkPlayerPosition(byte playerId, Vector2 position)
+    {
+        if (!TryGetNetworkPlayerEntity(playerId, out var entity))
+        {
+            return false;
+        }
+
+        ref var transform = ref _world.Get<Transform2D>(entity);
+        transform.Position = position;
+        transform.PreviousPosition = position;
+
+        if (_world.Has<Velocity>(entity))
+        {
+            ref var velocity = ref _world.Get<Velocity>(entity);
+            velocity.Value = Vector2.Zero;
+        }
+
+        if (_world.Has<TankLifeState>(entity))
+        {
+            ref var life = ref _world.Get<TankLifeState>(entity);
+            life.IsDead = false;
+            life.RespawnTimerSeconds = 0f;
+            life.SpawnPosition = position;
+        }
+
         return true;
     }
 
@@ -661,7 +728,8 @@ public sealed class GameSimulation : IDisposable
             _audioBuffer,
             QueueNetworkPlayerHpIfChanged,
             applyDamageToNetworkPlayers: !NetworkPlayersUseLocalBulletDamage,
-            defendedCityId: _cityBuild?.CityId ?? 0);
+            defendedCityId: _cityBuild?.CityId ?? 0,
+            onPlacedItemDamaged: ReportItemLifeToNetwork ? QueueNetworkItemLifeIfNeeded : null);
         CombatLifeSystem.Update(
             _world,
             deltaSeconds,
@@ -737,6 +805,19 @@ public sealed class GameSimulation : IDisposable
         return true;
     }
 
+    public bool TryConsumeNetworkItemLifeEvent(out ServerItemLifePacket itemLifeEvent)
+    {
+        if (_pendingItemLifeEvents.Count == 0)
+        {
+            itemLifeEvent = default;
+            return false;
+        }
+
+        itemLifeEvent = _pendingItemLifeEvents[0];
+        _pendingItemLifeEvents.RemoveAt(0);
+        return true;
+    }
+
     public bool TryConsumeNetworkExplosionEvent(out PendingExplosionEvent explosionEvent)
     {
         if (_pendingExplosionEvents.Count == 0)
@@ -808,6 +889,50 @@ public sealed class GameSimulation : IDisposable
             new Vector2(packet.X, packet.Y),
             packet.City,
             playWarpAudio: true);
+    }
+
+    /// <summary>
+    /// Admin <c>/city</c> rejoin: warp + reset inventory/city affiliation to match a fresh server spawn.
+    /// </summary>
+    public void ApplyAdminCityRejoin(in ServerStateGamePacket packet, bool isMayor, bool isAdmin)
+    {
+        if (!TryGetLocalPlayerEntity(out var entity))
+        {
+            ApplyNetworkWarp(packet);
+            return;
+        }
+
+        var cityId = packet.City;
+        EnsureCityBuild(cityId);
+        TryGetCityBuild(cityId, out var cityBuild);
+        var inventory = PlayerInventory.CreateLoadoutForCity(cityBuild);
+        inventory.Orb = 0;
+
+        var position = new Vector2(packet.X, packet.Y);
+        ApplyRespawnState(entity, position, cityId, playWarpAudio: true);
+
+        if (_world.Has<PlayerInventory>(entity))
+        {
+            _world.Set(entity, inventory);
+        }
+
+        if (_world.Has<MayorStatus>(entity))
+        {
+            _world.Get<MayorStatus>(entity).IsMayor = isMayor;
+        }
+
+        if (_world.Has<SpriteRef>(entity))
+        {
+            ref var sprite = ref _world.Get<SpriteRef>(entity);
+            sprite.SourceY = TankSpriteSelector.GetSourceY(cityId, cityId, isMayor, isAdmin)
+                * GameConstants.TileSize;
+        }
+
+        if (_world.Has<Health>(entity))
+        {
+            ref var health = ref _world.Get<Health>(entity);
+            health.Current = health.Max;
+        }
     }
 
     public void ApplyNetworkRespawn(byte playerId)
@@ -1362,6 +1487,36 @@ public sealed class GameSimulation : IDisposable
         return true;
     }
 
+    /// <summary>Admin spawn: grant one item into the player's inventory (legacy <c>cmAdmin</c> 7).</summary>
+    public bool TryAdminSpawnItemForNetworkPlayer(
+        byte playerId,
+        ItemType type,
+        out ServerPickedUpPacket pickedUpPacket)
+    {
+        pickedUpPacket = default;
+
+        if (!Enum.IsDefined(typeof(ItemType), (int)type))
+        {
+            return false;
+        }
+
+        if (!TryGetNetworkPlayerEntity(playerId, out var entity)
+            || !_world.Has<PlayerInventory>(entity))
+        {
+            return false;
+        }
+
+        ref var inventory = ref _world.Get<PlayerInventory>(entity);
+        if (!inventory.TryAdd(type))
+        {
+            return false;
+        }
+
+        var itemId = AllocateNetworkItemId();
+        pickedUpPacket = new ServerPickedUpPacket(itemId, active: 0, (byte)type);
+        return true;
+    }
+
     public void ApplyNetworkRemoveItem(in ServerRemoveItemPacket packet)
     {
         if (TryFindNetworkItem(packet.ItemId, out var entity))
@@ -1607,6 +1762,18 @@ public sealed class GameSimulation : IDisposable
             ? playerCityId
             : _cityBuild?.CityId ?? 0;
         CityAlertSystem.TriggerForCity(_world, cityId);
+    }
+
+    /// <summary>Legacy <c>smItemLife</c> — sync damaged item burn state to remote clients.</summary>
+    public void ApplyNetworkItemLife(in ServerItemLifePacket packet)
+    {
+        if (!TryFindNetworkItem(packet.ItemId, out var entity) || !_world.Has<Health>(entity))
+        {
+            return;
+        }
+
+        ref var health = ref _world.Get<Health>(entity);
+        health.Current = Math.Clamp(packet.Life, 0, health.Max);
     }
 
     public void ApplyNetworkCanBuild(in ServerCanBuildPacket packet)
@@ -2087,6 +2254,20 @@ public sealed class GameSimulation : IDisposable
 
         var playerId = _world.Get<NetworkIdentity>(entity).PlayerId;
         _pendingHpEvents.Add(new ServerHpPacket(playerId, (byte)Math.Clamp(currentHealth, 0, byte.MaxValue)));
+    }
+
+    private void QueueNetworkItemLifeIfNeeded(Entity entity, ItemType type, int healthAfterDamage)
+    {
+        if (!ReportItemLifeToNetwork
+            || !ItemDamageSync.ShouldBroadcastItemLife(type, healthAfterDamage)
+            || !_world.Has<NetworkItemRef>(entity))
+        {
+            return;
+        }
+
+        var itemId = _world.Get<NetworkItemRef>(entity).ItemId;
+        _pendingItemLifeEvents.Add(
+            new ServerItemLifePacket(itemId, ItemDamageSync.LegacyBurnLifeValue));
     }
 
     private bool ApplyDeathState(Entity entity, byte killerCity, bool playEffects)

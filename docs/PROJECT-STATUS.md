@@ -54,10 +54,13 @@ dotnet test src/BattleCity.sln
 dotnet run --project src/BattleCity.Client/BattleCity.Client.csproj
 # → Play Offline (Buenos Aires)
 
-# Online (two terminals)
-dotnet run --project src/BattleCity.Server.Host/BattleCity.Server.Host.csproj   # or BattleCity.Server
+# Online — one terminal (embedded local server)
 dotnet run --project src/BattleCity.Client/BattleCity.Client.csproj
-# → Play Online → Server 127.0.0.1 → Meeting Room
+# → Play Online (Local Server) → auto-starts 127.0.0.1:5643 → Meeting Room
+
+# Online — separate host (friends / LAN)
+dotnet run --project src/BattleCity.Server.Host/BattleCity.Server.Host.csproj
+dotnet run --project src/BattleCity.Client/BattleCity.Client.csproj
 
 # Smoke
 dotnet run --project tools/BattleCity.Smoke/BattleCity.Smoke.csproj
@@ -79,17 +82,15 @@ Share `dist/BattleCity-win-x64.zip`. Host runs `Server/BattleCity.Server.Host.ex
 |-----|---------|
 | [PROJECT-STATUS.md](PROJECT-STATUS.md) | This handoff overview |
 | [LEGACY-DELTAS.md](LEGACY-DELTAS.md) | Intentional + accidental differences vs C++ |
+| [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) | Full legacy audit, cities/spawn/compass gaps, fix backlog |
 | [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) | Phase checklist and packet history |
 | [HOSTING.md](HOSTING.md) | LAN / Tailscale / firewall for players |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to pick up work safely |
 
 ## Suggested next work
 
-1. Network `smUnderAttack` (local under-attack UI already exists)
-2. `smItemLife` — bomb fuse / item TTL for remotes
-3. `smPromotion` — rank-up chat on point thresholds
-4. Wire smoke test into CI (`.github/workflows/build.yml`)
-5. Clarify or auto-start local server from “Play Online (Local Server)” menu path
-6. Broader packet audit: `ServerMessageId` vs handlers in `GameServer`
+1. Optional: starting-city admin edit / account editor (`cmChangeStartingCity`, `cmAdminEdit`)
+
+See [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) for the full backlog.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow tips.

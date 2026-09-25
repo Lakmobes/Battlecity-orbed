@@ -37,6 +37,15 @@ For the current handoff checkpoint (host UI, modern HUD, population, recharge ab
 - [x] **Phase 28 — Factory Item Count Sync** (`smItemCount`)
 - [x] **Phase 29 — Explosion Sync** (`smExplosion`)
 - [x] **Phase 30 — Respawn / Warp Sync** (`smRespawn`, `smWarp`)
+- [x] **Phase 31 — Item Life Sync** (`smItemLife` — damaged wall/turret burn state)
+- [x] **Phase 32 — Promotion** (`smPromotion` — rank-up chat on point thresholds)
+- [x] **Phase 33 — Packet Audit Closures** (`InterviewCancel` in-game, join `PlayerData` roster, `cmSuccessor` / `/heir`)
+- [x] **Phase 34 — Admin Kick/Ban** (`cmAdmin` / `smAdmin` / `smKicked` + SQLite bans; `/kick` `/ban`)
+- [x] **Phase 35 — 8-Sector Compass** (**P-2** — legacy `imgArrows` / `imgArrowsRed` home arrow)
+- [x] **Phase 36 — Admin Join/Warp/Summon** (`cmAdmin` 2–4; `/city`, `/warp`, `/summon`)
+- [x] **Phase 37 — Server.Host Ban UI** (ban list + unban)
+- [x] **Phase 38 — Admin Spawn/Shutdown** (`cmAdmin` 6–7; `/spawn`, `/shutdown`)
+- [x] **Phase 39 — Admin Bans/News Wire** (`cmAdmin` 8–10 + `cmChangeNews`; `/bans` `/unban` `/news` `/setnews`)
 
 Finance HUD (`smFinance`) is intentionally **out of scope** for this rewrite.
 
@@ -57,15 +66,27 @@ Not numbered as formal phases; shipping together as a contributor handoff:
 
 ### Remaining network parity (not yet scheduled as phases)
 
-There is **no fixed total phase count** — phases are added incrementally as legacy multiplayer gaps are closed. Likely next targets:
+There is **no fixed total phase count** — phases are added incrementally as legacy multiplayer gaps are closed. Recent closures:
 
-| Candidate | Legacy packets | Notes |
-|-----------|----------------|-------|
-| City under attack | `smUnderAttack` | Local alert exists; network broadcast still open |
-| Item life sync | `smItemLife` | Bomb fuse / item TTL for remotes |
-| Promotion | `smPromotion` | Rank-up chat line on point thresholds |
+| Phase | Legacy packets | Notes |
+|-------|----------------|-------|
+| 31 | `smItemLife` | Wall/turret/plasma/sleeper burn sync after bullet damage |
+| 32 | `smPromotion` | Rank-up chat line when points cross thresholds |
+| 33 | `smInterviewCancel`, `smPlayerData`, `cmSuccessor` | Hire cancel UI, join name roster, mayor heir |
+| 34 | `cmAdmin` / `smAdmin` / `smKicked` | Admin kick/ban + persistent bans table |
+| 35 | HUD compass | Legacy 8-sector `imgArrows` home arrow (**P-2**) |
+| 36 | `cmAdmin` 2–4 | Join city / warp / summon (`/city`, `/warp`, `/summon`) |
+| 37 | Host UI | Ban list + unban in `BattleCity.Server.Host` |
+| 38 | `cmAdmin` 6–7 | Spawn item into inventory / remote shutdown (`/spawn`, `/shutdown`) |
+| 39 | `cmAdmin` 8–10 + `cmChangeNews` | Ban list / unban / news over the wire (`/bans` `/unban` `/news` `/setnews`) |
 
-Phases **0–30** are complete (31 numbered milestones including Phase 0).
+Likely next targets: starting-city admin edit; optional `cmAdminEdit` account editor; polish leftover deltas in [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md).
+
+**Play Online (Local Server)** auto-starts an embedded `GameServer` on `127.0.0.1:5643` (or reuses an existing listener). Friend hosting still uses Server.Host.
+
+CI (`.github/workflows/build.yml`) runs unit tests then `tools/BattleCity.Smoke` (1 mayor + 3 soldiers join + move).
+
+Phases **0–39** are complete (40 numbered milestones including Phase 0).
 
 ## Build & Run
 
@@ -79,7 +100,7 @@ dotnet run --project src/BattleCity.Client/BattleCity.Client.csproj
 dotnet test src/BattleCity.sln
 ```
 
-Press **Escape** in-game to return to the main menu. From the menu choose **Play Offline**, **Play Online** (local server on port 5643), or **Quit**. In-game: **arrows / WASD**, **Shift / LMB** fire, **Q** drop turret, **M** minimap, **Tab+arrows** camera pan.
+Press **Escape** in-game to return to the main menu. From the menu choose **Play Offline**, **Play Online (Local Server)** (auto-starts embedded server on port 5643), or **Quit**. In-game: **arrows / WASD**, **Shift / LMB** fire, **Q** drop turret, **M** minimap, **Tab+arrows** camera pan.
 
 ```powershell
 # Terminal 1 — authoritative server

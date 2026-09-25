@@ -67,6 +67,14 @@ public sealed class MainMenuScene : IScene
                 _context.PlayerName = $"Guest{Random.Shared.Next(100, 999)}";
                 _context.PlayerPassword = "guest";
                 _context.ServerHost = "127.0.0.1";
+                _context.ServerPort = BattleCity.Shared.Constants.NetworkConstants.TcpPort;
+
+                var ensure = _context.EmbeddedLocalServer.EnsureRunning(out var message);
+                _context.LoginStatusMessage = message;
+                if (ensure == Network.EmbeddedLocalServer.EnsureResult.Failed)
+                {
+                    // Still open login so the player can point at another host or retry after starting Server.Host.
+                }
             }
 
             return _selectedIndex switch

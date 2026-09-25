@@ -103,6 +103,27 @@ public sealed class UiRenderer
         {
             DrawHirePanel(spriteBatch, in context);
         }
+
+        if (context.ShowVirtualCursor)
+        {
+            DrawVirtualCursor(spriteBatch, context.VirtualCursorLogical);
+        }
+    }
+
+    private void DrawVirtualCursor(SpriteBatch spriteBatch, Vector2 logicalPosition)
+    {
+        var pixel = _assets.Pixel;
+        var x = (int)logicalPosition.X;
+        var y = (int)logicalPosition.Y;
+        const int arm = 7;
+        const int thickness = 2;
+        var fill = MenuTheme.TextAccent;
+        var outline = new Color(0, 0, 0, 200);
+
+        spriteBatch.Draw(pixel, new Rectangle(x - arm - 1, y - thickness / 2 - 1, arm * 2 + 3, thickness + 2), outline);
+        spriteBatch.Draw(pixel, new Rectangle(x - thickness / 2 - 1, y - arm - 1, thickness + 2, arm * 2 + 3), outline);
+        spriteBatch.Draw(pixel, new Rectangle(x - arm, y - thickness / 2, arm * 2 + 1, thickness), fill);
+        spriteBatch.Draw(pixel, new Rectangle(x - thickness / 2, y - arm, thickness, arm * 2 + 1), fill);
     }
 
     private void DrawHirePanel(SpriteBatch spriteBatch, in RenderContext context)
@@ -251,24 +272,29 @@ public sealed class UiRenderer
             var fill = selected ? MenuTheme.ButtonFocusFill : MenuTheme.ButtonIdleFill;
             var border = selected ? MenuTheme.ButtonFocusBorder : MenuTheme.ButtonIdleBorder;
             spriteBatch.Draw(pixel, bounds, fill);
-            spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Y, bounds.Width, selected ? 3 : 2), border);
-            spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Bottom - (selected ? 3 : 2), bounds.Width, selected ? 3 : 2), border);
-            spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Y, selected ? 3 : 2, bounds.Height), border);
-            spriteBatch.Draw(pixel, new Rectangle(bounds.Right - (selected ? 3 : 2), bounds.Y, selected ? 3 : 2, bounds.Height), border);
+            spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Y, bounds.Width, 1), border);
+            spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Bottom - 1, bounds.Width, 1), border);
+            spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Y, 1, bounds.Height), border);
+            spriteBatch.Draw(pixel, new Rectangle(bounds.Right - 1, bounds.Y, 1, bounds.Height), border);
 
-            var label = selected ? $">  {SettingsMenuItems[i]}  <" : SettingsMenuItems[i];
+            if (selected)
+            {
+                spriteBatch.Draw(
+                    pixel,
+                    new Rectangle(bounds.X, bounds.Y, MenuTheme.SelectionBarWidth, bounds.Height),
+                    MenuTheme.SelectionAccent);
+            }
+
             var color = selected ? MenuTheme.TextAccent : MenuTheme.TextSecondary;
-            var pulse = selected ? MenuTheme.FocusPulse(context.AnimationTime) : 1f;
-            var scale = new Vector2(pulse, pulse);
-            var size = _font.MeasureString(label) * scale;
+            var size = _font.MeasureString(SettingsMenuItems[i]);
             spriteBatch.DrawString(
                 _font,
-                label,
-                new Vector2(bounds.Center.X - size.X / 2f, bounds.Y + 14),
+                SettingsMenuItems[i],
+                new Vector2(bounds.Center.X - size.X / 2f, bounds.Center.Y - size.Y / 2f),
                 color,
                 0f,
                 Vector2.Zero,
-                scale,
+                Vector2.One,
                 SpriteEffects.None,
                 0f);
         }

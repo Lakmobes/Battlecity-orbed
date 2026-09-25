@@ -301,6 +301,28 @@
 /processorParam:TextureFormat=Color
 /build:Sprites/Hud/CompassRing.png
 
+#begin Sprites/Hud/CompassArrows.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyEnabled=False
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Sprites/Hud/CompassArrows.png
+
+#begin Sprites/Hud/CompassArrowsRed.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyEnabled=False
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:Sprites/Hud/CompassArrowsRed.png
+
 #begin Sprites/Title/BCLogo.png
 /importer:TextureImporter
 /processor:TextureProcessor

@@ -64,4 +64,8 @@ public sealed class RenderContext
 
     /// <summary>Local observer city for fog-of-war style item visibility (sleepers).</summary>
     public int ObserverCityId { get; init; }
+
+    /// <summary>Gamepad virtual cursor overlay (pointer mode).</summary>
+    public bool ShowVirtualCursor { get; init; }
+    public Vector2 VirtualCursorLogical { get; init; }
 }

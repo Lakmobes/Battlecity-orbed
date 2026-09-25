@@ -19,7 +19,7 @@ public static class MeetingRoomLayout
         new(UiLayout.LogicalWidth / 2 + 16, PanelTop, UiLayout.LogicalWidth / 2 - 48, UiLayout.LogicalHeight - PanelTop - PanelBottomMargin);
 
     public static Rectangle RefreshButton =>
-        new(32, UiLayout.LogicalHeight - 64, 130, 28);
+        new(32, UiLayout.LogicalHeight - 68, 148, 36);
 
     public static Rectangle QuitHint =>
         new(UiLayout.LogicalWidth / 2 + 16, UiLayout.LogicalHeight - 64, UiLayout.LogicalWidth / 2 - 48, 28);

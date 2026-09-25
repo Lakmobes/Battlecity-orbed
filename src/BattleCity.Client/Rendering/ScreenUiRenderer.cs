@@ -12,7 +12,6 @@ public sealed class ScreenUiRenderer
     private readonly AssetService _assets;
     private SpriteFont? _titleFont;
     private SpriteFont? _bodyFont;
-    private float _timeSeconds;
 
     public ScreenUiRenderer(AssetService assets)
     {
@@ -25,7 +24,10 @@ public sealed class ScreenUiRenderer
         _bodyFont = _assets.LoadFont("Fonts/UiFont");
     }
 
-    public void Update(float deltaSeconds) => _timeSeconds += deltaSeconds;
+    public void Update(float deltaSeconds)
+    {
+        _ = deltaSeconds;
+    }
 
     public void DrawBackdrop(SpriteBatch spriteBatch, int screenWidth, int screenHeight)
     {
@@ -39,17 +41,20 @@ public sealed class ScreenUiRenderer
             pixel,
             new Rectangle(0, screenHeight - MenuTheme.FooterHeight, screenWidth, MenuTheme.FooterHeight),
             MenuTheme.FooterBar);
-        // Soft accent line under header.
         spriteBatch.Draw(
             pixel,
-            new Rectangle(0, MenuTheme.HeaderHeight - 2, screenWidth, 2),
-            new Color(90, 140, 220, 80));
+            new Rectangle(0, MenuTheme.HeaderHeight - 1, screenWidth, 1),
+            MenuTheme.PanelInnerLine);
+        spriteBatch.Draw(
+            pixel,
+            new Rectangle(0, screenHeight - MenuTheme.FooterHeight, screenWidth, 1),
+            MenuTheme.PanelInnerLine);
     }
 
     public void DrawTitle(SpriteBatch spriteBatch, int screenWidth)
     {
-        DrawCenteredText(spriteBatch, GameInfo.Title, screenWidth / 2, 16, MenuTheme.TextPrimary, 1.05f, title: true);
-        DrawCenteredText(spriteBatch, $"v{GameInfo.Version}", screenWidth / 2, 52, MenuTheme.TextMuted, 1f);
+        DrawCenteredText(spriteBatch, GameInfo.Title, screenWidth / 2, 18, MenuTheme.TextPrimary, 1.05f, title: true);
+        DrawCenteredText(spriteBatch, $"v{GameInfo.Version}", screenWidth / 2, 50, MenuTheme.TextMuted, 1f);
     }
 
     public void DrawMenu(
@@ -122,16 +127,17 @@ public sealed class ScreenUiRenderer
         string footer)
     {
         DrawThemedPanel(spriteBatch, panel);
-        DrawCenteredText(spriteBatch, title, panel.Center.X, panel.Y + 22, MenuTheme.TextPrimary, 1.2f, title: true);
+        DrawCenteredText(spriteBatch, title, panel.Center.X, panel.Y + 24, MenuTheme.TextPrimary, 1.15f, title: true);
+        DrawHairline(spriteBatch, panel.X + 28, panel.Y + 58, panel.Width - 56);
 
-        var y = panel.Y + 72;
+        var y = panel.Y + 76;
         var fieldWidth = panel.Width - 64;
         var fieldX = panel.X + 32;
         foreach (var line in lines)
         {
             if (string.IsNullOrEmpty(line))
             {
-                y += 12;
+                y += 14;
                 continue;
             }
 
@@ -151,10 +157,10 @@ public sealed class ScreenUiRenderer
                     spriteBatch,
                     display,
                     panel.Center.X,
-                    y + 6,
+                    y + 4,
                     focused ? MenuTheme.TextAccent : MenuTheme.TextSecondary,
-                    focused ? MenuTheme.FocusPulse(_timeSeconds) : 1f);
-                y += 28;
+                    1f);
+                y += 26;
             }
         }
 
@@ -162,27 +168,40 @@ public sealed class ScreenUiRenderer
             spriteBatch,
             footer,
             panel.Center.X,
-            panel.Bottom - 36,
+            panel.Bottom - 34,
             MenuTheme.TextMuted,
             0.95f);
     }
 
-    public void DrawThemedPanel(SpriteBatch spriteBatch, Rectangle panel) =>
-        DrawPanel(spriteBatch, panel, MenuTheme.PanelFill, MenuTheme.PanelBorder);
+    public void DrawThemedPanel(SpriteBatch spriteBatch, Rectangle panel)
+    {
+        HudOverlayHelper.DrawPanel(spriteBatch, _assets, panel, MenuTheme.PanelFill, borderThickness: 1);
+        // Soft inner edge so flat fallback panels still read as framed.
+        if (_assets.LoadTexture(HudSpriteNames.Panel) == _assets.Pixel)
+        {
+            DrawRectBorder(spriteBatch, _assets.Pixel, panel, MenuTheme.PanelBorder, 1);
+            DrawHairline(spriteBatch, panel.X + 1, panel.Y + 1, panel.Width - 2);
+        }
+    }
 
     public void DrawMenuButton(SpriteBatch spriteBatch, Rectangle bounds, string label, bool selected)
     {
         var pixel = _assets.Pixel;
         var fill = selected ? MenuTheme.ButtonFocusFill : MenuTheme.ButtonIdleFill;
         var border = selected ? MenuTheme.ButtonFocusBorder : MenuTheme.ButtonIdleBorder;
-        var thickness = selected ? 3 : 2;
         spriteBatch.Draw(pixel, bounds, fill);
-        DrawRectBorder(spriteBatch, pixel, bounds, border, thickness);
+        DrawRectBorder(spriteBatch, pixel, bounds, border, 1);
 
-        var text = selected ? $">  {label}  <" : label;
+        if (selected)
+        {
+            spriteBatch.Draw(
+                pixel,
+                new Rectangle(bounds.X, bounds.Y, MenuTheme.SelectionBarWidth, bounds.Height),
+                MenuTheme.SelectionAccent);
+        }
+
         var color = selected ? MenuTheme.TextAccent : MenuTheme.TextSecondary;
-        var scale = selected ? MenuTheme.FocusPulse(_timeSeconds) : 1f;
-        DrawCenteredText(spriteBatch, text, bounds.Center.X, bounds.Y + 14, color, scale, title: true);
+        DrawCenteredInBounds(spriteBatch, label, bounds, color, title: true);
     }
 
     public void DrawFieldRow(SpriteBatch spriteBatch, Rectangle bounds, string text, bool focused)
@@ -191,7 +210,15 @@ public sealed class ScreenUiRenderer
         var fill = focused ? MenuTheme.FieldFocusFill : MenuTheme.FieldIdleFill;
         var border = focused ? MenuTheme.FieldFocusBorder : MenuTheme.FieldIdleBorder;
         spriteBatch.Draw(pixel, bounds, fill);
-        DrawRectBorder(spriteBatch, pixel, bounds, border, focused ? 2 : 1);
+        DrawRectBorder(spriteBatch, pixel, bounds, border, 1);
+
+        if (focused)
+        {
+            spriteBatch.Draw(
+                pixel,
+                new Rectangle(bounds.X, bounds.Y, MenuTheme.SelectionBarWidth, bounds.Height),
+                MenuTheme.SelectionAccent);
+        }
 
         if (_bodyFont is null)
         {
@@ -199,10 +226,9 @@ public sealed class ScreenUiRenderer
         }
 
         text = SanitizeForSpriteFont(text);
-        var scale = focused ? MenuTheme.FocusPulse(_timeSeconds) : 1f;
-        var size = _bodyFont.MeasureString(text) * scale;
+        var size = _bodyFont.MeasureString(text);
         var position = new Vector2(
-            bounds.X + 12,
+            bounds.X + 14,
             bounds.Y + (bounds.Height - size.Y) / 2f);
         spriteBatch.DrawString(
             _bodyFont,
@@ -211,7 +237,7 @@ public sealed class ScreenUiRenderer
             focused ? MenuTheme.TextAccent : MenuTheme.TextSecondary,
             0f,
             Vector2.Zero,
-            new Vector2(scale, scale),
+            Vector2.One,
             SpriteEffects.None,
             0f);
     }
@@ -272,6 +298,36 @@ public sealed class ScreenUiRenderer
             0f);
     }
 
+    public void DrawCenteredInBounds(
+        SpriteBatch spriteBatch,
+        string text,
+        Rectangle bounds,
+        Color color,
+        bool title = false)
+    {
+        var font = title ? _titleFont : _bodyFont;
+        if (font is null)
+        {
+            return;
+        }
+
+        text = SanitizeForSpriteFont(text);
+        var size = font.MeasureString(text);
+        var position = new Vector2(
+            bounds.Center.X - size.X / 2f,
+            bounds.Center.Y - size.Y / 2f);
+        spriteBatch.DrawString(
+            font,
+            text,
+            position,
+            color,
+            0f,
+            Vector2.Zero,
+            Vector2.One,
+            SpriteEffects.None,
+            0f);
+    }
+
     /// <summary>
     /// Menu/Ui fonts only include ASCII printable glyphs; strip anything else so DrawString cannot throw.
     /// </summary>
@@ -311,11 +367,11 @@ public sealed class ScreenUiRenderer
     {
         var pixel = _assets.Pixel;
         spriteBatch.Draw(pixel, bounds, fill);
-        spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Y, bounds.Width, 2), border);
-        spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Bottom - 2, bounds.Width, 2), border);
-        spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Y, 2, bounds.Height), border);
-        spriteBatch.Draw(pixel, new Rectangle(bounds.Right - 2, bounds.Y, 2, bounds.Height), border);
+        DrawRectBorder(spriteBatch, pixel, bounds, border, 1);
     }
+
+    public void DrawHairline(SpriteBatch spriteBatch, int x, int y, int width) =>
+        spriteBatch.Draw(_assets.Pixel, new Rectangle(x, y, width, 1), MenuTheme.PanelInnerLine);
 
     private static void DrawRectBorder(
         SpriteBatch spriteBatch,

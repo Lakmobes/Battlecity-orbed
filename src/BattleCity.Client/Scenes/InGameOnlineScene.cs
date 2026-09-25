@@ -10,13 +10,13 @@ using BattleCity.Core.City;
 using BattleCity.Core.Ecs;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Gameplay;
-using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Chat;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
 using BattleCity.Shared.Gameplay;
+using BattleCity.Shared.Network;
 using BattleCity.Shared.Network.Packets;
 
 using Microsoft.Xna.Framework;
@@ -40,7 +40,6 @@ public sealed class InGameOnlineScene : IScene
 
     private RenderPipeline _renderPipeline = null!;
     private TileMap _tileMap = null!;
-    private CityLayout _cityLayout = null!;
     private Vector2 _cameraFocus;
     private Vector2 _cameraPanOffset;
     private Vector2 _buildMenuAnchor;
@@ -54,6 +53,8 @@ public sealed class InGameOnlineScene : IScene
     private int _buildPreviewTypeCode;
     private bool _buildPreviewIsValid;
     private bool _buildPreviewIsDemolish;
+    private bool _showVirtualCursor;
+    private Vector2 _virtualCursorLogical;
     private float _animationTime;
     private bool _loaded;
     private float _updateSendCooldown;
@@ -110,9 +111,8 @@ public sealed class InGameOnlineScene : IScene
         _simulation.NetworkPlayersUseLocalBulletDamage = false;
         _simulation.ReportLocalShot = shot => _client.SendShoot(shot);
 
-        // Online multiplayer shares the Buenos Aires world layout; affiliation comes from SpawnState.
-        _cityLayout = LevelLoader.LoadLegacyCity("Buenos Aires", _context.CityDesign);
-        _simulation.LoadCityLayout(_cityLayout);
+        // Online multiplayer: CC-only shared world (legacy MP). Buildings arrive via join snapshot.
+        _simulation.LoadMultiplayerWorld();
 
         _remotePlayers = new RemotePlayerSync(_simulation.World);
         _remotePlayers.SetDisplayName(_client.PlayerId, _context.PlayerName);
@@ -133,7 +133,8 @@ public sealed class InGameOnlineScene : IScene
         }
         else
         {
-            spawn = _cityLayout.GetSpawnPosition();
+            // Last resort when map CC scan failed — prefer world origin over layout centroid.
+            spawn = NumericsVector2.Zero;
         }
 
         spawn = _simulation.FindOpenTankSpawnNear(spawn);
@@ -147,7 +148,7 @@ public sealed class InGameOnlineScene : IScene
         _simulation.CreatePlayerEntity(
             spawn,
             isMayor: false,
-            isAdmin: IsLocalAdmin(),
+            isAdmin: IsLocalAdminVisual(),
             cityId: localCityId);
         _remotePlayers.ObserverCityId = localCityId;
         ApplyLocalMayorVisual(_client.IsMayor);
@@ -235,11 +236,18 @@ public sealed class InGameOnlineScene : IScene
         }
 
         // Settings must win over chat so Esc / Enter are not stolen by chat or leave-to-menu.
+        var deltaSeconds = (float)gameTime.ElapsedGameTime.TotalSeconds;
         var networkGameplay = default(GameplayInputState);
         var hasNetworkGameplay = false;
         if (_showSettingsMenu)
         {
-            var settingsFrame = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+            var settingsFrame = _input.Poll(
+                _camera,
+                playerCenter,
+                worldWidth,
+                _context.Presentation,
+                deltaSeconds);
+            CaptureVirtualCursor(settingsFrame.Ui);
             if (HandleSettingsInput(settingsFrame.Ui, out var leaveToMenu, out var abandonCity))
             {
                 if (abandonCity)
@@ -265,7 +273,13 @@ public sealed class InGameOnlineScene : IScene
 
             if (!_chatInput.IsActive)
             {
-                var frameInput = _input.Poll(_camera, playerCenter, worldWidth, _context.Presentation);
+                var frameInput = _input.Poll(
+                    _camera,
+                    playerCenter,
+                    worldWidth,
+                    _context.Presentation,
+                    deltaSeconds);
+                CaptureVirtualCursor(frameInput.Ui);
                 if (HandleSettingsInput(frameInput.Ui, out var leaveToMenu, out var abandonCity))
                 {
                     if (abandonCity)
@@ -361,9 +375,15 @@ public sealed class InGameOnlineScene : IScene
             switch (networkEvent.Kind)
             {
                 case GameClientEventKind.JoinData when networkEvent.JoinData.PlayerId != _client.PlayerId:
-                    _remotePlayers.HandleJoin(
-                        networkEvent.JoinData,
-                        new NumericsVector2(_cityLayout.GetSpawnPosition().X, _cityLayout.GetSpawnPosition().Y));
+                    {
+                        var joinSpawn = _simulation.TryGetCityRespawnPosition(
+                                networkEvent.JoinData.City,
+                                out var citySpawn,
+                                out _)
+                            ? citySpawn
+                            : new NumericsVector2(0f, 0f);
+                        _remotePlayers.HandleJoin(networkEvent.JoinData, joinSpawn);
+                    }
                     break;
                 case GameClientEventKind.PlayerUpdate when networkEvent.Update.PlayerId != _client.PlayerId:
                     _remotePlayers.ApplyUpdate(networkEvent.Update);
@@ -408,6 +428,17 @@ public sealed class InGameOnlineScene : IScene
                 case GameClientEventKind.UnderAttack:
                     _simulation.ApplyNetworkUnderAttack();
                     break;
+                case GameClientEventKind.ItemLife:
+                    _simulation.ApplyNetworkItemLife(networkEvent.ItemLife);
+                    break;
+                case GameClientEventKind.Promotion:
+                    InGameChatService.AppendPromotion(
+                        _chatLog,
+                        _remotePlayers,
+                        _client,
+                        _context.PlayerName,
+                        networkEvent.Promotion);
+                    break;
                 case GameClientEventKind.CanBuild:
                     _simulation.ApplyNetworkCanBuild(networkEvent.CanBuild);
                     break;
@@ -431,11 +462,21 @@ public sealed class InGameOnlineScene : IScene
                     _simulation.ApplyNetworkExplosion(networkEvent.Explosion);
                     break;
                 case GameClientEventKind.Warp:
-                    _simulation.ApplyNetworkWarp(networkEvent.Warp);
-                    _cameraPanOffset = Vector2.Zero;
-                    _cameraFocus = new Vector2(
-                        networkEvent.Warp.X + GameConstants.TileSize / 2f,
-                        networkEvent.Warp.Y + GameConstants.TileSize / 2f);
+                    ApplyLocalWarp(networkEvent.Warp);
+                    break;
+                case GameClientEventKind.StateGame:
+                    // Admin /city rejoin uses smStateGame while already in-game.
+                    _simulation.ApplyAdminCityRejoin(
+                        networkEvent.StateGame,
+                        isMayor: _client.IsMayor,
+                        isAdmin: IsLocalAdminVisual());
+                    _remotePlayers.ObserverCityId = networkEvent.StateGame.City;
+                    ApplyLocalWarpCamera(networkEvent.StateGame);
+                    if (CityCatalog.IsValidCityId(networkEvent.StateGame.City))
+                    {
+                        _context.SelectedCity = CityCatalog.GetName(networkEvent.StateGame.City);
+                    }
+
                     break;
                 case GameClientEventKind.Respawn:
                     _remotePlayers.ApplyRespawn(networkEvent.Respawn.PlayerId);
@@ -446,13 +487,21 @@ public sealed class InGameOnlineScene : IScene
                     if (networkEvent.Death.PlayerId == _client.PlayerId)
                     {
                         _cameraPanOffset = Vector2.Zero;
-                        if (CommandCenterLookup.TryGetWorldPosition(
+                        var localCityId = GetLocalCityId();
+                        if (_simulation.TryGetCityBuild(localCityId, out var homeCity)
+                            && CommandCenterLookup.TryGetHomeReferenceWorldPosition(
                                 _simulation.World,
-                                out var commandCenterPosition))
+                                homeCity.CommandCenterGridX,
+                                homeCity.CommandCenterGridY,
+                                out var homeReference))
+                        {
+                            _cameraFocus = new Vector2(homeReference.X, homeReference.Y);
+                        }
+                        else if (_simulation.TryGetCityRespawnPosition(localCityId, out var spawn, out _))
                         {
                             _cameraFocus = new Vector2(
-                                commandCenterPosition.X + GameConstants.TileSize / 2f,
-                                commandCenterPosition.Y + GameConstants.TileSize / 2f);
+                                spawn.X + GameConstants.TileSize / 2f,
+                                spawn.Y + GameConstants.TileSize / 2f);
                         }
                     }
 
@@ -529,11 +578,40 @@ public sealed class InGameOnlineScene : IScene
                         _chatLog,
                         "Personnel: Enter=Welcome  Esc=Reject  N=Toggle not hiring");
                     break;
+                case GameClientEventKind.InterviewCancel:
+                    if (_pendingApplicantId.HasValue)
+                    {
+                        var canceled = _pendingApplicantName ?? "Applicant";
+                        InGameChatService.AppendSystem(
+                            _chatLog,
+                            $"{canceled} canceled their application.");
+                    }
+
+                    _pendingApplicantId = null;
+                    _pendingApplicantName = null;
+                    break;
                 case GameClientEventKind.Comms:
                     AppendInterviewComms(networkEvent.ChatMessage);
                     break;
                 case GameClientEventKind.Fired:
                     AbandonCityToLobby();
+                    break;
+                case GameClientEventKind.Kicked:
+                    {
+                        var verb = networkEvent.KickCommand == AdminCommands.Ban ? "banned" : "kicked";
+                        InGameChatService.AppendSystem(_chatLog, $"You have been {verb} by an admin.");
+                        AbandonCityToLobby();
+                    }
+
+                    break;
+                case GameClientEventKind.AdminAction:
+                    AppendAdminActionChat(networkEvent.AdminAction);
+                    break;
+                case GameClientEventKind.BanEntry:
+                    AppendBanEntryChat(networkEvent.BanEntry);
+                    break;
+                case GameClientEventKind.AppendNews:
+                    AppendNewsChat(networkEvent.NewsText);
                     break;
                 case GameClientEventKind.Orbed:
                     _simulation.ApplyNetworkOrb(
@@ -899,19 +977,19 @@ public sealed class InGameOnlineScene : IScene
             : _remotePlayers?.ObserverCityId ?? 0;
         var homeCcGridX = 0;
         var homeCcGridY = 0;
-        var cityCenterWorldPosition = new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y);
+        var cityCenterWorldPosition = _cameraFocus;
         Vector2? nearestOrbableCity = null;
         if (_simulation.TryGetCityBuild(observerCityId, out var homeCityForCompass))
         {
             homeCcGridX = homeCityForCompass.CommandCenterGridX;
             homeCcGridY = homeCityForCompass.CommandCenterGridY;
-            if (CommandCenterLookup.TryGetWorldPosition(
+            if (CommandCenterLookup.TryGetHomeReferenceWorldPosition(
                     _simulation.World,
                     homeCityForCompass.CommandCenterGridX,
                     homeCityForCompass.CommandCenterGridY,
-                    out var commandCenterPosition))
+                    out var homeReference))
             {
-                cityCenterWorldPosition = new Vector2(commandCenterPosition.X, commandCenterPosition.Y);
+                cityCenterWorldPosition = new Vector2(homeReference.X, homeReference.Y);
             }
 
             if (CommandCenterLookup.TryFindNearestOtherWorldPosition(
@@ -925,9 +1003,9 @@ public sealed class InGameOnlineScene : IScene
                 nearestOrbableCity = new Vector2(orbTarget.X, orbTarget.Y);
             }
         }
-        else if (CommandCenterLookup.TryGetWorldPosition(_simulation.World, out var anyCommandCenter))
+        else if (CommandCenterLookup.TryGetHomeReferenceWorldPosition(_simulation.World, out var anyHomeReference))
         {
-            cityCenterWorldPosition = new Vector2(anyCommandCenter.X, anyCommandCenter.Y);
+            cityCenterWorldPosition = new Vector2(anyHomeReference.X, anyHomeReference.Y);
         }
 
         return new RenderContext
@@ -945,7 +1023,7 @@ public sealed class InGameOnlineScene : IScene
             ShowMiniMap = _showMiniMap,
             ShowStatusPanel = _showStatusPanel,
             LoadedCityName = _context.SelectedCity,
-            BuildingCount = _cityLayout.Buildings.Count,
+            BuildingCount = _simulation.CountBuildingsInWorld(),
             PlayerDisplayName = _context.PlayerName,
             PlayerHealth = playerHealth,
             PlayerMaxHealth = playerMaxHealth,
@@ -982,6 +1060,8 @@ public sealed class InGameOnlineScene : IScene
             ObserverCityId = observerCityId,
             ShowSettingsMenu = _showSettingsMenu,
             SettingsSelectedIndex = _settingsSelectedIndex,
+            ShowVirtualCursor = _showVirtualCursor,
+            VirtualCursorLogical = _virtualCursorLogical,
         };
     }
 
@@ -1047,7 +1127,29 @@ public sealed class InGameOnlineScene : IScene
             }
         }
 
+        if (menu.CancelPressed)
+        {
+            _showSettingsMenu = false;
+        }
+
         return true;
+    }
+
+    private void CaptureVirtualCursor(UiInputState ui)
+    {
+        _showVirtualCursor = ui.ShowVirtualCursor;
+        _virtualCursorLogical = ui.MouseLogicalPosition;
+        if (ui.GamepadJustConnected)
+        {
+            InGameChatService.AppendSystem(
+                _chatLog,
+                "Controller connected. RS click toggles pointer mode for building.");
+        }
+
+        if (ui.GamepadJustDisconnected)
+        {
+            InGameChatService.AppendSystem(_chatLog, "Controller disconnected.");
+        }
     }
 
     private void AbandonCityToLobby()
@@ -1060,12 +1162,14 @@ public sealed class InGameOnlineScene : IScene
         _context.Audio.StopEngine();
     }
 
-    private bool IsLocalAdmin() =>
+    private bool IsLocalAdmin() => _client.IsAdmin;
+
+    private bool IsLocalAdminVisual() =>
         _client.IsAdmin || TankSpriteSelector.IsAdminAccount(_context.PlayerName);
 
     private void ApplyLocalMayorVisual(bool isMayor)
     {
-        var isAdmin = IsLocalAdmin();
+        var isAdmin = IsLocalAdminVisual();
         var query = new QueryDescription().WithAll<InputControlled, SpriteRef, MayorStatus, CityAffiliation>();
         _simulation.World.Query(
             in query,
@@ -1111,6 +1215,42 @@ public sealed class InGameOnlineScene : IScene
             case ChatCommandKind.Whisper:
                 SendWhisperChat(command.WhisperRecipient, command.Message);
                 break;
+            case ChatCommandKind.Heir:
+                SetMayorHeir(command.Message);
+                break;
+            case ChatCommandKind.Kick:
+                SendAdminModeration(command.Message, AdminCommands.Kick, "kick");
+                break;
+            case ChatCommandKind.Ban:
+                SendAdminModeration(command.Message, AdminCommands.Ban, "ban");
+                break;
+            case ChatCommandKind.Warp:
+                SendAdminModeration(command.Message, AdminCommands.Warp, "warp");
+                break;
+            case ChatCommandKind.Summon:
+                SendAdminModeration(command.Message, AdminCommands.Summon, "summon");
+                break;
+            case ChatCommandKind.JoinCity:
+                SendAdminJoinCity(command.Message);
+                break;
+            case ChatCommandKind.Spawn:
+                SendAdminSpawn(command.Message);
+                break;
+            case ChatCommandKind.Shutdown:
+                SendAdminShutdown();
+                break;
+            case ChatCommandKind.Bans:
+                SendAdminRequestBans();
+                break;
+            case ChatCommandKind.Unban:
+                SendAdminUnban(command.Message);
+                break;
+            case ChatCommandKind.News:
+                SendAdminRequestNews();
+                break;
+            case ChatCommandKind.SetNews:
+                SendAdminSetNews(command.Message);
+                break;
             default:
                 if (string.IsNullOrWhiteSpace(command.Message))
                 {
@@ -1132,6 +1272,246 @@ public sealed class InGameOnlineScene : IScene
                 InGameChatService.AppendLocalOutgoing(_chatLog, GetLocalChatDisplayName(), command.Message, isDead);
                 _client.SendWalkie(command.Message);
                 break;
+        }
+    }
+
+    private void SetMayorHeir(string argument)
+    {
+        if (!_client.IsMayor)
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only the mayor can set a successor.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(argument)
+            || argument.Equals("clear", StringComparison.OrdinalIgnoreCase)
+            || argument.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            _client.SendSuccessor(0);
+            InGameChatService.AppendSystem(_chatLog, "Mayor successor cleared.");
+            return;
+        }
+
+        if (!WhisperRecipientMatcher.TryMatch(
+                argument,
+                _client.PlayerId,
+                _remotePlayers.EnumerateDisplayNames(),
+                out var heirId,
+                out var heirName))
+        {
+            InGameChatService.AppendSystem(_chatLog, $"Player not found: {argument}");
+            return;
+        }
+
+        _client.SendSuccessor(heirId);
+        InGameChatService.AppendSystem(_chatLog, $"Mayor successor set to {heirName}.");
+    }
+
+    private void SendAdminModeration(string namePrefix, byte command, string verb)
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, $"Only admins can {verb} players.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(namePrefix))
+        {
+            InGameChatService.AppendSystem(_chatLog, $"Usage: /{verb} Name");
+            return;
+        }
+
+        if (!WhisperRecipientMatcher.TryMatch(
+                namePrefix,
+                _client.PlayerId,
+                _remotePlayers.EnumerateDisplayNames(),
+                out var targetId,
+                out var targetName))
+        {
+            InGameChatService.AppendSystem(_chatLog, $"Player not found: {namePrefix}");
+            return;
+        }
+
+        _client.SendAdmin(targetId, command);
+        var confirm = command switch
+        {
+            AdminCommands.Warp => $"Warping to {targetName}...",
+            AdminCommands.Summon => $"Summoning {targetName}...",
+            _ => $"Sent {verb} for {targetName}.",
+        };
+        InGameChatService.AppendSystem(_chatLog, confirm);
+    }
+
+    private void SendAdminJoinCity(string argument)
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can join another city.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(argument))
+        {
+            InGameChatService.AppendSystem(_chatLog, "Usage: /city <id|name>");
+            return;
+        }
+
+        byte cityId;
+        if (byte.TryParse(argument, out var parsedId) && CityCatalog.IsValidCityId(parsedId))
+        {
+            cityId = parsedId;
+        }
+        else if (CityCatalog.TryGetId(argument, out var namedId) && CityCatalog.IsValidCityId(namedId))
+        {
+            cityId = (byte)namedId;
+        }
+        else
+        {
+            InGameChatService.AppendSystem(_chatLog, $"City not found: {argument}");
+            return;
+        }
+
+        _client.SendAdmin(cityId, AdminCommands.JoinCity);
+        InGameChatService.AppendSystem(_chatLog, $"Joining {CityCatalog.GetName(cityId)}...");
+    }
+
+    private void SendAdminSpawn(string argument)
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can spawn items.");
+            return;
+        }
+
+        if (!ItemCatalog.TryParse(argument, out var itemType))
+        {
+            InGameChatService.AppendSystem(_chatLog, "Usage: /spawn <id|name>  (0–11, e.g. wall, medkit, 8)");
+            return;
+        }
+
+        _client.SendAdmin((byte)itemType, AdminCommands.SpawnItem);
+        InGameChatService.AppendSystem(_chatLog, $"Spawn requested: {ItemCatalog.GetName(itemType)}");
+    }
+
+    private void SendAdminShutdown()
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can shut down the server.");
+            return;
+        }
+
+        _client.SendAdmin(0, AdminCommands.Shutdown);
+        InGameChatService.AppendSystem(_chatLog, "Shutting down server...");
+    }
+
+    private void SendAdminRequestBans()
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can list bans.");
+            return;
+        }
+
+        InGameChatService.AppendSystem(_chatLog, "Banned accounts:");
+        _client.SendAdmin(0, AdminCommands.RequestBans);
+    }
+
+    private void SendAdminUnban(string argument)
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can unban.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(argument))
+        {
+            InGameChatService.AppendSystem(_chatLog, "Usage: /unban <username>");
+            return;
+        }
+
+        _client.SendAdminUnban(argument);
+        InGameChatService.AppendSystem(_chatLog, $"Unban requested: {argument.Trim()}");
+    }
+
+    private void SendAdminRequestNews()
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can request news.");
+            return;
+        }
+
+        _client.SendAdmin(0, AdminCommands.RequestNews);
+    }
+
+    private void SendAdminSetNews(string news)
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can set news.");
+            return;
+        }
+
+        _client.SendChangeNews(news);
+        InGameChatService.AppendSystem(
+            _chatLog,
+            string.IsNullOrWhiteSpace(news) ? "News cleared." : "News updated.");
+    }
+
+    private void AppendBanEntryChat(in ServerBanPacket ban)
+    {
+        var by = string.IsNullOrWhiteSpace(ban.IpAddress) ? "?" : ban.IpAddress;
+        var reason = string.IsNullOrWhiteSpace(ban.Reason) ? "banned" : ban.Reason;
+        InGameChatService.AppendSystem(_chatLog, $"  {ban.Account} — {reason} (by {by})");
+    }
+
+    private void AppendNewsChat(string news)
+    {
+        if (string.IsNullOrWhiteSpace(news))
+        {
+            return;
+        }
+
+        foreach (var line in news.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            var trimmed = line.TrimEnd();
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
+            InGameChatService.AppendSystem(_chatLog, trimmed);
+        }
+    }
+
+    private void ApplyLocalWarp(in ServerStateGamePacket warp)
+    {
+        _simulation.ApplyNetworkWarp(warp);
+        ApplyLocalWarpCamera(warp);
+    }
+
+    private void ApplyLocalWarpCamera(in ServerStateGamePacket warp)
+    {
+        _cameraPanOffset = Vector2.Zero;
+        _cameraFocus = new Vector2(
+            warp.X + GameConstants.TileSize / 2f,
+            warp.Y + GameConstants.TileSize / 2f);
+    }
+
+    private void AppendAdminActionChat(in ServerAdminPacket admin)
+    {
+        var adminName = admin.AdminPlayerId == _client.PlayerId
+            ? _context.PlayerName
+            : _remotePlayers.GetDisplayName((byte)admin.AdminPlayerId) ?? $"Player{admin.AdminPlayerId}";
+        var targetName = _remotePlayers.GetDisplayName((byte)admin.TargetPlayerId)
+            ?? $"Player{admin.TargetPlayerId}";
+        var verb = admin.Command == AdminCommands.Ban ? "banned" : "kicked";
+        InGameChatService.AppendSystem(_chatLog, $"{targetName} has been {verb} by {adminName}");
+        if (admin.TargetPlayerId != _client.PlayerId)
+        {
+            _remotePlayers.Remove((byte)admin.TargetPlayerId);
         }
     }
 

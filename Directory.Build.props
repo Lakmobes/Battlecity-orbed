@@ -5,5 +5,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))</RepoRoot>
+    <MgcbToolExe>$([System.IO.Path]::Combine('$(RepoRoot)', '.tools', 'mgcb.exe'))</MgcbToolExe>
   </PropertyGroup>
 </Project>

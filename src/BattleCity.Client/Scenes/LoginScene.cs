@@ -230,7 +230,7 @@ public sealed class LoginScene : IScene
             panel,
             "Multiplayer Login",
             [
-                "Paste the host invite (IP or IP:port) with Ctrl+V",
+                "Local Server menu auto-starts 127.0.0.1 — or paste a friend invite (Ctrl+V)",
                 "Guest login: leave user blank or set password to guest",
                 string.Empty,
                 FormatField("Server", _serverInput.Text, mask: false, focused: _activeField == Field.Server),

@@ -3,7 +3,7 @@ using BattleCity.Client.Network;
 using BattleCity.Shared.Chat;
 
 using BattleCity.Shared.Constants;
-
+using BattleCity.Shared.Gameplay;
 using BattleCity.Shared.Network.Packets;
 
 
@@ -55,6 +55,10 @@ public static class ChatColorResolver
 
 
     public static Color Global => ToColor(UiColors.White);
+
+
+
+    public static Color Promotion => ToColor(UiColors.White);
 
 
 
@@ -203,6 +207,28 @@ public static class InGameChatService
     public static void AppendSystem(InGameChatLog log, string message) =>
 
         log.Append(message, ChatColorResolver.System);
+
+
+
+    public static void AppendPromotion(
+
+        InGameChatLog log,
+
+        RemotePlayerSync remotePlayers,
+
+        GameClient client,
+
+        string localPlayerName,
+
+        in ServerPromotionPacket packet)
+
+    {
+
+        var playerName = ResolveSenderName(packet.PlayerId, client, localPlayerName, remotePlayers);
+
+        log.Append(PromotionMessages.Format(playerName, packet.Rank), ChatColorResolver.Promotion);
+
+    }
 
 
 
