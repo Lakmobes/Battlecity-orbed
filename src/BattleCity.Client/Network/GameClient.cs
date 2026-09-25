@@ -45,6 +45,8 @@ public enum GameClientEventKind
     Respawn,
     Orbed,
     UnderAttack,
+    ItemLife,
+    Promotion,
     ChatCommand,
     ClearPlayer,
     CityListClear,
@@ -113,6 +115,10 @@ public readonly struct GameClientEvent
     public ServerStateGamePacket Warp { get; init; }
 
     public ServerRespawnPacket Respawn { get; init; }
+
+    public ServerItemLifePacket ItemLife { get; init; }
+
+    public ServerPromotionPacket Promotion { get; init; }
 
     public char ErrorCode { get; init; }
 }
@@ -659,6 +665,18 @@ public sealed class GameClient : IDisposable
                 break;
             case ServerMessageId.UnderAttack:
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.UnderAttack));
+                break;
+            case ServerMessageId.ItemLife when packet.Payload.Length >= ServerItemLifePacket.Size:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.ItemLife)
+                {
+                    ItemLife = ServerItemLifePacket.Read(packet.Payload.Span),
+                });
+                break;
+            case ServerMessageId.Promotion when packet.Payload.Length >= 2:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.Promotion)
+                {
+                    Promotion = ServerPromotionPacket.Read(packet.Payload.Span),
+                });
                 break;
             case ServerMessageId.Death when packet.Payload.Length >= ServerDeathPacket.Size:
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.Death)

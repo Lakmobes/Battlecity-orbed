@@ -51,6 +51,7 @@ dotnet @artArgs
 
 Write-Host "==> Building MonoGame content"
 dotnet tool restore | Out-Null
+& (Join-Path $RepoRoot "tools\Restore-Mgcb.ps1")
 dotnet build (Join-Path $RepoRoot "src\BattleCity.Client\BattleCity.Client.csproj") -c Release
 
 Write-Host "Content pipeline complete."

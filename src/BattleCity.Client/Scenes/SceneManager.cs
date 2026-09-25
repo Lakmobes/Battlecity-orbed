@@ -52,6 +52,7 @@ public sealed class SceneManager : IDisposable
     {
         _current?.Dispose();
         _current = null;
+        Context.Dispose();
     }
 
     private void ApplyTransition(SceneTransition transition)

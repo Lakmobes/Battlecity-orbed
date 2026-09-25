@@ -174,18 +174,18 @@ public sealed class TitleScreenRenderer
         int selectedIndex)
     {
         const int buttonWidth = 560;
-        var buttonHeight = MenuTheme.MenuButtonHeight + 8;
-        var gap = MenuTheme.MenuButtonGap + 4;
+        var buttonHeight = MenuTheme.MenuButtonHeight + 4;
+        var gap = MenuTheme.MenuButtonGap;
         var totalHeight = items.Count * buttonHeight + (items.Count - 1) * gap;
         var startY = height - 220 - totalHeight / 2;
         var x = (width - buttonWidth) / 2;
         var pixel = _assets.Pixel;
 
         var panelBounds = new Rectangle(
-            x - 36,
-            startY - 36,
-            buttonWidth + 72,
-            totalHeight + 72);
+            x - 28,
+            startY - 28,
+            buttonWidth + 56,
+            totalHeight + 56);
         HudOverlayHelper.DrawPanel(
             spriteBatch,
             _assets,
@@ -198,15 +198,20 @@ public sealed class TitleScreenRenderer
             var selected = i == selectedIndex;
             var fill = selected ? MenuTheme.ButtonFocusFill : MenuTheme.ButtonIdleFill;
             var border = selected ? MenuTheme.ButtonFocusBorder : MenuTheme.ButtonIdleBorder;
-            var thickness = selected ? 3 : 2;
 
             spriteBatch.Draw(pixel, bounds, fill);
-            DrawRectBorder(spriteBatch, pixel, bounds, border, thickness);
+            DrawRectBorder(spriteBatch, pixel, bounds, border, 1);
 
-            var label = selected ? $">  {items[i]}  <" : items[i];
+            if (selected)
+            {
+                spriteBatch.Draw(
+                    pixel,
+                    new Rectangle(bounds.X, bounds.Y, MenuTheme.SelectionBarWidth, bounds.Height),
+                    MenuTheme.SelectionAccent);
+            }
+
             var color = selected ? MenuTheme.TextAccent : MenuTheme.TextSecondary;
-            var pulseScale = selected ? MenuTheme.FocusPulse(_timeSeconds) : 1f;
-            DrawCentered(spriteBatch, label, bounds.Center.X, bounds.Y + 14, color, pulseScale);
+            DrawCenteredInBounds(spriteBatch, items[i], bounds, color);
         }
     }
 
@@ -221,6 +226,26 @@ public sealed class TitleScreenRenderer
         spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Bottom - thickness, bounds.Width, thickness), color);
         spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Y, thickness, bounds.Height), color);
         spriteBatch.Draw(pixel, new Rectangle(bounds.Right - thickness, bounds.Y, thickness, bounds.Height), color);
+    }
+
+    private void DrawCenteredInBounds(SpriteBatch spriteBatch, string text, Rectangle bounds, Color color)
+    {
+        if (_font is null)
+        {
+            return;
+        }
+
+        var size = _font.MeasureString(text);
+        spriteBatch.DrawString(
+            _font,
+            text,
+            new Vector2(bounds.Center.X - size.X / 2f, bounds.Center.Y - size.Y / 2f),
+            color,
+            0f,
+            Vector2.Zero,
+            Vector2.One,
+            SpriteEffects.None,
+            0f);
     }
 
     private void DrawCentered(

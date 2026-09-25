@@ -36,12 +36,13 @@ dotnet run --project tools/BattleCity.Smoke/BattleCity.Smoke.csproj
 
 - Keep commits focused (docs vs host tooling vs gameplay)
 - Mention legacy file references in the PR body when matching old behavior
-- Run smoke after online/sync changes
+- Run smoke after online/sync changes (`tools/BattleCity.Smoke`; also runs in CI after unit tests)
 
 ## Where to start reading
 
 1. [PROJECT-STATUS.md](PROJECT-STATUS.md) — checkpoint overview  
-2. [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) — what phases already cover  
-3. `GameSimulation` tick order — systems pipeline  
-4. `GameServer` message switch — online authority  
-5. `InGameScene` / `InGameOnlineScene` — client loop  
+2. [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) — legacy parity audit & fix backlog (cities, spawn, compass)  
+3. [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) — what phases already cover  
+4. `GameSimulation` tick order — systems pipeline  
+5. `GameServer` message switch — online authority  
+6. `InGameScene` / `InGameOnlineScene` — client loop  

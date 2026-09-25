@@ -26,6 +26,57 @@ public class CommandCenterSpawnTests
     }
 
     [Fact]
+    public void GetHomeReference_MatchesDrivePlatformTankCenter()
+    {
+        var spriteTopLeft = BuildingPlacement.GridAnchorToWorldPosition(20, 22);
+        var spawn = CommandCenterLookup.GetDrivePlatformSpawnPosition(spriteTopLeft);
+        var home = CommandCenterLookup.GetHomeReferenceFromSpawnTopLeft(spawn);
+
+        Assert.Equal(spawn.X + GameConstants.TileSize / 2f, home.X);
+        Assert.Equal(spawn.Y + GameConstants.TileSize / 2f, home.Y);
+    }
+
+    [Fact]
+    public void TryGetHomeReferenceWorldPosition_UsesHomeCommandCenterFilter()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.LoadCityLayout(new CityLayout
+        {
+            CityName = "HomeRefCity",
+            SourcePath = "test.city",
+            Buildings =
+            [
+                new CityBuildingPlacement(0, 40, 40, 0),
+            ],
+        });
+
+        // Second CC elsewhere on the map (city 1) — must not be used as home.
+        LevelLoader.SpawnCommandCenter(simulation.World, 10, 10, cityId: 1);
+
+        Assert.True(simulation.TryGetCityBuild(0, out var homeCity));
+        Assert.True(CommandCenterLookup.TryGetHomeReferenceWorldPosition(
+            simulation.World,
+            homeCity.CommandCenterGridX,
+            homeCity.CommandCenterGridY,
+            out var homeReference));
+
+        Assert.True(CommandCenterLookup.TryGetRespawnPosition(
+            simulation.World,
+            homeCity.CommandCenterGridX,
+            homeCity.CommandCenterGridY,
+            out var spawn));
+
+        var expected = CommandCenterLookup.GetHomeReferenceFromSpawnTopLeft(spawn);
+        Assert.Equal(expected.X, homeReference.X, precision: 2);
+        Assert.Equal(expected.Y, homeReference.Y, precision: 2);
+
+        var otherHome = CommandCenterLookup.GetHomeReferenceFromSpawnTopLeft(
+            CommandCenterLookup.GetRespawnPositionFromGridAnchor(10, 10));
+        Assert.NotEqual(otherHome.X, homeReference.X);
+    }
+
+    [Fact]
     public void FindOpenTankSpawnNear_SkipsTileBlockedByWall()
     {
         using var simulation = new GameSimulation();

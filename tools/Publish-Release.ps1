@@ -51,6 +51,13 @@ New-Item -ItemType Directory -Force -Path $legacyDest | Out-Null
 Copy-Item (Join-Path $legacyData "map.dat") $legacyDest -Force
 Copy-Item (Join-Path $legacyData "cities") (Join-Path $legacyDest "cities") -Recurse -Force
 
+# Client also needs map.dat for offline play and embedded "Local Server" hosting.
+Write-Host "==> Copying map.dat next to Client (offline + embedded local server)"
+$clientLegacyDest = Join-Path $clientOut "legacy\data"
+New-Item -ItemType Directory -Force -Path $clientLegacyDest | Out-Null
+Copy-Item (Join-Path $legacyData "map.dat") $clientLegacyDest -Force
+Copy-Item (Join-Path $legacyData "cities") (Join-Path $clientLegacyDest "cities") -Recurse -Force
+
 Write-Host "==> Copying docs for hosts and contributors"
 Copy-Item $hostingDoc (Join-Path $outRoot "HOSTING.md") -Force
 Copy-Item $hostingDoc (Join-Path $serverOut "HOSTING.md") -Force
@@ -66,8 +73,8 @@ Battle City — Windows $Runtime release
 
 PLAY WITH FRIENDS
 1. Server: open Server\BattleCity.Server.Host.exe → Start → Copy Invite
-2. Client: open Client\BattleCity.Client.exe → Play Online
-3. Paste the invite address into the Server field on the login screen
+2. Client: open Client\BattleCity.Client.exe → Play Online (paste invite)
+3. Same PC solo test: Client → Play Online (Local Server) auto-starts 127.0.0.1
 
 See HOSTING.md for LAN, firewall, and Tailscale steps.
 

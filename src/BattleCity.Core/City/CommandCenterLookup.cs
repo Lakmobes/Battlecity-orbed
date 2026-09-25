@@ -128,6 +128,41 @@ public static class CommandCenterLookup
     public static Vector2 GetRespawnPositionFromGridAnchor(int gridAnchorX, int gridAnchorY) =>
         GetDrivePlatformSpawnPosition(BuildingPlacement.GridAnchorToWorldPosition(gridAnchorX, gridAnchorY));
 
+    /// <summary>
+    /// Tank-center on the drive platform. Used for compass home + death camera so they
+    /// match join/respawn (intentional correction vs legacy formula CityX/Y).
+    /// </summary>
+    public static Vector2 GetHomeReferenceFromSpawnTopLeft(Vector2 spawnTopLeft) =>
+        spawnTopLeft + new Vector2(GameConstants.TileSize / 2f, GameConstants.TileSize / 2f);
+
+    public static bool TryGetHomeReferenceWorldPosition(
+        World world,
+        int homeGridAnchorX,
+        int homeGridAnchorY,
+        out Vector2 position)
+    {
+        if (!TryGetRespawnPosition(world, homeGridAnchorX, homeGridAnchorY, out var spawnTopLeft))
+        {
+            position = default;
+            return false;
+        }
+
+        position = GetHomeReferenceFromSpawnTopLeft(spawnTopLeft);
+        return true;
+    }
+
+    public static bool TryGetHomeReferenceWorldPosition(World world, out Vector2 position)
+    {
+        if (!TryGetRespawnPosition(world, out var spawnTopLeft))
+        {
+            position = default;
+            return false;
+        }
+
+        position = GetHomeReferenceFromSpawnTopLeft(spawnTopLeft);
+        return true;
+    }
+
     public static bool TryGetRespawnPosition(World world, out Vector2 position) =>
         TryGetRespawnPosition(world, homeGridAnchorX: null, homeGridAnchorY: null, out position);
 

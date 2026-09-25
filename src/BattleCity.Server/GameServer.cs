@@ -12,6 +12,7 @@ using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Chat;
+using BattleCity.Shared.Gameplay;
 using BattleCity.Shared.Network;
 using BattleCity.Shared.Network.Packets;
 
@@ -20,7 +21,6 @@ namespace BattleCity.Server;
 public sealed class GameServer : IDisposable
 {
     public const int MaxPlayers = 32;
-    private const byte DefaultCityId = 0;
 
     private readonly GameSimulation _simulation = new();
     private readonly Dictionary<byte, ClientSession> _sessions = new();
@@ -33,7 +33,7 @@ public sealed class GameServer : IDisposable
     private readonly CityBuildPopSync _buildPopSync = new();
     private readonly FactoryItemCountSync _factoryItemCountSync = new();
     private byte _nextPlayerId = 1;
-    private CityLayout? _cityLayout;
+    private bool _worldReady;
     private bool _started;
 
     public GameServer(string databasePath)
@@ -59,6 +59,8 @@ public sealed class GameServer : IDisposable
 
     public GameSimulation Simulation => _simulation;
 
+    /// <param name="cityName">Ignored — multiplayer boots CC-only from map.dat (legacy MP).</param>
+    /// <param name="cityDesign">Ignored — demo layouts are offline-only.</param>
     public void Start(string host, int port, string cityName = "Buenos Aires", string cityDesign = "demo")
     {
         if (_started)
@@ -66,19 +68,25 @@ public sealed class GameServer : IDisposable
             return;
         }
 
+        _ = cityName;
+        _ = cityDesign;
+
         _simulation.TileMap = LoadTileMap();
-        _cityLayout = LevelLoader.LoadLegacyCity(cityName, cityDesign);
-        _simulation.LoadCityLayout(_cityLayout);
-        _simulation.SpawnDemoItems(DefaultCityId);
+        var ccCount = _simulation.LoadMultiplayerWorld();
+        _worldReady = true;
         _simulation.AssignNetworkItemIds();
         _simulation.NetworkPlayersUseLocalBulletDamage = false;
         _simulation.NetworkPlayersUseLocalHealthDeath = false;
         _simulation.ReportBombEventsToNetwork = true;
         _simulation.ReportFactoryItemSpawnsToNetwork = true;
+        _simulation.ReportItemLifeToNetwork = true;
         _simulation.ReportRespawnEventsToNetwork = true;
         _simulation.ReturnInventoryPlaceablesOnDeath = true;
         _buildPopSync.Reset(_simulation);
         _factoryItemCountSync.Reset(_simulation);
+        _cities.ResetStartingCity();
+        Console.WriteLine($"Multiplayer world: {ccCount} command centers (CC-only, no demo.city)");
+        Console.WriteLine($"Meeting room starting city: {_cities.StartingCityId}");
 
         BoundHost = string.IsNullOrWhiteSpace(host) ? "0.0.0.0" : host.Trim();
         var listenAddress = BoundHost is "0.0.0.0" or "*"
@@ -162,6 +170,7 @@ public sealed class GameServer : IDisposable
         BroadcastPendingDeathEvents();
         BroadcastPendingRespawnEvents();
         BroadcastPendingHpEvents();
+        BroadcastPendingItemLifeEvents();
         RemoveDisconnectedSessions();
     }
 
@@ -463,6 +472,8 @@ public sealed class GameServer : IDisposable
     /// <summary>Legacy <c>SendCurrentPlayers</c> — existing roster + points for the joiner.</summary>
     private void SendCurrentPlayers(ClientSession joiner)
     {
+        Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
+        Span<byte> points = stackalloc byte[ServerPointsUpdatePacket.Size];
         foreach (var other in GetLobbySessions())
         {
             if (other.PlayerId == joiner.PlayerId || other.State < PlayerSessionState.LoggedIn)
@@ -470,11 +481,9 @@ public sealed class GameServer : IDisposable
                 continue;
             }
 
-            Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
             WritePlayerDataPacket(playerData, other);
             joiner.SendServer(ServerMessageId.PlayerData, playerData);
 
-            Span<byte> points = stackalloc byte[ServerPointsUpdatePacket.Size];
             CreatePointsUpdatePacket(other).Write(points);
             joiner.SendServer(ServerMessageId.PointsUpdate, points);
         }
@@ -574,9 +583,10 @@ public sealed class GameServer : IDisposable
         Span<byte> clearList = stackalloc byte[1];
         clearList[0] = 255;
         session.SendServer(ServerMessageId.AddRemCity, clearList);
-        foreach (var entry in _cities.BuildCityList(_mayors, GetLobbySessions(), DefaultCityId))
+
+        Span<byte> payload = stackalloc byte[3];
+        foreach (var entry in _cities.BuildCityList(_mayors, GetLobbySessions()))
         {
-            Span<byte> payload = stackalloc byte[3];
             entry.Write(payload);
             session.SendServer(ServerMessageId.AddRemCity, payload);
         }
@@ -903,7 +913,7 @@ public sealed class GameServer : IDisposable
 
     private void JoinGame(ClientSession session)
     {
-        if (_cityLayout is null || !session.HasCityAssignment)
+        if (!_worldReady || !session.HasCityAssignment)
         {
             return;
         }
@@ -913,10 +923,18 @@ public sealed class GameServer : IDisposable
         {
             spawn = openSpawn;
         }
+        else if (CityBuildInitializer.TryGetCommandCenterGridForCity(
+                     session.CityId,
+                     _simulation.TileMap,
+                     out var gridX,
+                     out var gridY))
+        {
+            spawn = _simulation.FindOpenTankSpawnNear(
+                CommandCenterLookup.GetRespawnPositionFromGridAnchor(gridX, gridY));
+        }
         else
         {
-            spawn = _cityLayout.GetSpawnPosition();
-            spawn = _simulation.FindOpenTankSpawnNear(spawn);
+            spawn = Vector2.Zero;
         }
 
         _simulation.CreateNetworkPlayerEntity(spawn, session.PlayerId, session.CityId);
@@ -938,6 +956,8 @@ public sealed class GameServer : IDisposable
             session.CityId).Write(joinData);
         BroadcastExcept(session.PlayerId, ServerMessageId.JoinData, joinData);
 
+        Span<byte> existingJoin = stackalloc byte[ServerJoinDataPacket.Size];
+        Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
         foreach (var other in GetInGameSessions())
         {
             if (other.PlayerId == session.PlayerId)
@@ -945,7 +965,6 @@ public sealed class GameServer : IDisposable
                 continue;
             }
 
-            Span<byte> existingJoin = stackalloc byte[ServerJoinDataPacket.Size];
             new ServerJoinDataPacket(
                 other.PlayerId,
                 mayor: other.IsMayor ? (byte)1 : (byte)0,
@@ -954,7 +973,6 @@ public sealed class GameServer : IDisposable
 
             if (_simulation.TryGetNetworkPlayerSnapshot(other.PlayerId, out var snapshot))
             {
-                Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
                 snapshot.ToPacket().Write(updatePayload);
                 session.SendServer(ServerMessageId.Update, updatePayload);
             }
@@ -977,11 +995,11 @@ public sealed class GameServer : IDisposable
             return;
         }
 
+        Span<byte> canBuildPayload = stackalloc byte[ServerCanBuildPacket.Size];
         foreach (var packet in _buildPopSync.CreateCanBuildSnapshot(_simulation, session.CityId))
         {
-            Span<byte> payload = stackalloc byte[ServerCanBuildPacket.Size];
-            packet.Write(payload);
-            session.SendServer(ServerMessageId.CanBuild, payload);
+            packet.Write(canBuildPayload);
+            session.SendServer(ServerMessageId.CanBuild, canBuildPayload);
         }
 
         _buildPopSync.Reset(_simulation, session.CityId);
@@ -989,9 +1007,9 @@ public sealed class GameServer : IDisposable
 
     private void SendFactoryItemCountSnapshot(ClientSession session)
     {
+        Span<byte> payload = stackalloc byte[ServerItemCountPacket.Size];
         foreach (var packet in _factoryItemCountSync.CreateItemCountSnapshot(_simulation))
         {
-            Span<byte> payload = stackalloc byte[ServerItemCountPacket.Size];
             packet.Write(payload);
             session.SendServer(ServerMessageId.ItemCount, payload);
         }
@@ -1001,29 +1019,29 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastBuildPopSync()
     {
+        Span<byte> canBuildPayload = stackalloc byte[ServerCanBuildPacket.Size];
         foreach (var cityId in _simulation.EnumerateCityBuildIds())
         {
             foreach (var packet in _buildPopSync.CollectCanBuildChanges(_simulation, cityId))
             {
-                Span<byte> payload = stackalloc byte[ServerCanBuildPacket.Size];
-                packet.Write(payload);
-                BroadcastCanBuild(payload, cityId);
+                packet.Write(canBuildPayload);
+                BroadcastCanBuild(canBuildPayload, cityId);
             }
         }
 
+        Span<byte> popPayload = stackalloc byte[ServerUpdatePopPacket.Size];
         foreach (var packet in _buildPopSync.CollectPopulationChanges(_simulation))
         {
-            Span<byte> payload = stackalloc byte[ServerUpdatePopPacket.Size];
-            packet.Write(payload);
-            BroadcastAll(ServerMessageId.UpdatePop, payload);
+            packet.Write(popPayload);
+            BroadcastAll(ServerMessageId.UpdatePop, popPayload);
         }
     }
 
     private void BroadcastFactoryItemCountSync()
     {
+        Span<byte> payload = stackalloc byte[ServerItemCountPacket.Size];
         foreach (var packet in _factoryItemCountSync.CollectItemCountChanges(_simulation))
         {
-            Span<byte> payload = stackalloc byte[ServerItemCountPacket.Size];
             packet.Write(payload);
             BroadcastAll(ServerMessageId.ItemCount, payload);
         }
@@ -1031,9 +1049,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastFactoryAddItems()
     {
+        Span<byte> payload = stackalloc byte[ServerAddItemPacket.Size];
         while (_simulation.TryConsumeFactoryAddItem(out var addItem))
         {
-            Span<byte> payload = stackalloc byte[ServerAddItemPacket.Size];
             addItem.Write(payload);
             BroadcastAll(ServerMessageId.AddItem, payload);
         }
@@ -1068,25 +1086,24 @@ public sealed class GameServer : IDisposable
         var snapshot = new JoinWorldSnapshot();
         _simulation.CollectJoinSnapshot(snapshot);
 
+        Span<byte> buildingPayload = stackalloc byte[ServerBuildingPacket.Size];
         foreach (var removed in snapshot.RemovedBuildings)
         {
-            Span<byte> payload = stackalloc byte[ServerBuildingPacket.Size];
-            removed.Write(payload);
-            session.SendServer(ServerMessageId.RemBuilding, payload);
+            removed.Write(buildingPayload);
+            session.SendServer(ServerMessageId.RemBuilding, buildingPayload);
         }
 
         foreach (var building in snapshot.Buildings)
         {
-            Span<byte> payload = stackalloc byte[ServerBuildingPacket.Size];
-            building.Write(payload);
-            session.SendServer(ServerMessageId.NewBuilding, payload);
+            building.Write(buildingPayload);
+            session.SendServer(ServerMessageId.NewBuilding, buildingPayload);
         }
 
+        Span<byte> itemPayload = stackalloc byte[ServerAddItemPacket.Size];
         foreach (var item in snapshot.Items)
         {
-            Span<byte> payload = stackalloc byte[ServerAddItemPacket.Size];
-            item.Write(payload);
-            session.SendServer(ServerMessageId.AddItem, payload);
+            item.Write(itemPayload);
+            session.SendServer(ServerMessageId.AddItem, itemPayload);
         }
     }
 
@@ -1430,9 +1447,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingHpEvents()
     {
+        Span<byte> payload = stackalloc byte[ServerHpPacket.Size];
         while (_simulation.TryConsumeNetworkHpEvent(out var hpEvent))
         {
-            Span<byte> payload = stackalloc byte[ServerHpPacket.Size];
             hpEvent.Write(payload);
             BroadcastAll(ServerMessageId.Hp, payload);
         }
@@ -1442,12 +1459,7 @@ public sealed class GameServer : IDisposable
     {
         DeathPointTransfers.Apply(victim, killerCityId, GetInGameSessions(), (session, pointDelta) =>
         {
-            if (pointDelta != 0 && !session.IsGuest && session.RegisteredUsername is not null)
-            {
-                _accounts.AdjustPoints(session.RegisteredUsername, pointDelta);
-            }
-
-            BroadcastPointsUpdate(session);
+            AdjustSessionPoints(session, pointDelta);
         });
     }
 
@@ -1469,11 +1481,50 @@ public sealed class GameServer : IDisposable
         BroadcastAll(ServerMessageId.PointsUpdate, payload);
     }
 
+    private void AdjustSessionPoints(ClientSession session, int delta)
+    {
+        if (delta != 0)
+        {
+            var oldRank = PlayerRankCatalog.GetRank(session.Points);
+            session.Points += delta;
+            var newRank = PlayerRankCatalog.GetRank(session.Points);
+            if (oldRank != newRank)
+            {
+                BroadcastPromotion(session.PlayerId, newRank);
+            }
+
+            if (!session.IsGuest && session.RegisteredUsername is not null)
+            {
+                _accounts.AdjustPoints(session.RegisteredUsername, delta);
+            }
+        }
+
+        BroadcastPointsUpdate(session);
+    }
+
+    private void BroadcastPromotion(byte playerId, string rank)
+    {
+        var packet = new ServerPromotionPacket(playerId, rank);
+        Span<byte> payload = stackalloc byte[packet.GetWriteLength()];
+        packet.Write(payload);
+        BroadcastAll(ServerMessageId.Promotion, payload);
+    }
+
+    private void BroadcastPendingItemLifeEvents()
+    {
+        Span<byte> payload = stackalloc byte[ServerItemLifePacket.Size];
+        while (_simulation.TryConsumeNetworkItemLifeEvent(out var itemLifeEvent))
+        {
+            itemLifeEvent.Write(payload);
+            BroadcastAll(ServerMessageId.ItemLife, payload);
+        }
+    }
+
     private void SendPointsSnapshot(ClientSession session)
     {
+        Span<byte> payload = stackalloc byte[ServerPointsUpdatePacket.Size];
         foreach (var player in GetInGameSessions())
         {
-            Span<byte> payload = stackalloc byte[ServerPointsUpdatePacket.Size];
             CreatePointsUpdatePacket(player).Write(payload);
             session.SendServer(ServerMessageId.PointsUpdate, payload);
         }
@@ -1487,9 +1538,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingDeathEvents()
     {
+        Span<byte> payload = stackalloc byte[ServerDeathPacket.Size];
         while (_simulation.TryConsumeNetworkDeathEvent(out var deathEvent))
         {
-            Span<byte> payload = stackalloc byte[ServerDeathPacket.Size];
             deathEvent.Write(payload);
             BroadcastAll(ServerMessageId.Death, payload);
 
@@ -1504,9 +1555,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingOrbEvents()
     {
+        Span<byte> payload = stackalloc byte[ServerOrbedCityPacket.Size];
         while (_simulation.TryConsumeOrbEvent(out var orbEvent))
         {
-            Span<byte> payload = stackalloc byte[ServerOrbedCityPacket.Size];
             new ServerOrbedCityPacket(
                 (byte)orbEvent.VictimCityId,
                 (byte)orbEvent.AttackerCityId,
@@ -1538,13 +1589,7 @@ public sealed class GameServer : IDisposable
                 continue;
             }
 
-            session.Points += points;
-            if (!session.IsGuest && session.RegisteredUsername is not null)
-            {
-                _accounts.AdjustPoints(session.RegisteredUsername, points);
-            }
-
-            BroadcastPointsUpdate(session);
+            AdjustSessionPoints(session, points);
         }
     }
 
@@ -1560,15 +1605,15 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingExplosionEvents()
     {
+        Span<byte> payload = stackalloc byte[ServerExplosionPacket.Size];
+        Span<byte> removePayload = stackalloc byte[ServerRemoveItemPacket.Size];
         while (_simulation.TryConsumeNetworkExplosionEvent(out var explosionEvent))
         {
-            Span<byte> payload = stackalloc byte[ServerExplosionPacket.Size];
             explosionEvent.Explosion.Write(payload);
             BroadcastAll(ServerMessageId.Explosion, payload);
 
             if (explosionEvent.RemovedItemId != 0)
             {
-                Span<byte> removePayload = stackalloc byte[ServerRemoveItemPacket.Size];
                 new ServerRemoveItemPacket(explosionEvent.RemovedItemId).Write(removePayload);
                 BroadcastAll(ServerMessageId.RemItem, removePayload);
             }
@@ -1577,9 +1622,9 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingBombBuildingRemovals()
     {
+        Span<byte> payload = stackalloc byte[ServerBuildingPacket.Size];
         while (_simulation.TryConsumeBombBuildingRemoval(out var building))
         {
-            Span<byte> payload = stackalloc byte[ServerBuildingPacket.Size];
             building.Write(payload);
             BroadcastAll(ServerMessageId.RemBuilding, payload);
             BroadcastTeamUnderAttack(building.City);
@@ -1588,9 +1633,11 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastPendingRespawnEvents()
     {
+        Span<byte> warpPayload = stackalloc byte[ServerStateGamePacket.Size];
+        Span<byte> respawnPayload = stackalloc byte[ServerRespawnPacket.Size];
+        Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
         while (_simulation.TryConsumeNetworkRespawnEvent(out var respawnEvent))
         {
-            Span<byte> warpPayload = stackalloc byte[ServerStateGamePacket.Size];
             new ServerStateGamePacket(
                 (ushort)respawnEvent.Position.X,
                 (ushort)respawnEvent.Position.Y,
@@ -1601,13 +1648,11 @@ public sealed class GameServer : IDisposable
                 session.SendServer(ServerMessageId.Warp, warpPayload);
             }
 
-            Span<byte> respawnPayload = stackalloc byte[ServerRespawnPacket.Size];
             new ServerRespawnPacket(respawnEvent.PlayerId).Write(respawnPayload);
             BroadcastExcept(respawnEvent.PlayerId, ServerMessageId.Respawn, respawnPayload);
 
             if (_simulation.TryGetNetworkPlayerSnapshot(respawnEvent.PlayerId, out var snapshot))
             {
-                Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
                 snapshot.ToPacket().Write(updatePayload);
                 BroadcastAll(ServerMessageId.Update, updatePayload);
             }

@@ -10,7 +10,6 @@ using BattleCity.Core.City;
 using BattleCity.Core.Ecs;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Gameplay;
-using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Chat;
@@ -40,7 +39,6 @@ public sealed class InGameOnlineScene : IScene
 
     private RenderPipeline _renderPipeline = null!;
     private TileMap _tileMap = null!;
-    private CityLayout _cityLayout = null!;
     private Vector2 _cameraFocus;
     private Vector2 _cameraPanOffset;
     private Vector2 _buildMenuAnchor;
@@ -112,9 +110,8 @@ public sealed class InGameOnlineScene : IScene
         _simulation.NetworkPlayersUseLocalBulletDamage = false;
         _simulation.ReportLocalShot = shot => _client.SendShoot(shot);
 
-        // Online multiplayer shares the Buenos Aires world layout; affiliation comes from SpawnState.
-        _cityLayout = LevelLoader.LoadLegacyCity("Buenos Aires", _context.CityDesign);
-        _simulation.LoadCityLayout(_cityLayout);
+        // Online multiplayer: CC-only shared world (legacy MP). Buildings arrive via join snapshot.
+        _simulation.LoadMultiplayerWorld();
 
         _remotePlayers = new RemotePlayerSync(_simulation.World);
         _remotePlayers.SetDisplayName(_client.PlayerId, _context.PlayerName);
@@ -135,7 +132,8 @@ public sealed class InGameOnlineScene : IScene
         }
         else
         {
-            spawn = _cityLayout.GetSpawnPosition();
+            // Last resort when map CC scan failed — prefer world origin over layout centroid.
+            spawn = NumericsVector2.Zero;
         }
 
         spawn = _simulation.FindOpenTankSpawnNear(spawn);
@@ -376,9 +374,15 @@ public sealed class InGameOnlineScene : IScene
             switch (networkEvent.Kind)
             {
                 case GameClientEventKind.JoinData when networkEvent.JoinData.PlayerId != _client.PlayerId:
-                    _remotePlayers.HandleJoin(
-                        networkEvent.JoinData,
-                        new NumericsVector2(_cityLayout.GetSpawnPosition().X, _cityLayout.GetSpawnPosition().Y));
+                    {
+                        var joinSpawn = _simulation.TryGetCityRespawnPosition(
+                                networkEvent.JoinData.City,
+                                out var citySpawn,
+                                out _)
+                            ? citySpawn
+                            : new NumericsVector2(0f, 0f);
+                        _remotePlayers.HandleJoin(networkEvent.JoinData, joinSpawn);
+                    }
                     break;
                 case GameClientEventKind.PlayerUpdate when networkEvent.Update.PlayerId != _client.PlayerId:
                     _remotePlayers.ApplyUpdate(networkEvent.Update);
@@ -423,6 +427,17 @@ public sealed class InGameOnlineScene : IScene
                 case GameClientEventKind.UnderAttack:
                     _simulation.ApplyNetworkUnderAttack();
                     break;
+                case GameClientEventKind.ItemLife:
+                    _simulation.ApplyNetworkItemLife(networkEvent.ItemLife);
+                    break;
+                case GameClientEventKind.Promotion:
+                    InGameChatService.AppendPromotion(
+                        _chatLog,
+                        _remotePlayers,
+                        _client,
+                        _context.PlayerName,
+                        networkEvent.Promotion);
+                    break;
                 case GameClientEventKind.CanBuild:
                     _simulation.ApplyNetworkCanBuild(networkEvent.CanBuild);
                     break;
@@ -461,13 +476,21 @@ public sealed class InGameOnlineScene : IScene
                     if (networkEvent.Death.PlayerId == _client.PlayerId)
                     {
                         _cameraPanOffset = Vector2.Zero;
-                        if (CommandCenterLookup.TryGetWorldPosition(
+                        var localCityId = GetLocalCityId();
+                        if (_simulation.TryGetCityBuild(localCityId, out var homeCity)
+                            && CommandCenterLookup.TryGetHomeReferenceWorldPosition(
                                 _simulation.World,
-                                out var commandCenterPosition))
+                                homeCity.CommandCenterGridX,
+                                homeCity.CommandCenterGridY,
+                                out var homeReference))
+                        {
+                            _cameraFocus = new Vector2(homeReference.X, homeReference.Y);
+                        }
+                        else if (_simulation.TryGetCityRespawnPosition(localCityId, out var spawn, out _))
                         {
                             _cameraFocus = new Vector2(
-                                commandCenterPosition.X + GameConstants.TileSize / 2f,
-                                commandCenterPosition.Y + GameConstants.TileSize / 2f);
+                                spawn.X + GameConstants.TileSize / 2f,
+                                spawn.Y + GameConstants.TileSize / 2f);
                         }
                     }
 
@@ -914,19 +937,19 @@ public sealed class InGameOnlineScene : IScene
             : _remotePlayers?.ObserverCityId ?? 0;
         var homeCcGridX = 0;
         var homeCcGridY = 0;
-        var cityCenterWorldPosition = new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y);
+        var cityCenterWorldPosition = _cameraFocus;
         Vector2? nearestOrbableCity = null;
         if (_simulation.TryGetCityBuild(observerCityId, out var homeCityForCompass))
         {
             homeCcGridX = homeCityForCompass.CommandCenterGridX;
             homeCcGridY = homeCityForCompass.CommandCenterGridY;
-            if (CommandCenterLookup.TryGetWorldPosition(
+            if (CommandCenterLookup.TryGetHomeReferenceWorldPosition(
                     _simulation.World,
                     homeCityForCompass.CommandCenterGridX,
                     homeCityForCompass.CommandCenterGridY,
-                    out var commandCenterPosition))
+                    out var homeReference))
             {
-                cityCenterWorldPosition = new Vector2(commandCenterPosition.X, commandCenterPosition.Y);
+                cityCenterWorldPosition = new Vector2(homeReference.X, homeReference.Y);
             }
 
             if (CommandCenterLookup.TryFindNearestOtherWorldPosition(
@@ -940,9 +963,9 @@ public sealed class InGameOnlineScene : IScene
                 nearestOrbableCity = new Vector2(orbTarget.X, orbTarget.Y);
             }
         }
-        else if (CommandCenterLookup.TryGetWorldPosition(_simulation.World, out var anyCommandCenter))
+        else if (CommandCenterLookup.TryGetHomeReferenceWorldPosition(_simulation.World, out var anyHomeReference))
         {
-            cityCenterWorldPosition = new Vector2(anyCommandCenter.X, anyCommandCenter.Y);
+            cityCenterWorldPosition = new Vector2(anyHomeReference.X, anyHomeReference.Y);
         }
 
         return new RenderContext
@@ -960,7 +983,7 @@ public sealed class InGameOnlineScene : IScene
             ShowMiniMap = _showMiniMap,
             ShowStatusPanel = _showStatusPanel,
             LoadedCityName = _context.SelectedCity,
-            BuildingCount = _cityLayout.Buildings.Count,
+            BuildingCount = _simulation.CountBuildingsInWorld(),
             PlayerDisplayName = _context.PlayerName,
             PlayerHealth = playerHealth,
             PlayerMaxHealth = playerMaxHealth,

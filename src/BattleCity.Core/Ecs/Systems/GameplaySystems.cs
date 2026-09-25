@@ -12,6 +12,7 @@ using BattleCity.Core.Maps;
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
+using BattleCity.Shared.Gameplay;
 
 namespace BattleCity.Core.Ecs.Systems;
 
@@ -186,7 +187,8 @@ public static class BulletCollisionSystem
         SimulationAudioBuffer? audio = null,
         Action<Entity, int, int>? onHealthChanged = null,
         bool applyDamageToNetworkPlayers = true,
-        int defendedCityId = 0)
+        int defendedCityId = 0,
+        Action<Entity, ItemType, int>? onPlacedItemDamaged = null)
     {
         var hits = new List<Entity>();
 
@@ -222,7 +224,8 @@ public static class BulletCollisionSystem
                         collider,
                         damage.Value,
                         hits,
-                        audio))
+                        audio,
+                        onPlacedItemDamaged))
                 {
                     return;
                 }
@@ -350,7 +353,8 @@ public static class BulletCollisionSystem
         in Collider collider,
         int damage,
         List<Entity> hits,
-        SimulationAudioBuffer? audio)
+        SimulationAudioBuffer? audio,
+        Action<Entity, ItemType, int>? onPlacedItemDamaged)
     {
         var itemQuery = new QueryDescription().WithAll<PlacedItemRef, Transform2D, Health>();
         var previousBounds = AxisAlignedBox.FromCollider(previousPosition, collider);
@@ -397,6 +401,10 @@ public static class BulletCollisionSystem
                 if (health.Current <= 0)
                 {
                     world.Destroy(entity);
+                }
+                else if (ItemDamageSync.ShouldBroadcastItemLife(item.Type, health.Current))
+                {
+                    onPlacedItemDamaged?.Invoke(entity, item.Type, health.Current);
                 }
 
                 hits.Add(bulletEntity);

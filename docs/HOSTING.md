@@ -19,10 +19,17 @@ Default port: **5643** (TCP).
 
 ## Local (same PC)
 
+### Quick (embedded)
+
+1. Start `BattleCity.Client.exe` → **Play Online (Local Server)**
+2. The client starts an in-process server on `127.0.0.1:5643` (or uses one already listening)
+3. Login with guest or create an account (F2)
+
+### Separate host app (share with friends later)
+
 1. Start `BattleCity.Server.Host.exe` → **Start**
-2. Start `BattleCity.Client.exe` → **Play Online**
-3. Server field: `127.0.0.1` (or `127.0.0.1:5643`)
-4. Leave username blank for guest, or create an account (F2)
+2. Start `BattleCity.Client.exe` → **Play Online (Local Server)** (reuses port 5643) or paste the invite
+3. Leave username blank for guest, or create an account (F2)
 
 ---
 
@@ -87,4 +94,4 @@ With the repo checked out:
 dotnet run --project tools/BattleCity.Smoke/BattleCity.Smoke.csproj
 ```
 
-Starts an in-process server, joins **1 mayor + 3 soldiers** to Buenos Aires, sends movement updates, then exits with a pass/fail summary.
+Starts an in-process server, joins **1 mayor + 3 soldiers** to Buenos Aires, sends movement updates, then exits with a pass/fail summary. The same project runs in GitHub Actions after unit tests.

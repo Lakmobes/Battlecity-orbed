@@ -15,6 +15,8 @@
   <ItemGroup>
     <ProjectReference Include="..\BattleCity.Core\BattleCity.Core.csproj" />
     <ProjectReference Include="..\BattleCity.Shared\BattleCity.Shared.csproj" />
+    <!-- Embedded local host for "Play Online (Local Server)" — friend hosting still uses Server.Host. -->
+    <ProjectReference Include="..\BattleCity.Server\BattleCity.Server.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(EnableMGCBItems)' != 'false'">
@@ -34,7 +36,8 @@
 
   <Target Name="RestoreDotnetTools" BeforeTargets="CollectPackageReferences">
     <Message Text="Restoring dotnet tools" Importance="High" />
-    <Exec Command="dotnet tool restore" />
+    <Exec Command="dotnet tool restore" WorkingDirectory="$(RepoRoot)" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(RepoRoot)tools\Restore-Mgcb.ps1&quot;" />
   </Target>
 
 </Project>

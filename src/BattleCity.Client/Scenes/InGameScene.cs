@@ -11,6 +11,7 @@ using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Gameplay;
 using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
+using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
 using BattleCity.Shared.Gameplay;
@@ -88,17 +89,19 @@ public sealed class InGameScene : IScene
         _simulation.LoadCityLayout(_cityLayout);
         _simulation.SpawnDemoItems();
 
-        var spawn = _simulation.TryGetCityRespawnPosition(
-                cityId: 0,
-                out var openSpawn,
-                out _)
+        var localCityId = CityCatalog.TryGetId(_context.SelectedCity, out var resolvedCityId)
+            ? resolvedCityId
+            : 0;
+        var spawn = _simulation.TryGetCityRespawnPosition(localCityId, out var openSpawn, out _)
             ? new NumericsVector2(openSpawn.X, openSpawn.Y)
-            : new NumericsVector2(_cityLayout.GetSpawnPosition().X, _cityLayout.GetSpawnPosition().Y);
+            : NumericsVector2.Zero;
+        spawn = _simulation.FindOpenTankSpawnNear(spawn);
 
         _cameraFocus = new Vector2(spawn.X + GameConstants.TileSize / 2f, spawn.Y + GameConstants.TileSize / 2f);
         _simulation.CreatePlayerEntity(
             spawn,
-            isAdmin: TankSpriteSelector.IsAdminAccount(_context.PlayerName));
+            isAdmin: TankSpriteSelector.IsAdminAccount(_context.PlayerName),
+            cityId: localCityId);
         _simulation.SpawnPracticeBots(spawn);
 
         _gameplayAudio = new GameplayAudioController(_context.Audio);
@@ -242,7 +245,7 @@ public sealed class InGameScene : IScene
             return;
         }
 
-        if (!ui.MouseLeftClicked || !_simulation.TryGetCityBuild(0, out var build))
+        if (!ui.MouseLeftClicked || !_simulation.TryGetCityBuild(GetLocalCityId(), out var build))
         {
             return;
         }
@@ -320,7 +323,7 @@ public sealed class InGameScene : IScene
     {
         _showBuildPreview = false;
 
-        if (_buildModeSlot == 0 || !ui.PointerOverWorld || !_simulation.TryGetCityBuild(0, out var build))
+        if (_buildModeSlot == 0 || !ui.PointerOverWorld || !_simulation.TryGetCityBuild(GetLocalCityId(), out var build))
         {
             return;
         }
@@ -382,7 +385,8 @@ public sealed class InGameScene : IScene
             });
 
         CityBuildState? cityBuild = null;
-        if (_simulation.TryGetCityBuild(0, out var build))
+        var localCityId = GetLocalCityId();
+        if (_simulation.TryGetCityBuild(localCityId, out var build))
         {
             cityBuild = build;
         }
@@ -391,17 +395,17 @@ public sealed class InGameScene : IScene
         var homeCcGridY = 0;
         var cityCenterWorldPosition = new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y);
         Vector2? nearestOrbableCity = null;
-        if (_simulation.TryGetCityBuild(0, out var homeCity))
+        if (_simulation.TryGetCityBuild(localCityId, out var homeCity))
         {
             homeCcGridX = homeCity.CommandCenterGridX;
             homeCcGridY = homeCity.CommandCenterGridY;
-            if (CommandCenterLookup.TryGetWorldPosition(
+            if (CommandCenterLookup.TryGetHomeReferenceWorldPosition(
                     _simulation.World,
                     homeCity.CommandCenterGridX,
                     homeCity.CommandCenterGridY,
-                    out var commandCenterPosition))
+                    out var homeReference))
             {
-                cityCenterWorldPosition = new Vector2(commandCenterPosition.X, commandCenterPosition.Y);
+                cityCenterWorldPosition = new Vector2(homeReference.X, homeReference.Y);
             }
 
             if (CommandCenterLookup.TryFindNearestOtherWorldPosition(
@@ -409,7 +413,8 @@ public sealed class InGameScene : IScene
                     homeCity.CommandCenterGridX,
                     homeCity.CommandCenterGridY,
                     new NumericsVector2(_cameraFocus.X, _cameraFocus.Y),
-                    out var orbTarget))
+                    out var orbTarget,
+                    cityId => _simulation.TryGetCityBuild(cityId, out var orbBuild) && orbBuild.IsOrbable))
             {
                 nearestOrbableCity = new Vector2(orbTarget.X, orbTarget.Y);
             }
@@ -673,7 +678,7 @@ public sealed class InGameScene : IScene
             return;
         }
 
-        _simulation.TryGetCityBuild(0, out var cityBuild);
+        _simulation.TryGetCityBuild(GetLocalCityId(), out var cityBuild);
         var player = GetLocalPlayerEntity();
         var tankTopLeft = new NumericsVector2(position.X, position.Y);
 
@@ -708,6 +713,16 @@ public sealed class InGameScene : IScene
         Entity player = default;
         _simulation.World.Query(in query, (Entity entity) => player = entity);
         return player;
+    }
+
+    private int GetLocalCityId()
+    {
+        if (CityCatalog.TryGetId(_context.SelectedCity, out var resolvedCityId))
+        {
+            return resolvedCityId;
+        }
+
+        return _simulation.TryGetPlayerCityId(out var playerCityId) ? playerCityId : 0;
     }
 
     private ChatOverlayRenderer CreateChatOverlayRenderer()

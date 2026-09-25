@@ -185,8 +185,13 @@ public sealed class MeetingScene : IScene
     private void DrawCitiesPanel(SpriteBatch spriteBatch)
     {
         var panel = MeetingRoomLayout.CitiesPanel;
-        _ui.DrawPanel(spriteBatch, panel, MenuTheme.PanelFill, MenuTheme.PanelBorder);
-        _ui.DrawText(spriteBatch, "Open Cities", panel.X + MeetingRoomLayout.PanelPadding, panel.Y + 6, MenuTheme.TextPrimary);
+        _ui.DrawThemedPanel(spriteBatch, panel);
+        _ui.DrawText(spriteBatch, "Open Cities", panel.X + MeetingRoomLayout.PanelPadding, panel.Y + 10, MenuTheme.TextPrimary);
+        _ui.DrawHairline(
+            spriteBatch,
+            panel.X + MeetingRoomLayout.PanelPadding,
+            panel.Y + MeetingRoomLayout.PanelPadding + MeetingRoomLayout.HeaderHeight - 4,
+            panel.Width - MeetingRoomLayout.PanelPadding * 2);
 
         if (_cities.Count == 0)
         {
@@ -200,13 +205,14 @@ public sealed class MeetingScene : IScene
                 spriteBatch,
                 "Click Refresh or press R",
                 panel.X + MeetingRoomLayout.PanelPadding,
-                MeetingRoomLayout.CityListTop + 22,
+                MeetingRoomLayout.CityListTop + 24,
                 MenuTheme.TextMuted);
             return;
         }
 
         var visible = VisibleCityCount;
         var scroll = GetCityScrollOffset();
+        var pixel = _context.Assets.Pixel;
 
         for (var row = 0; row < visible; row++)
         {
@@ -219,17 +225,21 @@ public sealed class MeetingScene : IScene
             var bounds = MeetingRoomLayout.GetCityRowBounds(row);
             if (i == _selectedCityIndex)
             {
-                _ui.DrawPanel(spriteBatch, bounds, MenuTheme.RowSelected, MenuTheme.ButtonFocusBorder);
+                spriteBatch.Draw(pixel, bounds, MenuTheme.RowSelected);
+                spriteBatch.Draw(
+                    pixel,
+                    new Rectangle(bounds.X, bounds.Y, MenuTheme.SelectionBarWidth, bounds.Height),
+                    MenuTheme.SelectionAccent);
             }
             else if (i == _hoverCityIndex)
             {
-                _ui.DrawPanel(spriteBatch, bounds, MenuTheme.RowHover, MenuTheme.RowHover);
+                spriteBatch.Draw(pixel, bounds, MenuTheme.RowHover);
             }
 
             var city = _cities[i];
             var nameColor = i == _selectedCityIndex ? MenuTheme.TextAccent : MenuTheme.TextPrimary;
-            var label = $"{city.CityName} - {city.RoleLabel}";
-            _ui.DrawText(spriteBatch, label, bounds.X + 6, bounds.Y + 6, nameColor);
+            var label = $"{city.CityName}  -  {city.RoleLabel}";
+            _ui.DrawText(spriteBatch, label, bounds.X + 12, bounds.Y + 8, nameColor);
         }
 
         if (_cities.Count > visible)
@@ -238,7 +248,7 @@ public sealed class MeetingScene : IScene
                 spriteBatch,
                 $"+ {_cities.Count - visible} more (use Up/Down)",
                 panel.X + MeetingRoomLayout.PanelPadding,
-                panel.Bottom - 22,
+                panel.Bottom - 24,
                 MenuTheme.TextMuted);
         }
         else
@@ -247,7 +257,7 @@ public sealed class MeetingScene : IScene
                 spriteBatch,
                 "Click a city to apply",
                 panel.X + MeetingRoomLayout.PanelPadding,
-                panel.Bottom - 22,
+                panel.Bottom - 24,
                 MenuTheme.TextMuted);
         }
     }
@@ -255,11 +265,16 @@ public sealed class MeetingScene : IScene
     private void DrawChatPanel(SpriteBatch spriteBatch)
     {
         var panel = MeetingRoomLayout.ChatPanel;
-        _ui.DrawPanel(spriteBatch, panel, MenuTheme.PanelFill, MenuTheme.PanelBorder);
-        _ui.DrawText(spriteBatch, "Lobby Chat", panel.X + MeetingRoomLayout.PanelPadding, panel.Y + 6, MenuTheme.TextPrimary);
+        _ui.DrawThemedPanel(spriteBatch, panel);
+        _ui.DrawText(spriteBatch, "Lobby Chat", panel.X + MeetingRoomLayout.PanelPadding, panel.Y + 10, MenuTheme.TextPrimary);
+        _ui.DrawHairline(
+            spriteBatch,
+            panel.X + MeetingRoomLayout.PanelPadding,
+            panel.Y + MeetingRoomLayout.PanelPadding + MeetingRoomLayout.HeaderHeight - 4,
+            panel.Width - MeetingRoomLayout.PanelPadding * 2);
 
         var chatY = MeetingRoomLayout.CityListTop;
-        var maxY = panel.Bottom - 36;
+        var maxY = panel.Bottom - 40;
         foreach (var line in _chatLog.Lines)
         {
             if (chatY + 16 > maxY)
@@ -268,16 +283,22 @@ public sealed class MeetingScene : IScene
             }
 
             _ui.DrawText(spriteBatch, line.Text, panel.X + MeetingRoomLayout.PanelPadding, chatY, line.Color);
-            chatY += 16;
+            chatY += 18;
         }
 
         if (_chatInput.IsActive)
         {
+            var inputBounds = new Rectangle(
+                panel.X + MeetingRoomLayout.PanelPadding,
+                panel.Bottom - 32,
+                panel.Width - MeetingRoomLayout.PanelPadding * 2,
+                24);
+            spriteBatch.Draw(_context.Assets.Pixel, inputBounds, MenuTheme.FieldFocusFill);
             _ui.DrawText(
                 spriteBatch,
-                $"> {_chatInput.Draft}_",
-                panel.X + MeetingRoomLayout.PanelPadding,
-                panel.Bottom - 24,
+                $"{_chatInput.Draft}_",
+                inputBounds.X + 8,
+                inputBounds.Y + 4,
                 MenuTheme.TextAccent);
         }
         else
@@ -286,7 +307,7 @@ public sealed class MeetingScene : IScene
                 spriteBatch,
                 "Press Enter to chat",
                 panel.X + MeetingRoomLayout.PanelPadding,
-                panel.Bottom - 24,
+                panel.Bottom - 26,
                 MenuTheme.TextMuted);
         }
     }
@@ -295,12 +316,7 @@ public sealed class MeetingScene : IScene
     {
         var refresh = MeetingRoomLayout.RefreshButton;
         var refreshHover = refresh.Contains(_previousLogicalMouse);
-        _ui.DrawPanel(
-            spriteBatch,
-            refresh,
-            refreshHover ? MenuTheme.RowHover : MenuTheme.ButtonIdleFill,
-            MenuTheme.PanelBorder);
-        _ui.DrawText(spriteBatch, "Refresh (R)", refresh.X + 10, refresh.Y + 6, MenuTheme.TextPrimary);
+        _ui.DrawMenuButton(spriteBatch, refresh, "Refresh (R)", selected: refreshHover);
 
         _ui.DrawCenteredText(
             spriteBatch,

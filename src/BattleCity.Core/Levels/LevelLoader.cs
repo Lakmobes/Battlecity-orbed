@@ -45,6 +45,37 @@ public static class LevelLoader
         int homeGridAnchorX,
         int homeGridAnchorY)
     {
+        foreach (var (cityId, gridAnchorX, gridAnchorY) in EnumerateCommandCenters(tileMap))
+        {
+            if (OverlapsFootprint(gridAnchorX, gridAnchorY, homeGridAnchorX, homeGridAnchorY))
+            {
+                continue;
+            }
+
+            SpawnCommandCenter(world, gridAnchorX, gridAnchorY, cityId);
+        }
+    }
+
+    /// <summary>
+    /// Spawns every map command center with its legacy city id (63→0). Used for multiplayer
+    /// CC-only world boot (no <c>.city</c> demo buildings).
+    /// </summary>
+    public static int SpawnAllCommandCenters(World world, TileMap tileMap)
+    {
+        var count = 0;
+        foreach (var (cityId, gridAnchorX, gridAnchorY) in EnumerateCommandCenters(tileMap))
+        {
+            SpawnCommandCenter(world, gridAnchorX, gridAnchorY, cityId);
+            count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>Legacy 63→0 CityCenter cluster scan.</summary>
+    public static IEnumerable<(int CityId, int GridAnchorX, int GridAnchorY)> EnumerateCommandCenters(
+        TileMap tileMap)
+    {
         var citIndex = 63;
         for (var y = 1; y < TileMap.Size - 1; y++)
         {
@@ -64,15 +95,12 @@ public static class LevelLoader
 
                 var gridAnchorX = x + GameConstants.BuildingCollisionOffset;
                 var gridAnchorY = y + GameConstants.BuildingCollisionOffset;
-                var cityId = citIndex;
+                yield return (citIndex, gridAnchorX, gridAnchorY);
                 citIndex--;
-
-                if (OverlapsFootprint(gridAnchorX, gridAnchorY, homeGridAnchorX, homeGridAnchorY))
+                if (citIndex < 0)
                 {
-                    continue;
+                    yield break;
                 }
-
-                SpawnCommandCenter(world, gridAnchorX, gridAnchorY, cityId);
             }
         }
     }

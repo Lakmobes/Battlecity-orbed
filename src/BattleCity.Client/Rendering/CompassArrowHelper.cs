@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace BattleCity.Client.Rendering;
 
-/// <summary>Compass direction toward the home command center (legacy CDrawing::DrawArrow).</summary>
+/// <summary>Compass direction toward the home drive-platform reference (spawn pad center).</summary>
 public static class CompassArrowHelper
 {
     public static string GetDirectionGlyph(Vector2 playerWorldCenter, Vector2 cityWorldCenter)

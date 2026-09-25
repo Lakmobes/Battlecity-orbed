@@ -1162,3 +1162,67 @@ public readonly struct ServerItemCountPacket
         buffer[2] = ItemCount;
     }
 }
+
+/// <summary>Legacy <c>smItemLife</c> / <c>sSMItemLife</c> — damaged item burn sync.</summary>
+public readonly struct ServerItemLifePacket
+{
+    public const int Size = 3;
+
+    public ServerItemLifePacket(ushort itemId, byte life)
+    {
+        ItemId = itemId;
+        Life = life;
+    }
+
+    public ushort ItemId { get; }
+
+    public byte Life { get; }
+
+    public static ServerItemLifePacket Read(ReadOnlySpan<byte> buffer) =>
+        new(
+            BinaryPrimitives.ReadUInt16LittleEndian(buffer),
+            buffer[2]);
+
+    public void Write(Span<byte> buffer)
+    {
+        BinaryPrimitives.WriteUInt16LittleEndian(buffer, ItemId);
+        buffer[2] = Life;
+    }
+}
+
+/// <summary>Legacy <c>smPromotion</c> — rank-up chat line (player id + null-terminated rank name).</summary>
+public readonly struct ServerPromotionPacket
+{
+    public ServerPromotionPacket(byte playerId, string rank)
+    {
+        PlayerId = playerId;
+        Rank = rank;
+    }
+
+    public byte PlayerId { get; }
+
+    public string Rank { get; }
+
+    public int GetWriteLength() => 1 + Encoding.ASCII.GetByteCount(Rank) + 1;
+
+    public static ServerPromotionPacket Read(ReadOnlySpan<byte> buffer)
+    {
+        if (buffer.Length < 2)
+        {
+            return new ServerPromotionPacket(0, string.Empty);
+        }
+
+        var playerId = buffer[0];
+        var nullIndex = buffer.Slice(1).IndexOf((byte)0);
+        var rankLength = nullIndex >= 0 ? nullIndex : buffer.Length - 1;
+        var rank = Encoding.ASCII.GetString(buffer.Slice(1, rankLength));
+        return new ServerPromotionPacket(playerId, rank);
+    }
+
+    public void Write(Span<byte> buffer)
+    {
+        buffer[0] = PlayerId;
+        var written = Encoding.ASCII.GetBytes(Rank, buffer.Slice(1));
+        buffer[1 + written] = 0;
+    }
+}

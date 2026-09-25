@@ -4,20 +4,23 @@ using BattleCity.Shared.Network.Packets;
 
 namespace BattleCity.Server;
 
+/// <summary>
+/// Meeting-room city list — mirrors legacy <c>CSend::SendCityList</c>
+/// (<c>SendCommandos</c> + spiral <c>SendTheCities</c>).
+/// </summary>
 public sealed class CityRegistry
 {
-    /// <summary>Always offer at least this many joinable meeting-room entries.</summary>
-    public const int MinimumJoinableCities = 3;
-
     /// <summary>
-    /// Preferred empty-city order (legacy starting-CC neighborhood around Buenos Aires).
+    /// Legacy <c>startingCityOptions</c> — Buenos Aires neighborhood on the 8×8 city grid.
     /// </summary>
-    private static readonly byte[] PreferredEmptyCities =
+    public static readonly byte[] StartingCityOptions =
     [
-        27, 26, 28, 19, 20, 18, 34, 35, 36, 0, 1, 2, 3, 4, 5,
+        18, 19, 20, 26, 27, 28, 34, 35, 36,
     ];
 
     private readonly Dictionary<byte, CitySlot> _slots = new();
+
+    public byte StartingCityId { get; private set; } = 27;
 
     public CitySlot GetOrCreate(byte cityId) =>
         _slots.TryGetValue(cityId, out var slot) ? slot : _slots[cityId] = new CitySlot(cityId);
@@ -45,20 +48,43 @@ public sealed class CityRegistry
         return false;
     }
 
+    /// <summary>Legacy <c>CSend::ResetStartingCC</c> — pick a BA-neighborhood seed city.</summary>
+    public void ResetStartingCity(Random? random = null)
+    {
+        random ??= Random.Shared;
+        StartingCityId = StartingCityOptions[random.Next(StartingCityOptions.Length)];
+    }
+
+    public void SetStartingCityForTests(byte cityId)
+    {
+        if (!CityCatalog.IsValidCityId(cityId))
+        {
+            throw new ArgumentOutOfRangeException(nameof(cityId));
+        }
+
+        StartingCityId = cityId;
+    }
+
+    /// <summary>
+    /// Legacy <c>citiesWanted = ⌊players/5⌋ + 6</c> where players are meeting/interview/logged-in/in-game.
+    /// </summary>
+    public static int ComputeCitiesWanted(int lobbyPlayerCount) =>
+        (Math.Max(0, lobbyPlayerCount) / 5) + 6;
+
     public IEnumerable<ServerAddRemCityPacket> BuildCityList(
         CityMayorRegistry mayors,
-        IEnumerable<ClientSession> sessions,
-        byte defaultCityId)
+        IEnumerable<ClientSession> sessions)
     {
-        var inGameCounts = CountInGamePlayersByCity(sessions);
+        var sessionList = sessions as IList<ClientSession> ?? sessions.ToList();
+        var inGameCounts = CountInGamePlayersByCity(sessionList);
         var results = new List<ServerAddRemCityPacket>();
         var sent = new HashSet<byte>();
 
-        // (a) Every city that already has a mayor and can still take commandos.
-        foreach (var cityId in mayors.GetMayoredCityIds())
+        // (a) SendCommandos — mayor'd cities that are hiring and not empty/full.
+        foreach (var cityId in mayors.GetMayoredCityIds().OrderBy(id => id))
         {
             inGameCounts.TryGetValue(cityId, out var count);
-            if (count >= GameConstants.MaxPlayersPerCity)
+            if (count <= 0 || count >= GameConstants.MaxPlayersPerCity)
             {
                 continue;
             }
@@ -68,12 +94,7 @@ public sealed class CityRegistry
                 continue;
             }
 
-            if (!mayors.TryGetMayorPlayerId(cityId, out var mayorId))
-            {
-                continue;
-            }
-
-            if (!sent.Add(cityId))
+            if (!mayors.TryGetMayorPlayerId(cityId, out var mayorId) || !sent.Add(cityId))
             {
                 continue;
             }
@@ -81,15 +102,11 @@ public sealed class CityRegistry
             results.Add(new ServerAddRemCityPacket(cityId, mayorId, (byte)count));
         }
 
-        // (b) Enough empty "Mayor required" slots so the list always has ≥ 3 joinable cities.
-        foreach (var cityId in EnumerateEmptyCityCandidates(defaultCityId))
+        // (b) SendTheCities — spiral empty (needs-mayor) cities from startingCity.
+        var citiesWanted = ComputeCitiesWanted(CountLobbyPlayers(sessionList));
+        foreach (var cityId in EnumerateSpiralCityIds(StartingCityId, citiesWanted))
         {
-            if (results.Count >= MinimumJoinableCities)
-            {
-                break;
-            }
-
-            if (mayors.HasMayor(cityId) || !CityCatalog.IsValidCityId(cityId) || !sent.Add(cityId))
+            if (mayors.HasMayor(cityId) || !sent.Add(cityId))
             {
                 continue;
             }
@@ -100,22 +117,85 @@ public sealed class CityRegistry
         return results;
     }
 
-    private static IEnumerable<byte> EnumerateEmptyCityCandidates(byte defaultCityId)
+    /// <summary>
+    /// Legacy spiral from <c>CSend::SendTheCities</c>. Yields up to <paramref name="citiesWanted"/>
+    /// visited indices (including ones that already have mayors — those consume budget but are not sent).
+    /// Callers skip mayored cities when building packets.
+    /// </summary>
+    public static IEnumerable<byte> EnumerateSpiralCityIds(byte startingCityId, int citiesWanted)
     {
-        yield return defaultCityId;
-
-        foreach (var cityId in PreferredEmptyCities)
+        if (citiesWanted <= 0 || !CityCatalog.IsValidCityId(startingCityId))
         {
-            if (cityId != defaultCityId)
+            yield break;
+        }
+
+        var citiesFound = 0;
+        var counter = 0;
+        var targetCity = (int)startingCityId;
+        var isNeighbor = true;
+
+        // Starting city always consumes one budget slot (sent only if empty).
+        yield return startingCityId;
+        citiesFound++;
+
+        while (citiesFound < citiesWanted)
+        {
+            var steps = (counter / 2) + 1;
+            for (var i = 0; i < steps; i++)
             {
-                yield return cityId;
+                var lastCity = targetCity;
+                targetCity += SpiralStep(counter);
+
+                // Legacy edge-wrap toggle.
+                if ((targetCity % 8) != ((lastCity % 8) + 1 - (counter % 4))
+                    && (targetCity / 8) != ((lastCity / 8) + 2 - (counter % 4)))
+                {
+                    isNeighbor = !isNeighbor;
+                }
+
+                if (CityCatalog.IsValidCityId(targetCity) && isNeighbor)
+                {
+                    yield return (byte)targetCity;
+                    citiesFound++;
+                    if (citiesFound >= citiesWanted)
+                    {
+                        yield break;
+                    }
+                }
+            }
+
+            counter++;
+
+            // Safety: avoid infinite loop if spiral math fails to find enough valid neighbors.
+            if (counter > 256)
+            {
+                yield break;
+            }
+        }
+    }
+
+    /// <summary>Right, down, left, up deltas matching legacy counter formula.</summary>
+    private static int SpiralStep(int counter) =>
+        1
+        + (7 * (counter % 2))
+        - (2 * ((counter / 2) % 2))
+        - (14 * ((counter / 2) % 2) * (counter % 2));
+
+    private static int CountLobbyPlayers(IEnumerable<ClientSession> sessions)
+    {
+        var count = 0;
+        foreach (var session in sessions)
+        {
+            if (session.State is PlayerSessionState.Meeting
+                or PlayerSessionState.Interview
+                or PlayerSessionState.LoggedIn
+                or PlayerSessionState.InGame)
+            {
+                count++;
             }
         }
 
-        for (var id = 0; id < CityCatalog.Names.Count; id++)
-        {
-            yield return (byte)id;
-        }
+        return count;
     }
 
     private static Dictionary<byte, int> CountInGamePlayersByCity(IEnumerable<ClientSession> sessions)

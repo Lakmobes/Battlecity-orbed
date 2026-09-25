@@ -1,0 +1,26 @@
+<Project>
+  <Target Name="EnsureMgcbTool" BeforeTargets="RunContentBuilder" Condition="'@(MonoGameContentReference)' != ''">
+    <Exec
+      Condition="!Exists('$(MgcbToolExe)')"
+      Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(RepoRoot)tools\Restore-Mgcb.ps1&quot;" />
+  </Target>
+
+  <!-- MonoGame defaults to `dotnet mgcb`, which fails when local tool shims are missing on PATH. -->
+  <Target
+    Name="RunContentBuilder"
+    DependsOnTargets="PrepareContentBuilder"
+    Condition="Exists('$(MgcbToolExe)')">
+    <Exec
+      Condition="'%(ContentReference.FullPath)' != ''"
+      Command="&quot;$(MgcbToolExe)&quot; $(MonoGameMGCBAdditionalArguments) /@:&quot;%(ContentReference.FullPath)&quot; /platform:$(MonoGamePlatform) /outputDir:&quot;%(ContentReference.ContentOutputDir)&quot; /intermediateDir:&quot;%(ContentReference.ContentIntermediateOutputDir)&quot; /workingDir:&quot;%(ContentReference.FullDir)&quot;"
+      WorkingDirectory="$(MSBuildProjectDirectory)" />
+
+    <ItemGroup>
+      <ExtraContent
+        Condition="'%(ContentReference.ContentOutputDir)' != ''"
+        Include="%(ContentReference.ContentOutputDir)\**\*.*">
+        <ContentDir>%(ContentReference.ContentDir)</ContentDir>
+      </ExtraContent>
+    </ItemGroup>
+  </Target>
+</Project>
