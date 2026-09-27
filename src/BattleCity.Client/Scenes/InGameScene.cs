@@ -80,7 +80,8 @@ public sealed class InGameScene : IScene
             CreateDeathOverlayRenderer(),
             CreateOrbedOverlayRenderer(),
             CreateResearchCompleteOverlayRenderer(),
-            CreateChatOverlayRenderer());
+            CreateChatOverlayRenderer(),
+            CreateNameplateRenderer());
 
         _tileMap = LoadTileMap();
         _simulation.TileMap = _tileMap;
@@ -394,7 +395,8 @@ public sealed class InGameScene : IScene
         var homeCcGridX = 0;
         var homeCcGridY = 0;
         var cityCenterWorldPosition = new Vector2(_cityLayout.GetCameraFocus().X, _cityLayout.GetCameraFocus().Y);
-        Vector2? nearestOrbableCity = null;
+        Vector2? nearestOtherCity = null;
+        var nearestOtherIsOrbable = false;
         if (_simulation.TryGetCityBuild(localCityId, out var homeCity))
         {
             homeCcGridX = homeCity.CommandCenterGridX;
@@ -416,7 +418,18 @@ public sealed class InGameScene : IScene
                     out var orbTarget,
                     cityId => _simulation.TryGetCityBuild(cityId, out var orbBuild) && orbBuild.IsOrbable))
             {
-                nearestOrbableCity = new Vector2(orbTarget.X, orbTarget.Y);
+                nearestOtherCity = new Vector2(orbTarget.X, orbTarget.Y);
+                nearestOtherIsOrbable = true;
+            }
+            else if (CommandCenterLookup.TryFindNearestOtherWorldPosition(
+                         _simulation.World,
+                         homeCity.CommandCenterGridX,
+                         homeCity.CommandCenterGridY,
+                         new NumericsVector2(_cameraFocus.X, _cameraFocus.Y),
+                         out var nearestTarget,
+                         cityIsOrbable: null))
+            {
+                nearestOtherCity = new Vector2(nearestTarget.X, nearestTarget.Y);
             }
         }
 
@@ -467,7 +480,11 @@ public sealed class InGameScene : IScene
             ShowSettingsMenu = _showSettingsMenu,
             SettingsSelectedIndex = _settingsSelectedIndex,
             LoadedCityName = _cityLayout.CityName,
-            BuildingCount = _cityLayout.Buildings.Count,
+            BuildingCount = cityBuild?.CurrentBuildingCount ?? _cityLayout.Buildings.Count,
+            CityTeamCount = 1,
+            CityTeamCapacity = GameConstants.MaxPlayersPerCity,
+            LocalPlayerIsMayor = true,
+            MayorDisplayName = _context.PlayerName,
             PlayerDisplayName = _context.PlayerName,
             PlayerHealth = playerHealth,
             PlayerMaxHealth = playerMaxHealth,
@@ -478,7 +495,8 @@ public sealed class InGameScene : IScene
             CloakRechargeUnlocked = CityEquipmentRules.HasRechargeableCloak(cityBuild),
             FlareRechargeUnlocked = CityEquipmentRules.HasRechargeableFlare(cityBuild),
             CityCenterWorldPosition = cityCenterWorldPosition,
-            NearestOrbableCityWorldPosition = nearestOrbableCity,
+            NearestOtherCityWorldPosition = nearestOtherCity,
+            NearestOtherCityIsOrbable = nearestOtherIsOrbable,
             HomeCommandCenterGridX = homeCcGridX,
             HomeCommandCenterGridY = homeCcGridY,
             IsUnderAttack = isUnderAttack,
@@ -730,5 +748,12 @@ public sealed class InGameScene : IScene
         var overlay = new ChatOverlayRenderer(_context.Assets);
         overlay.LoadContent();
         return overlay;
+    }
+
+    private TankNameplateRenderer CreateNameplateRenderer()
+    {
+        var nameplates = new TankNameplateRenderer(_context.Assets);
+        nameplates.LoadContent();
+        return nameplates;
     }
 }

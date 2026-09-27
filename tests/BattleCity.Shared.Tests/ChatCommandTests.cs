@@ -121,6 +121,26 @@ public class ChatCommandTests
     }
 
     [Fact]
+    public void Parse_StartingCityAndAccountCommands()
+    {
+        var query = ChatCommandParser.Parse("/startcity");
+        Assert.Equal(ChatCommandKind.StartingCity, query.Kind);
+        Assert.Equal(string.Empty, query.Message);
+
+        var set = ChatCommandParser.Parse("/startcity Buenos Aires");
+        Assert.Equal(ChatCommandKind.StartingCity, set.Kind);
+        Assert.Equal("Buenos Aires", set.Message);
+
+        var account = ChatCommandParser.Parse("/account Alice");
+        Assert.Equal(ChatCommandKind.Account, account.Kind);
+        Assert.Equal("Alice", account.Message);
+
+        var edit = ChatCommandParser.Parse("/editaccount Alice points=10");
+        Assert.Equal(ChatCommandKind.EditAccount, edit.Kind);
+        Assert.Equal("Alice points=10", edit.Message);
+    }
+
+    [Fact]
     public void ItemCatalog_TryParse_ResolvesIdNameAndAlias()
     {
         Assert.True(ItemCatalog.TryParse("8", out var byId));

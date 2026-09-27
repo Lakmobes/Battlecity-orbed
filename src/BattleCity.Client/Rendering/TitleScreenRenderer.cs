@@ -166,6 +166,40 @@ public sealed class TitleScreenRenderer
             0.75f);
     }
 
+    public static bool TryGetMainMenuItemIndex(
+        int width,
+        int height,
+        int itemCount,
+        int logicalX,
+        int logicalY,
+        out int index)
+    {
+        index = -1;
+        if (itemCount <= 0)
+        {
+            return false;
+        }
+
+        const int buttonWidth = 560;
+        var buttonHeight = MenuTheme.MenuButtonHeight + 4;
+        var gap = MenuTheme.MenuButtonGap;
+        var totalHeight = itemCount * buttonHeight + (itemCount - 1) * gap;
+        var startY = height - 220 - totalHeight / 2;
+        var x = (width - buttonWidth) / 2;
+
+        for (var i = 0; i < itemCount; i++)
+        {
+            var bounds = new Rectangle(x, startY + i * (buttonHeight + gap), buttonWidth, buttonHeight);
+            if (bounds.Contains(logicalX, logicalY))
+            {
+                index = i;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void DrawMenuColumn(
         SpriteBatch spriteBatch,
         int width,

@@ -40,7 +40,7 @@ These differ from a naive port of legacy formulas because the rewrite’s coordi
 
 ## Naming traps
 
-- Build menu still labels some slots **“Time Bomb”** while `FactoryProducts` maps tree index **2** to **Cloak** (`EconomyConstants.CloakResearchTreeIndex`). Treat catalogs as source of truth for item type.
+- ~~Build menu “Time Bomb” / “Bazooka” labels~~ — fixed (**Phase 41+**): menu now says **Cloak** / **Bomb** to match factory products
 - “Play Online (Local Server)” auto-starts an embedded `GameServer` on `127.0.0.1:5643` (or reuses an existing listener). Friend hosting still uses **Server.Host**; the menu path is for same-PC / solo online testing.
 
 ## Still missing vs legacy multiplayer
@@ -48,7 +48,8 @@ These differ from a naive port of legacy formulas because the rewrite’s coordi
 Tracked in [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) and [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md):
 
 - `smFinance` (only if scope expands)
-- Optional starting-city / admin-edit account tools (`cmChangeStartingCity`, `cmAdminEdit`)
+- ~~Starting-city / admin-edit account tools~~ — fixed (**Phase 40**, `/startcity` `/account` `/editaccount`; Host starting-city control)
+- ~~AI City opposition (solo / light MP)~~ — fixed (**Phase 41**, Host **AI City** toggle; scripted mayor + soldiers)
 - ~~Admin ban-list / news over the wire~~ — fixed (**Phase 39**, `/bans` `/unban` `/news` `/setnews`; Host still lists/unbans via SQLite)
 - ~~Admin spawn-item / shutdown~~ — fixed (**Phase 38**, `/spawn` `/shutdown`)
 - ~~Server.Host ban-list / unban UI~~ — fixed (**Phase 37**)

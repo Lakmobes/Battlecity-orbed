@@ -7,7 +7,6 @@ using BattleCity.Core.Audio;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Gameplay;
 using BattleCity.Shared.Constants;
-
 using BattleCity.Shared.Data;
 
 namespace BattleCity.Core.Ecs.Systems;
@@ -16,6 +15,7 @@ public static class BotAiSystem
 {
     private const int FireAlignmentTolerance = 2;
     private const float StopDistancePixels = 96f;
+    private const float HomeHoldDistancePixels = 64f;
 
     private static readonly QueryDescription BotQuery =
         new QueryDescription().WithAll<BotController, Transform2D, TankFacing, Velocity, CityAffiliation, Health, TankLifeState, TankStatus, SpriteRef>();
@@ -43,17 +43,30 @@ public static class BotAiSystem
                     out _,
                     out var targetCenter);
 
-                if (!hasTarget)
+                Vector2 steerTarget;
+                float stopDistance;
+                if (hasTarget)
                 {
-                    velocity.Value = Vector2.Zero;
-                    return;
+                    steerTarget = targetCenter;
+                    stopDistance = StopDistancePixels;
+                }
+                else if (bot.Role == BotRoles.Attack && bot.HasGoal)
+                {
+                    steerTarget = new Vector2(bot.GoalX, bot.GoalY);
+                    stopDistance = StopDistancePixels * 2f;
+                }
+                else
+                {
+                    // Defend / idle: return toward home pad.
+                    steerTarget = new Vector2(bot.HomeX, bot.HomeY);
+                    stopDistance = HomeHoldDistancePixels;
                 }
 
-                var desiredDirection = TurretTargeting.WorldPositionToLegacyDirection(botCenter, targetCenter);
+                var desiredDirection = TurretTargeting.WorldPositionToLegacyDirection(botCenter, steerTarget);
                 TryTurnToward(ref facing, desiredDirection, deltaSeconds);
 
-                var distance = Vector2.Distance(botCenter, targetCenter);
-                if (distance > StopDistancePixels &&
+                var distance = Vector2.Distance(botCenter, steerTarget);
+                if (distance > stopDistance &&
                     TurretTargeting.DirectionDifference(facing.Direction, desiredDirection) <= 4)
                 {
                     velocity.Value = InputSystem.ComputeLegacyVelocity(
@@ -70,7 +83,14 @@ public static class BotAiSystem
             });
     }
 
-    public static void UpdateFiring(World world, float deltaSeconds, SimulationAudioBuffer? audio = null)
+    /// <param name="reportNetworkShot">
+    /// When set, bots with <see cref="NetworkIdentity"/> also enqueue a network shot for clients.
+    /// </param>
+    public static void UpdateFiring(
+        World world,
+        float deltaSeconds,
+        SimulationAudioBuffer? audio = null,
+        Action<byte, ushort, ushort, byte>? reportNetworkShot = null)
     {
         world.Query(
             in BotQuery,
@@ -115,6 +135,17 @@ public static class BotAiSystem
                 GameplayEntityFactory.CreateExplosion(world, ExplosionKind.MuzzleFlash, muzzle);
                 audio?.Play(SoundId.Laser, muzzle);
                 bot.FireCooldownSeconds = GameConstants.TimerShootLaser / 1000f;
+
+                if (reportNetworkShot is not null
+                    && world.Has<NetworkIdentity>(entity))
+                {
+                    var playerId = world.Get<NetworkIdentity>(entity).PlayerId;
+                    reportNetworkShot(
+                        playerId,
+                        (ushort)Math.Clamp((int)muzzle.X, 0, ushort.MaxValue),
+                        (ushort)Math.Clamp((int)muzzle.Y, 0, ushort.MaxValue),
+                        (byte)facing.Direction);
+                }
             });
     }
 

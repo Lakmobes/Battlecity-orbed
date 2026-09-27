@@ -68,4 +68,6 @@ public enum ServerMessageId : byte
     Whisper = 61,
     Count = 62,
     Cloak = 63,
+    AutoBuild = 64,
+    StartingCity = 65,
 }

@@ -30,13 +30,16 @@ public sealed class InGameChatInput
         _openedThisFrame = false;
     }
 
-    public ChatInputUpdate Update(KeyboardState keyboard)
+    /// <summary>
+    /// Open chat with Enter (default) or another key (meeting room uses Tab so Enter can apply to a city).
+    /// </summary>
+    public ChatInputUpdate Update(KeyboardState keyboard, Keys openKey = Keys.Enter)
     {
         _openedThisFrame = false;
 
         if (!_isActive)
         {
-            if (WasEnterPressed(keyboard))
+            if (WasPressed(keyboard, openKey))
             {
                 _isActive = true;
                 _textInput.SetText(string.Empty);

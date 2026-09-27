@@ -48,12 +48,18 @@ public sealed class UnderAttackPanelRenderer
         var underAttackFlash = context is { IsUnderAttack: true, UnderAttackFlashVisible: true };
         var homeColor = underAttackFlash ? AttackArrowColor : HomeArrowColor;
 
-        if (context.NearestOrbableCityWorldPosition is { } orbTarget)
+        if (context.NearestOtherCityWorldPosition is { } targetCity)
         {
-            var orbIndex = CompassArrowHelper.ComputeArrowIndex(playerCenter, ToNumerics(orbTarget));
-            var orbRadians = CompassArrowHelper.RadiansFromArrowIndex(orbIndex);
-            DrawCompassArrow(spriteBatch, _assets.Pixel, center, orbRadians, OrbArrowColor, tipLength: 42f, wingLength: 16f);
-            DrawCornerLabel(spriteBatch, outerBounds, "ORB", OrbArrowColor, topLeft: false);
+            var targetIndex = CompassArrowHelper.ComputeArrowIndex(playerCenter, ToNumerics(targetCity));
+            var targetRadians = CompassArrowHelper.RadiansFromArrowIndex(targetIndex);
+            var targetColor = context.NearestOtherCityIsOrbable ? OrbArrowColor : new Color(200, 200, 210);
+            DrawCompassArrow(spriteBatch, _assets.Pixel, center, targetRadians, targetColor, tipLength: 42f, wingLength: 16f);
+            DrawCornerLabel(
+                spriteBatch,
+                outerBounds,
+                context.NearestOtherCityIsOrbable ? "ORB" : "CITY",
+                targetColor,
+                topLeft: false);
         }
 
         DrawLegacyHomeArrow(spriteBatch, center, homeIndex, underAttackFlash, homeColor);

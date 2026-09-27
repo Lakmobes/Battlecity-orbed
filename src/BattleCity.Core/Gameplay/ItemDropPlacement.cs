@@ -56,6 +56,17 @@ public static class ItemDropPlacement
         return true;
     }
 
+    public static bool IsSolidDropTerrainAllowed(TileMap tileMap, int gridX, int gridY)
+    {
+        if (gridX < 0 || gridY < 0 || gridX >= TileMap.Size || gridY >= TileMap.Size)
+        {
+            return false;
+        }
+
+        var terrain = tileMap.Terrain[gridX, gridY];
+        return terrain is not (TerrainTileType.Lava or TerrainTileType.Rock);
+    }
+
     private static bool IsInsideMap(int gridX, int gridY) =>
         gridX > 0 && gridY > 0 && gridX < TileMap.Size - 1 && gridY < TileMap.Size - 1;
 }

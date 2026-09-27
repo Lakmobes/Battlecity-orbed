@@ -4,6 +4,7 @@ using BattleCity.Shared.Data;
 
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
 
 namespace BattleCity.Client.Scenes;
 
@@ -20,6 +21,7 @@ public sealed class MainMenuScene : IScene
     private readonly TitleScreenRenderer _title;
     private readonly MenuInputReader _input = new();
     private int _selectedIndex;
+    private ButtonState _previousMouseButton;
 
     public MainMenuScene(SceneContext context)
     {
@@ -52,37 +54,27 @@ public sealed class MainMenuScene : IScene
             _selectedIndex = (_selectedIndex + 1) % MenuItems.Length;
         }
 
-        if (menuInput.ConfirmPressed)
+        var mouse = Mouse.GetState();
+        var logical = _context.Presentation.ScreenToLogical(new Vector2(mouse.X, mouse.Y));
+        var hoverIndex = -1;
+        if (TitleScreenRenderer.TryGetMainMenuItemIndex(
+                UiLayout.LogicalWidth,
+                UiLayout.LogicalHeight,
+                MenuItems.Length,
+                (int)logical.X,
+                (int)logical.Y,
+                out hoverIndex))
         {
-            _context.Audio.Play(SoundId.Click);
-            if (_selectedIndex == 0)
-            {
-                _context.PlayerName = "Player";
-                _context.SelectedCity = "Buenos Aires";
-                _context.CityDesign = "demo";
-            }
+            _selectedIndex = hoverIndex;
+        }
 
-            if (_selectedIndex == 1)
-            {
-                _context.PlayerName = $"Guest{Random.Shared.Next(100, 999)}";
-                _context.PlayerPassword = "guest";
-                _context.ServerHost = "127.0.0.1";
-                _context.ServerPort = BattleCity.Shared.Constants.NetworkConstants.TcpPort;
+        var clicked = mouse.LeftButton == ButtonState.Pressed
+            && _previousMouseButton == ButtonState.Released;
+        _previousMouseButton = mouse.LeftButton;
 
-                var ensure = _context.EmbeddedLocalServer.EnsureRunning(out var message);
-                _context.LoginStatusMessage = message;
-                if (ensure == Network.EmbeddedLocalServer.EnsureResult.Failed)
-                {
-                    // Still open login so the player can point at another host or retry after starting Server.Host.
-                }
-            }
-
-            return _selectedIndex switch
-            {
-                0 => SceneTransition.InGameOffline,
-                1 => SceneTransition.Login,
-                _ => SceneTransition.Quit,
-            };
+        if (menuInput.ConfirmPressed || (clicked && hoverIndex >= 0))
+        {
+            return ConfirmSelection();
         }
 
         if (menuInput.CancelPressed)
@@ -93,6 +85,39 @@ public sealed class MainMenuScene : IScene
         }
 
         return SceneTransition.None;
+    }
+
+    private SceneTransition ConfirmSelection()
+    {
+        _context.Audio.Play(SoundId.Click);
+        if (_selectedIndex == 0)
+        {
+            _context.PlayerName = "Player";
+            _context.SelectedCity = "Buenos Aires";
+            _context.CityDesign = "demo";
+        }
+
+        if (_selectedIndex == 1)
+        {
+            _context.PlayerName = $"Guest{Random.Shared.Next(100, 999)}";
+            _context.PlayerPassword = "guest";
+            _context.ServerHost = "127.0.0.1";
+            _context.ServerPort = BattleCity.Shared.Constants.NetworkConstants.TcpPort;
+
+            var ensure = _context.EmbeddedLocalServer.EnsureRunning(out var message);
+            _context.LoginStatusMessage = message;
+            if (ensure == Network.EmbeddedLocalServer.EnsureResult.Failed)
+            {
+                // Still open login so the player can point at another host or retry after starting Server.Host.
+            }
+        }
+
+        return _selectedIndex switch
+        {
+            0 => SceneTransition.InGameOffline,
+            1 => SceneTransition.Login,
+            _ => SceneTransition.Quit,
+        };
     }
 
     public void DrawWorld(SpriteBatch spriteBatch)
@@ -107,7 +132,7 @@ public sealed class MainMenuScene : IScene
             UiLayout.LogicalHeight,
             MenuItems,
             _selectedIndex,
-            "Up / Down to select    Enter to confirm    F11 fullscreen");
+            "Up / Down or click to select    Enter to confirm    F11 fullscreen");
     }
 
     public void Dispose()

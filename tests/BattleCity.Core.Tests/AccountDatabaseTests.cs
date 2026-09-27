@@ -78,4 +78,36 @@ public sealed class AccountDatabaseTests : IDisposable
         Assert.Empty(_accounts.ListBans());
         Assert.False(_accounts.TryRemoveBan("BadActor"));
     }
+
+    [Fact]
+    public void AdminEdit_UpdatesPointsDeathsAndProfile()
+    {
+        Assert.Equal(AccountCreateResult.Created, _accounts.TryCreateAccount(
+            "Editor",
+            "secret123",
+            town: "Buenos Aires",
+            email: "old@x.com",
+            fullName: "Old Name",
+            state: "BA"));
+
+        Assert.True(_accounts.TryApplyAdminEdit(
+            "Editor",
+            newPassword: null,
+            displayName: "New Name",
+            town: "Berlin",
+            email: "new@x.com",
+            state: "DE",
+            points: 99,
+            deaths: 4,
+            isAdmin: true));
+
+        Assert.True(_accounts.TryGetAccountForAdminEdit("Editor", out var account));
+        Assert.Equal("New Name", account!.DisplayName);
+        Assert.Equal("Berlin", account.Town);
+        Assert.Equal("new@x.com", account.Email);
+        Assert.Equal("DE", account.State);
+        Assert.Equal(99, account.Points);
+        Assert.Equal(4, account.Deaths);
+        Assert.True(account.IsAdmin);
+    }
 }

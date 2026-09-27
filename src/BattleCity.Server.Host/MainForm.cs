@@ -24,7 +24,12 @@ internal sealed class MainForm : Form
     private readonly Button _unbanButton = new();
     private readonly Button _refreshBansButton = new();
     private readonly Label _adminHint = new();
+    private readonly NumericUpDown _startingCityInput = new();
+    private readonly Button _applyStartingCityButton = new();
+    private readonly Label _startingCityLabel = new();
+    private readonly CheckBox _aiCityCheck = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new();
+    private bool _suppressAiCityToggle;
 
     private GameServer? _server;
     private Thread? _tickThread;
@@ -108,6 +113,30 @@ internal sealed class MainForm : Form
         _copyInviteButton.Text = "Copy Invite";
         _copyInviteButton.Width = 110;
         controls.Controls.Add(_copyInviteButton);
+
+        controls.Controls.Add(new Label
+        {
+            Text = "Start city",
+            AutoSize = true,
+            Margin = new Padding(16, 8, 6, 0),
+        });
+        _startingCityInput.Minimum = 0;
+        _startingCityInput.Maximum = 63;
+        _startingCityInput.Value = 27;
+        _startingCityInput.Width = 50;
+        controls.Controls.Add(_startingCityInput);
+        _applyStartingCityButton.Text = "Apply city";
+        _applyStartingCityButton.Width = 90;
+        controls.Controls.Add(_applyStartingCityButton);
+        _startingCityLabel.AutoSize = true;
+        _startingCityLabel.Margin = new Padding(8, 8, 0, 0);
+        controls.Controls.Add(_startingCityLabel);
+
+        _aiCityCheck.Text = "AI City";
+        _aiCityCheck.AutoSize = true;
+        _aiCityCheck.Margin = new Padding(16, 6, 0, 0);
+        controls.Controls.Add(_aiCityCheck);
+
         left.Controls.Add(controls, 0, 0);
 
         _statusLabel.AutoSize = true;
@@ -267,6 +296,8 @@ internal sealed class MainForm : Form
         _startButton.Click += (_, _) => StartServer();
         _stopButton.Click += (_, _) => StopServer();
         _copyInviteButton.Click += (_, _) => CopyInvite();
+        _applyStartingCityButton.Click += (_, _) => ApplyStartingCity();
+        _aiCityCheck.CheckedChanged += (_, _) => ToggleAiCity();
         _lanAddresses.SelectedIndexChanged += (_, _) => RefreshShareBox();
         _accounts.ItemCheck += OnAccountItemCheck;
         _unbanButton.Click += (_, _) => UnbanSelected();
@@ -288,6 +319,8 @@ internal sealed class MainForm : Form
             RefreshLanAddresses();
             RefreshPlayers();
             RefreshShareBox();
+            RefreshStartingCity();
+            RefreshAiCityCheck();
             _banRefreshTicks++;
             if (_banRefreshTicks >= 10)
             {
@@ -324,6 +357,7 @@ internal sealed class MainForm : Form
             ReloadBans();
             RefreshPlayers();
             RefreshShareBox();
+            RefreshStartingCity();
         }
         catch (Exception ex)
         {
@@ -734,9 +768,103 @@ internal sealed class MainForm : Form
         _portInput.Enabled = !running;
         _startButton.Enabled = !running;
         _stopButton.Enabled = running;
+        _applyStartingCityButton.Enabled = running;
+        _startingCityInput.Enabled = running;
+        _aiCityCheck.Enabled = running;
+        if (!running)
+        {
+            _suppressAiCityToggle = true;
+            _aiCityCheck.Checked = false;
+            _suppressAiCityToggle = false;
+        }
+
         _statusLabel.Text = running
             ? $"Listening on 0.0.0.0:{_server?.Port ?? (int)_portInput.Value}  |  DB: {_databasePath}"
             : $"Stopped  |  DB: {_databasePath}";
+        if (!running)
+        {
+            _startingCityLabel.Text = string.Empty;
+        }
+    }
+
+    private void RefreshAiCityCheck()
+    {
+        if (_server is null)
+        {
+            return;
+        }
+
+        var enabled = _server.IsAiCityEnabled;
+        if (_aiCityCheck.Checked == enabled)
+        {
+            return;
+        }
+
+        _suppressAiCityToggle = true;
+        _aiCityCheck.Checked = enabled;
+        _suppressAiCityToggle = false;
+    }
+
+    private void ToggleAiCity()
+    {
+        if (_suppressAiCityToggle || _server is null)
+        {
+            return;
+        }
+
+        if (_aiCityCheck.Checked)
+        {
+            if (!_server.TryEnableAiCity(out var message))
+            {
+                MessageBox.Show(this, message, "AI City", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                RefreshAiCityCheck();
+                return;
+            }
+
+            _statusLabel.Text = message;
+        }
+        else
+        {
+            _server.DisableAiCity();
+            _statusLabel.Text = "AI City disabled.";
+        }
+    }
+
+    private void RefreshStartingCity()
+    {
+        if (_server is null)
+        {
+            return;
+        }
+
+        var cityId = _server.StartingCityId;
+        if (_startingCityInput.Value != cityId)
+        {
+            _startingCityInput.Value = cityId;
+        }
+
+        _startingCityLabel.Text = BattleCity.Shared.Catalogs.CityCatalog.IsValidCityId(cityId)
+            ? BattleCity.Shared.Catalogs.CityCatalog.GetName(cityId)
+            : string.Empty;
+    }
+
+    private void ApplyStartingCity()
+    {
+        if (_server is null)
+        {
+            return;
+        }
+
+        var cityId = (byte)_startingCityInput.Value;
+        if (!_server.TrySetStartingCity(cityId))
+        {
+            MessageBox.Show(this, "Invalid city id (0–63).", "Starting city", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            RefreshStartingCity();
+            return;
+        }
+
+        RefreshStartingCity();
+        _statusLabel.Text = $"Starting city set to {cityId}";
     }
 
     protected override void OnClosing(CancelEventArgs e)

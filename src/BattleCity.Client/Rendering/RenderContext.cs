@@ -3,6 +3,7 @@ using Arch.Core;
 using BattleCity.Client.Chat;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Maps;
+using BattleCity.Shared.Constants;
 
 using Microsoft.Xna.Framework;
 
@@ -22,6 +23,10 @@ public sealed class RenderContext
     public int SettingsSelectedIndex { get; init; }
     public string? LoadedCityName { get; init; }
     public int BuildingCount { get; init; }
+    public int CityTeamCount { get; init; }
+    public int CityTeamCapacity { get; init; } = GameConstants.MaxPlayersPerCity;
+    public string? MayorDisplayName { get; init; }
+    public bool LocalPlayerIsMayor { get; init; }
     public int? PlayerHealth { get; init; }
     public int? PlayerMaxHealth { get; init; }
     public string? PlayerDisplayName { get; init; }
@@ -32,7 +37,11 @@ public sealed class RenderContext
     public bool FlareRechargeUnlocked { get; init; }
     public float? PlayerRespawnSeconds { get; init; }
     public Vector2 CityCenterWorldPosition { get; init; }
-    public Vector2? NearestOrbableCityWorldPosition { get; init; }
+    public Vector2? NearestOtherCityWorldPosition { get; init; }
+    public bool NearestOtherCityIsOrbable { get; init; }
+    /// <summary>Deprecated alias — prefer <see cref="NearestOtherCityWorldPosition"/>.</summary>
+    public Vector2? NearestOrbableCityWorldPosition =>
+        NearestOtherCityIsOrbable ? NearestOtherCityWorldPosition : null;
     public int HomeCommandCenterGridX { get; init; }
     public int HomeCommandCenterGridY { get; init; }
     public bool IsUnderAttack { get; init; }
@@ -56,6 +65,9 @@ public sealed class RenderContext
     public IReadOnlyCollection<ChatLine>? ChatLines { get; init; }
     public bool IsChatting { get; init; }
     public string? ChatDraft { get; init; }
+
+    public byte LocalPlayerId { get; init; }
+    public Func<byte, string?>? ResolvePlayerDisplayName { get; init; }
 
     /// <summary>Legacy Personnel dialog: mayor has an applicant waiting.</summary>
     public bool ShowHirePanel { get; init; }

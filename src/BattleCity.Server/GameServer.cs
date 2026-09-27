@@ -31,12 +31,15 @@ public sealed class GameServer : IDisposable
     private TcpListener? _listener;
     private readonly CityMayorRegistry _mayors = new();
     private readonly CityRegistry _cities = new();
+    private readonly AiCityController _aiCity = new();
+    private readonly HashSet<byte> _botPlayerIds = [];
     private readonly CityBuildPopSync _buildPopSync = new();
     private readonly FactoryItemCountSync _factoryItemCountSync = new();
     private byte _nextPlayerId = 1;
     private bool _worldReady;
     private bool _started;
     private bool _shutdownRequested;
+    private float _aiGoalRefreshSeconds;
 
     public GameServer(string databasePath)
     {
@@ -79,7 +82,8 @@ public sealed class GameServer : IDisposable
         _worldReady = true;
         _simulation.AssignNetworkItemIds();
         _simulation.NetworkPlayersUseLocalBulletDamage = false;
-        _simulation.NetworkPlayersUseLocalHealthDeath = false;
+        // Server owns HP→death for all network tanks (humans + AI City bots).
+        _simulation.NetworkPlayersUseLocalHealthDeath = true;
         _simulation.ReportBombEventsToNetwork = true;
         _simulation.ReportFactoryItemSpawnsToNetwork = true;
         _simulation.ReportItemLifeToNetwork = true;
@@ -111,6 +115,7 @@ public sealed class GameServer : IDisposable
             return;
         }
 
+        DisableAiCity();
         _started = false;
         try
         {
@@ -174,11 +179,13 @@ public sealed class GameServer : IDisposable
         BroadcastPendingRespawnEvents();
         BroadcastPendingHpEvents();
         BroadcastPendingItemLifeEvents();
+        BroadcastAiCityUpdates(deltaSeconds);
         RemoveDisconnectedSessions();
 
         if (_shutdownRequested)
         {
             _shutdownRequested = false;
+            DisableAiCity();
             Stop();
         }
     }
@@ -233,6 +240,76 @@ public sealed class GameServer : IDisposable
 
     public IReadOnlyList<BanRecord> ListBans() => _accounts.ListBans();
 
+    public byte StartingCityId => _cities.StartingCityId;
+
+    public bool TrySetStartingCity(byte cityId)
+    {
+        if (!_cities.TrySetStartingCity(cityId))
+        {
+            return false;
+        }
+
+        BroadcastCityListToMeetingClients();
+        Console.WriteLine($"StartingCity::{cityId}");
+        return true;
+    }
+
+    public bool TryGetAccountForAdminEdit(string username, out AccountRecord? account) =>
+        _accounts.TryGetAccountForAdminEdit(username, out account);
+
+    public bool TryApplyAdminEdit(in AdminEditPacket edit) => ApplyAdminEditFromPacket(edit);
+
+    public bool IsAiCityEnabled => _aiCity.IsEnabled;
+
+    public bool TryEnableAiCity(out string message)
+    {
+        if (!_started || !_worldReady)
+        {
+            message = "Server is not running.";
+            return false;
+        }
+
+        var humans = SnapshotHumanPlayers();
+        if (!_aiCity.TryEnable(
+                _simulation,
+                _cities,
+                _mayors,
+                AllocateBotPlayerId,
+                ReleaseBotPlayerId,
+                humans,
+                out message))
+        {
+            return false;
+        }
+
+        BroadcastAiCityJoin();
+        BroadcastCityListToMeetingClients();
+        _aiCity.RefreshAttackGoals(_simulation, humans);
+        Console.WriteLine(message);
+        return true;
+    }
+
+    public void DisableAiCity()
+    {
+        if (!_aiCity.IsEnabled)
+        {
+            return;
+        }
+
+        var cityId = _aiCity.CityId;
+        Span<byte> clearPlayer = stackalloc byte[1];
+        foreach (var bot in _aiCity.Bots.ToList())
+        {
+            clearPlayer[0] = bot.PlayerId;
+            BroadcastAll(ServerMessageId.ClearPlayer, clearPlayer);
+            BroadcastLobbyExcept(bot.PlayerId, ServerMessageId.ClearPlayer, clearPlayer);
+        }
+
+        _aiCity.Disable(_simulation, _mayors, ReleaseBotPlayerId);
+        BroadcastCityListToMeetingClients();
+        Console.WriteLine($"AI City disabled (was city {cityId}).");
+    }
+
     private void AcceptPendingConnections()
     {
         if (_listener is null)
@@ -271,7 +348,7 @@ public sealed class GameServer : IDisposable
         {
             var candidate = _nextPlayerId;
             _nextPlayerId = (byte)(_nextPlayerId == 255 ? 1 : _nextPlayerId + 1);
-            if (candidate == 0 || _sessions.ContainsKey(candidate))
+            if (candidate == 0 || _sessions.ContainsKey(candidate) || _botPlayerIds.Contains(candidate))
             {
                 continue;
             }
@@ -282,6 +359,136 @@ public sealed class GameServer : IDisposable
 
         playerId = 0;
         return false;
+    }
+
+    private byte AllocateBotPlayerId()
+    {
+        if (!TryAllocatePlayerId(out var playerId) || playerId == 0)
+        {
+            return 0;
+        }
+
+        _botPlayerIds.Add(playerId);
+        return playerId;
+    }
+
+    private void ReleaseBotPlayerId(byte playerId) => _botPlayerIds.Remove(playerId);
+
+    private List<(byte PlayerId, byte CityId, bool InGame)> SnapshotHumanPlayers()
+    {
+        lock (_sync)
+        {
+            return _sessions.Values
+                .Select(session => (session.PlayerId, session.CityId, session.IsInGame))
+                .ToList();
+        }
+    }
+
+    private void BroadcastAiCityJoin()
+    {
+        if (!_aiCity.IsEnabled)
+        {
+            return;
+        }
+
+        Span<byte> joinData = stackalloc byte[ServerJoinDataPacket.Size];
+        Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
+        Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
+        Span<byte> points = stackalloc byte[ServerPointsUpdatePacket.Size];
+
+        foreach (var bot in _aiCity.Bots)
+        {
+            new ServerJoinDataPacket(
+                bot.PlayerId,
+                mayor: bot.IsMayor ? (byte)1 : (byte)0,
+                bot.CityId).Write(joinData);
+            BroadcastAll(ServerMessageId.JoinData, joinData);
+
+            WriteBotPlayerDataPacket(playerData, bot);
+            BroadcastAll(ServerMessageId.PlayerData, playerData);
+            BroadcastLobbyExcept(0, ServerMessageId.PlayerData, playerData);
+
+            if (_simulation.TryGetNetworkPlayerSnapshot(bot.PlayerId, out var snapshot))
+            {
+                snapshot.ToPacket().Write(updatePayload);
+                BroadcastAll(ServerMessageId.Update, updatePayload);
+            }
+
+            new ServerPointsUpdatePacket(bot.PlayerId, 0, 0).Write(points);
+            BroadcastAll(ServerMessageId.PointsUpdate, points);
+        }
+    }
+
+    private void BroadcastAiCityUpdates(float deltaSeconds)
+    {
+        if (!_aiCity.IsEnabled)
+        {
+            return;
+        }
+
+        _aiGoalRefreshSeconds -= deltaSeconds;
+        if (_aiGoalRefreshSeconds <= 0f)
+        {
+            _aiGoalRefreshSeconds = 2.5f;
+            _aiCity.RefreshAttackGoals(_simulation, SnapshotHumanPlayers());
+        }
+
+        Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
+        foreach (var bot in _aiCity.Bots)
+        {
+            if (!_simulation.TryGetNetworkPlayerSnapshot(bot.PlayerId, out var snapshot))
+            {
+                continue;
+            }
+
+            snapshot.ToPacket().Write(updatePayload);
+            BroadcastAll(ServerMessageId.Update, updatePayload);
+        }
+
+        Span<byte> shotPayload = stackalloc byte[ServerShotPacket.Size];
+        while (_simulation.TryConsumeBotNetworkShot(out var shot))
+        {
+            shot.Write(shotPayload);
+            BroadcastAll(ServerMessageId.Shoot, shotPayload);
+        }
+    }
+
+    private void SendAiBotsToJoiner(ClientSession joiner)
+    {
+        if (!_aiCity.IsEnabled)
+        {
+            return;
+        }
+
+        Span<byte> joinData = stackalloc byte[ServerJoinDataPacket.Size];
+        Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
+        Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
+        foreach (var bot in _aiCity.Bots)
+        {
+            new ServerJoinDataPacket(
+                bot.PlayerId,
+                mayor: bot.IsMayor ? (byte)1 : (byte)0,
+                bot.CityId).Write(joinData);
+            joiner.SendServer(ServerMessageId.JoinData, joinData);
+
+            WriteBotPlayerDataPacket(playerData, bot);
+            joiner.SendServer(ServerMessageId.PlayerData, playerData);
+
+            if (_simulation.TryGetNetworkPlayerSnapshot(bot.PlayerId, out var snapshot))
+            {
+                snapshot.ToPacket().Write(updatePayload);
+                joiner.SendServer(ServerMessageId.Update, updatePayload);
+            }
+        }
+    }
+
+    private static void WriteBotPlayerDataPacket(Span<byte> playerData, AiBotPlayer bot)
+    {
+        playerData.Clear();
+        playerData[0] = bot.PlayerId;
+        WriteFixedAscii(playerData.Slice(1, 16), bot.DisplayName);
+        WriteFixedAscii(playerData.Slice(17, 16), "AI");
+        playerData[33] = 1;
     }
 
     private void ReadSessions()
@@ -409,6 +616,18 @@ public sealed class GameServer : IDisposable
                 break;
             case ClientMessageId.ChangeNews:
                 HandleChangeNews(session, packet.Payload.Span);
+                break;
+            case ClientMessageId.StartingCity:
+                HandleStartingCityRequest(session);
+                break;
+            case ClientMessageId.ChangeStartingCity:
+                HandleChangeStartingCity(session, packet.Payload.Span);
+                break;
+            case ClientMessageId.AdminEditRequest:
+                HandleAdminEditRequest(session, packet.Payload.Span);
+                break;
+            case ClientMessageId.AdminEdit:
+                HandleAdminEdit(session, packet.Payload.Span);
                 break;
             case ClientMessageId.TcpPing:
                 session.SendServer(ServerMessageId.TcpPong, " "u8);
@@ -1093,6 +1312,7 @@ public sealed class GameServer : IDisposable
         SendPlayerDataSnapshot(session);
         SendPointsSnapshot(session);
         BroadcastPointsUpdate(session);
+        SendAiBotsToJoiner(session);
 
         Span<byte> joinerPlayerData = stackalloc byte[ServerPlayerDataPacket.Size];
         WritePlayerDataPacket(joinerPlayerData, session);
@@ -1726,6 +1946,133 @@ public sealed class GameServer : IDisposable
         // Push updated news to the editing admin (legacy smAppendNews).
         SendNews(session);
     }
+
+    private void HandleStartingCityRequest(ClientSession session)
+    {
+        Span<byte> payload = stackalloc byte[StartingCityPacket.Size];
+        new StartingCityPacket(_cities.StartingCityId).Write(payload);
+        session.SendServer(ServerMessageId.StartingCity, payload);
+    }
+
+    private void HandleChangeStartingCity(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsAdmin || payload.Length < StartingCityPacket.Size)
+        {
+            return;
+        }
+
+        var request = StartingCityPacket.Read(payload);
+        if (request.CityId is < 0 or > byte.MaxValue
+            || !_cities.TrySetStartingCity((byte)request.CityId))
+        {
+            return;
+        }
+
+        Console.WriteLine($"ChangeStartingCity::{session.DisplayName}::{request.CityId}");
+        BroadcastCityListToMeetingClients();
+        HandleStartingCityRequest(session);
+    }
+
+    private void HandleAdminEditRequest(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsAdmin || payload.Length < ClientAdminEditRequestPacket.Size)
+        {
+            return;
+        }
+
+        var request = ClientAdminEditRequestPacket.Read(payload);
+        if (!_accounts.TryGetAccountForAdminEdit(request.Username, out var account) || account is null)
+        {
+            return;
+        }
+
+        Console.WriteLine($"AdminEditRequest::{session.DisplayName}::{account.Username}");
+        Span<byte> response = stackalloc byte[AdminEditPacket.Size];
+        ToAdminEditPacket(account, password: string.Empty).Write(response);
+        session.SendServer(ServerMessageId.AdminEdit, response);
+    }
+
+    private void HandleAdminEdit(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsAdmin || payload.Length < AdminEditPacket.Size)
+        {
+            return;
+        }
+
+        var edit = AdminEditPacket.Read(payload);
+        if (!ApplyAdminEditFromPacket(edit))
+        {
+            return;
+        }
+
+        Console.WriteLine($"AdminEdit::{session.DisplayName}::{edit.Username}");
+    }
+
+    private bool ApplyAdminEditFromPacket(in AdminEditPacket edit)
+    {
+        if (!_accounts.TryApplyAdminEdit(
+                edit.Username,
+                string.IsNullOrWhiteSpace(edit.Password) ? null : edit.Password,
+                edit.FullName,
+                edit.Town,
+                edit.Email,
+                edit.State,
+                edit.Points,
+                edit.Deaths,
+                isAdmin: edit.PlayerType != 0))
+        {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            Span<byte> loginCorrect = stackalloc byte[2];
+            Span<byte> points = stackalloc byte[ServerPointsUpdatePacket.Size];
+            Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
+            foreach (var online in _sessions.Values)
+            {
+                if (!string.Equals(online.RegisteredUsername, edit.Username, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                online.Town = string.IsNullOrWhiteSpace(edit.Town) ? online.Town : edit.Town.Trim();
+                online.Points = Math.Max(0, edit.Points);
+                online.Deaths = Math.Max(0, edit.Deaths);
+                online.IsAdmin = edit.PlayerType != 0
+                    || string.Equals(edit.Username, "admin", StringComparison.OrdinalIgnoreCase);
+
+                loginCorrect[0] = online.PlayerId;
+                loginCorrect[1] = (byte)(1 | (online.IsAdmin ? 2 : 0));
+                online.SendServer(ServerMessageId.LoginCorrect, loginCorrect);
+
+                CreatePointsUpdatePacket(online).Write(points);
+                online.SendServer(ServerMessageId.PointsUpdate, points);
+                BroadcastLobbyExcept(online.PlayerId, ServerMessageId.PointsUpdate, points);
+
+                WritePlayerDataPacket(playerData, online);
+                online.SendServer(ServerMessageId.PlayerData, playerData);
+                BroadcastLobbyExcept(online.PlayerId, ServerMessageId.PlayerData, playerData);
+            }
+        }
+
+        return true;
+    }
+
+    private static AdminEditPacket ToAdminEditPacket(AccountRecord account, string password) =>
+        new(
+            account.Username,
+            password,
+            account.Email,
+            account.DisplayName,
+            account.Town,
+            account.State,
+            account.Points,
+            monthlyPoints: 0,
+            account.Deaths,
+            orbs: 0,
+            assists: 0,
+            playerType: account.IsAdmin ? 1 : 0);
 
     private void SendNews(ClientSession session)
     {

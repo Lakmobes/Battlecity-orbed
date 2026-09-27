@@ -29,6 +29,10 @@ public sealed class LoginScene : IScene
     private Field _activeField = Field.Username;
     private string? _statusMessage;
     private KeyboardState _previousKeyboard;
+    private ButtonState _previousMouseButton;
+    private bool _isConnecting;
+    private GameClient? _pendingClient;
+    private Task<bool>? _connectTask;
 
     public LoginScene(SceneContext context)
     {
@@ -50,8 +54,15 @@ public sealed class LoginScene : IScene
     public SceneTransition Update(GameTime gameTime, int screenWidth, int screenHeight)
     {
         _ui.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+
+        if (_isConnecting)
+        {
+            return PollConnect();
+        }
+
         var menuInput = _menuInput.Poll(textEntryMode: true);
         var keyboard = Keyboard.GetState();
+        HandleMouseClicks();
 
         if (WasPressed(keyboard, Keys.Tab))
         {
@@ -88,6 +99,7 @@ public sealed class LoginScene : IScene
             return SceneTransition.MainMenu;
         }
 
+        // Left/Right are caret keys while typing — don't steal them for field nav.
         ActiveInput().Update();
 
         if (menuInput.ConfirmPressed)
@@ -98,12 +110,55 @@ public sealed class LoginScene : IScene
             }
             else
             {
-                return TryConnect();
+                return BeginConnect();
             }
         }
 
         _previousKeyboard = keyboard;
         return SceneTransition.None;
+    }
+
+    private void HandleMouseClicks()
+    {
+        var mouse = Mouse.GetState();
+        var clicked = mouse.LeftButton == ButtonState.Pressed
+            && _previousMouseButton == ButtonState.Released;
+        _previousMouseButton = mouse.LeftButton;
+        if (!clicked)
+        {
+            return;
+        }
+
+        var logical = _context.Presentation.ScreenToLogical(new Vector2(mouse.X, mouse.Y));
+        var point = new Point((int)logical.X, (int)logical.Y);
+        var panel = ScreenUiRenderer.CenteredFormPanel(UiLayout.LogicalWidth, UiLayout.LogicalHeight, 600, 420);
+        var fields = GetFieldBounds(panel);
+        for (var i = 0; i < fields.Length; i++)
+        {
+            if (fields[i].Contains(point))
+            {
+                _context.Audio.Play(SoundId.Click);
+                _activeField = (Field)i;
+                return;
+            }
+        }
+    }
+
+    private static Rectangle[] GetFieldBounds(Rectangle panel)
+    {
+        // Must match LoginScene.DrawScreen line layout + ScreenUiRenderer.DrawFormPanel spacing.
+        var fieldWidth = panel.Width - 64;
+        var fieldX = panel.X + 32;
+        var y = panel.Y + 76;
+        y += 26; // hint
+        y += 26; // hint
+        y += 14; // blank
+        var server = new Rectangle(fieldX, y, fieldWidth, MenuTheme.FormFieldHeight);
+        y += MenuTheme.FormFieldHeight + MenuTheme.FormFieldGap;
+        var username = new Rectangle(fieldX, y, fieldWidth, MenuTheme.FormFieldHeight);
+        y += MenuTheme.FormFieldHeight + MenuTheme.FormFieldGap;
+        var password = new Rectangle(fieldX, y, fieldWidth, MenuTheme.FormFieldHeight);
+        return [server, username, password];
     }
 
     private LoginTextInput ActiveInput() =>
@@ -129,7 +184,7 @@ public sealed class LoginScene : IScene
     private bool WasPressed(KeyboardState keyboard, Keys key) =>
         keyboard.IsKeyDown(key) && !_previousKeyboard.IsKeyDown(key);
 
-    private SceneTransition TryConnect()
+    private SceneTransition BeginConnect()
     {
         _context.Audio.Play(SoundId.Click);
         _statusMessage = "Connecting...";
@@ -152,18 +207,46 @@ public sealed class LoginScene : IScene
         _context.PlayerPassword = password;
 
         _context.NetworkClient?.Dispose();
-        var client = new GameClient();
-        var connected = client.ConnectAndLogin(
-            _context.ServerHost,
-            _context.ServerPort,
-            username,
-            password,
-            TimeSpan.FromSeconds(5));
+        _pendingClient = new GameClient();
+        var host = _context.ServerHost;
+        var port = _context.ServerPort;
+        _isConnecting = true;
+        _connectTask = Task.Run(() =>
+            _pendingClient.ConnectAndLogin(host, port, username, password, TimeSpan.FromSeconds(5)));
+        return SceneTransition.None;
+    }
 
-        if (!connected)
+    private SceneTransition PollConnect()
+    {
+        if (_connectTask is null || !_connectTask.IsCompleted)
         {
-            _statusMessage = client.LastError ?? "Connection failed.";
-            client.Dispose();
+            _statusMessage = "Connecting...";
+            return SceneTransition.None;
+        }
+
+        _isConnecting = false;
+        var connected = false;
+        try
+        {
+            connected = _connectTask.Result;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = ex.InnerException?.Message ?? ex.Message;
+            _pendingClient?.Dispose();
+            _pendingClient = null;
+            _connectTask = null;
+            return SceneTransition.None;
+        }
+
+        var client = _pendingClient;
+        _pendingClient = null;
+        _connectTask = null;
+
+        if (client is null || !connected)
+        {
+            _statusMessage = client?.LastError ?? "Connection failed.";
+            client?.Dispose();
             return SceneTransition.None;
         }
 
@@ -225,6 +308,10 @@ public sealed class LoginScene : IScene
         _ui.DrawTitle(spriteBatch, width);
 
         var panel = ScreenUiRenderer.CenteredFormPanel(width, height, 600, 420);
+        var status = _statusMessage
+            ?? (_isConnecting
+                ? "Connecting..."
+                : "Enter connects   Tab / arrows switch field   click a field to focus");
         _ui.DrawFormPanel(
             spriteBatch,
             panel,
@@ -233,24 +320,27 @@ public sealed class LoginScene : IScene
                 "Local Server menu auto-starts 127.0.0.1 — or paste a friend invite (Ctrl+V)",
                 "Guest login: leave user blank or set password to guest",
                 string.Empty,
-                FormatField("Server", _serverInput.Text, mask: false, focused: _activeField == Field.Server),
-                FormatField("Username", _usernameInput.Text, mask: false, focused: _activeField == Field.Username),
-                FormatField("Password", _passwordInput.Text, mask: true, focused: _activeField == Field.Password),
+                FormatField("Server", _serverInput, mask: false, focused: _activeField == Field.Server),
+                FormatField("Username", _usernameInput, mask: false, focused: _activeField == Field.Username),
+                FormatField("Password", _passwordInput, mask: true, focused: _activeField == Field.Password),
                 string.Empty,
-                _statusMessage ?? "Enter connects   Tab / arrows switch field",
+                status,
             ],
             "Tab/arrows - next field   Enter - connect   Ctrl+V - paste   F2 - create account   Esc - back");
     }
 
-    private static string FormatField(string label, string value, bool mask, bool focused)
+    private static string FormatField(string label, LoginTextInput input, bool mask, bool focused)
     {
-        var display = mask ? new string('*', value.Length) : value;
-        var cursor = focused ? "_" : string.Empty;
         var marker = focused ? "> " : "  ";
-        return $"{marker}{label}: {display}{cursor}";
+        return $"{marker}{label}: {input.FormatDisplay(mask, focused)}";
     }
 
     public void Dispose()
     {
+        if (_isConnecting)
+        {
+            _pendingClient?.Dispose();
+            _pendingClient = null;
+        }
     }
 }

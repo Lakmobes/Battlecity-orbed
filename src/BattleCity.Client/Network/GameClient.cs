@@ -53,6 +53,8 @@ public enum GameClientEventKind
     AdminAction,
     BanEntry,
     AppendNews,
+    StartingCity,
+    AdminEdit,
     Kicked,
     Error,
     Disconnected,
@@ -132,6 +134,10 @@ public readonly struct GameClientEvent
 
     /// <summary>Legacy <c>smKicked</c> payload command byte (Kick/Ban) when present.</summary>
     public byte KickCommand { get; init; }
+
+    public int StartingCityId { get; init; }
+
+    public AdminEditPacket AdminEdit { get; init; }
 
     public char ErrorCode { get; init; }
 }
@@ -403,6 +409,48 @@ public sealed class GameClient : IDisposable
         bytes.CopyTo(payload);
         payload[bytes.Length] = 0;
         Send(ClientMessageId.ChangeNews, payload);
+    }
+
+    /// <summary>Legacy <c>cmStartingCity</c> — ask server for meeting-room seed city.</summary>
+    public void RequestStartingCity() => Send(ClientMessageId.StartingCity, ReadOnlySpan<byte>.Empty);
+
+    /// <summary>Legacy <c>cmChangeStartingCity</c> — admin sets meeting-room seed city.</summary>
+    public void SendChangeStartingCity(byte cityId)
+    {
+        if (!IsAdmin)
+        {
+            return;
+        }
+
+        Span<byte> payload = stackalloc byte[StartingCityPacket.Size];
+        new StartingCityPacket(cityId).Write(payload);
+        Send(ClientMessageId.ChangeStartingCity, payload);
+    }
+
+    /// <summary>Legacy <c>cmAdminEditRequest</c>.</summary>
+    public void SendAdminEditRequest(string username)
+    {
+        if (!IsAdmin || string.IsNullOrWhiteSpace(username))
+        {
+            return;
+        }
+
+        Span<byte> payload = stackalloc byte[ClientAdminEditRequestPacket.Size];
+        new ClientAdminEditRequestPacket(username.Trim()).Write(payload);
+        Send(ClientMessageId.AdminEditRequest, payload);
+    }
+
+    /// <summary>Legacy <c>cmAdminEdit</c> — empty password keeps existing hash.</summary>
+    public void SendAdminEdit(in AdminEditPacket edit)
+    {
+        if (!IsAdmin)
+        {
+            return;
+        }
+
+        Span<byte> payload = stackalloc byte[AdminEditPacket.Size];
+        edit.Write(payload);
+        Send(ClientMessageId.AdminEdit, payload);
     }
 
     public void FirePlayer(byte targetPlayerId)
@@ -905,6 +953,18 @@ public sealed class GameClient : IDisposable
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.AppendNews)
                 {
                     NewsText = System.Text.Encoding.ASCII.GetString(packet.Payload.Span).TrimEnd('\0'),
+                });
+                break;
+            case ServerMessageId.StartingCity when packet.Payload.Length >= StartingCityPacket.Size:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.StartingCity)
+                {
+                    StartingCityId = StartingCityPacket.Read(packet.Payload.Span).CityId,
+                });
+                break;
+            case ServerMessageId.AdminEdit when packet.Payload.Length >= AdminEditPacket.Size:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.AdminEdit)
+                {
+                    AdminEdit = AdminEditPacket.Read(packet.Payload.Span),
                 });
                 break;
             case ServerMessageId.Interview:

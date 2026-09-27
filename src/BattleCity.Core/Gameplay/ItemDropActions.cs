@@ -14,12 +14,19 @@ namespace BattleCity.Core.Gameplay;
 /// <summary>Shared item drop/pickup rules for offline sim and authoritative server.</summary>
 public static class ItemDropActions
 {
-    /// <summary>After dropping a solid under the tank: try left, then down, then right.</summary>
+    /// <summary>
+    /// After dropping a solid under the tank: try cardinals then diagonals (legacy RelocatePlayer).
+    /// </summary>
     private static readonly (int Dx, int Dy)[] SolidDropNudgeOffsets =
     [
         (-1, 0),
-        (0, 1),
         (1, 0),
+        (0, -1),
+        (0, 1),
+        (-1, -1),
+        (-1, 1),
+        (1, -1),
+        (1, 1),
     ];
 
     public static bool TryDropForEntity(
@@ -35,6 +42,13 @@ public static class ItemDropActions
         TileMap? tileMap = null)
     {
         if (!ItemDropPlacement.TryFindDropTile(world, owner, tankTopLeft, type, out gridX, out gridY, cityBuild))
+        {
+            return false;
+        }
+
+        if (ItemDropPlacement.RequiresDedicatedTile(type)
+            && tileMap is not null
+            && !ItemDropPlacement.IsSolidDropTerrainAllowed(tileMap, gridX, gridY))
         {
             return false;
         }

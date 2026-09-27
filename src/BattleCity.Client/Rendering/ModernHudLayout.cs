@@ -21,6 +21,9 @@ public static class ModernHudLayout
     public const int CompassInnerSize = 64;
     public const int CompassMargin = 20;
 
+    public const int RadarPanelSize = 100;
+    public const int RadarMargin = 16;
+
     /// <summary>Inset past the nine-slice border so text sits inside the frame.</summary>
     public const int StatusPanelPadding = HudSpriteNames.PanelBorder + 8;
 
@@ -34,6 +37,14 @@ public static class ModernHudLayout
 
     public static Rectangle TopBar =>
         new(0, 0, UiLayout.LogicalWidth, TopBarHeight);
+
+    /// <summary>Proximity radar — top-right of the inventory bar.</summary>
+    public static Rectangle RadarBounds =>
+        new(
+            UiLayout.LogicalWidth - RadarPanelSize - RadarMargin,
+            (TopBarHeight - RadarPanelSize) / 2,
+            RadarPanelSize,
+            RadarPanelSize);
 
     public static Rectangle CompassBounds =>
         new(
@@ -68,7 +79,11 @@ public static class ModernHudLayout
         }
 
         var rowWidth = slotCount * InventorySlotSize + (slotCount - 1) * InventorySlotSpacing;
-        return (UiLayout.LogicalWidth - rowWidth) / 2;
+        // Leave room for hamburger (left) and radar (right) so inventory is not full-bleed.
+        var left = HamburgerMargin + HamburgerSize + 24;
+        var right = RadarMargin + RadarPanelSize + 24;
+        var available = UiLayout.LogicalWidth - left - right;
+        return left + Math.Max(0, (available - rowWidth) / 2);
     }
 
     public static int GetInventorySlotX(int slotIndex, int slotCount) =>

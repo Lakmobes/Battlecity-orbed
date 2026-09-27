@@ -29,6 +29,7 @@ public sealed class UiRenderer
     private readonly AssetService _assets;
     private readonly InventoryPanelRenderer _inventoryPanel;
     private readonly UnderAttackPanelRenderer _underAttackPanel;
+    private readonly RadarRenderer _radar;
     private readonly BuildMenuRenderer _buildMenu;
     private SpriteFont? _font;
 
@@ -37,6 +38,7 @@ public sealed class UiRenderer
         _assets = assets;
         _inventoryPanel = new InventoryPanelRenderer(assets);
         _underAttackPanel = new UnderAttackPanelRenderer(assets);
+        _radar = new RadarRenderer(assets);
         _buildMenu = new BuildMenuRenderer(assets);
     }
 
@@ -76,7 +78,9 @@ public sealed class UiRenderer
                 context.FlareRechargeUnlocked);
         }
 
+        _radar.Draw(spriteBatch, in context);
         _underAttackPanel.Draw(spriteBatch, in context);
+        DrawCityInfoPanel(spriteBatch, in context);
 
         if (context.ShowStatusPanel)
         {
@@ -194,6 +198,63 @@ public sealed class UiRenderer
                 pixel,
                 new Rectangle(startX, startY + i * (lineHeight + gap), lineWidth, lineHeight),
                 lineColor);
+        }
+    }
+
+    private void DrawCityInfoPanel(SpriteBatch spriteBatch, in RenderContext context)
+    {
+        if (_font is null || string.IsNullOrWhiteSpace(context.LoadedCityName))
+        {
+            return;
+        }
+
+        var lines = new List<string> { context.LoadedCityName };
+        if (context.CityTeamCapacity > 0)
+        {
+            var team = context.CityTeamCount > 0
+                ? context.CityTeamCount
+                : 1;
+            lines.Add($"{team}/{context.CityTeamCapacity}");
+        }
+
+        lines.Add($"Buildings: {context.BuildingCount}");
+        if (!context.LocalPlayerIsMayor && !string.IsNullOrWhiteSpace(context.MayorDisplayName))
+        {
+            lines.Add($"Mayor: {context.MayorDisplayName}");
+        }
+        else if (context.LocalPlayerIsMayor)
+        {
+            lines.Add("You are mayor");
+        }
+
+        const int padding = 10;
+        const int lineHeight = 18;
+        var maxWidth = 0f;
+        foreach (var line in lines)
+        {
+            maxWidth = Math.Max(maxWidth, _font.MeasureString(line).X * 0.9f);
+        }
+
+        var panelWidth = (int)maxWidth + padding * 2;
+        var panelHeight = lines.Count * lineHeight + padding * 2;
+        var compass = ModernHudLayout.CompassBounds;
+        var panel = new Rectangle(
+            compass.Right - panelWidth,
+            compass.Bottom + 10,
+            panelWidth,
+            panelHeight);
+
+        HudOverlayHelper.DrawPanel(spriteBatch, _assets, panel, StatusPanelFill);
+
+        var y = panel.Y + padding;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var color = i == 0 ? MenuTheme.TextAccent : TextColor;
+            var scale = new Vector2(0.9f, 0.9f);
+            var position = new Vector2(panel.X + padding, y);
+            spriteBatch.DrawString(_font, lines[i], position + new Vector2(1f, 1f), TextShadowColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+            spriteBatch.DrawString(_font, lines[i], position, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+            y += lineHeight;
         }
     }
 

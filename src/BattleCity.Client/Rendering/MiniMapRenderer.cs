@@ -23,6 +23,7 @@ public sealed class MiniMapRenderer
         new QueryDescription().WithAll<BuildingRef, Transform2D>();
 
     private readonly AssetService _assets;
+    private SpriteFont? _font;
 
     public MiniMapRenderer(AssetService assets)
     {
@@ -104,6 +105,18 @@ public sealed class MiniMapRenderer
             homeCommandCenterGridX,
             homeCommandCenterGridY);
 
+        DrawCityLabels(
+            spriteBatch,
+            world,
+            mapCenter,
+            centerTileX,
+            centerTileY,
+            radius,
+            tilePixelSize,
+            background,
+            homeCommandCenterGridX,
+            homeCommandCenterGridY);
+
         var playerRect = new Rectangle(
             (int)mapCenter.X - tilePixelSize / 2,
             (int)mapCenter.Y - tilePixelSize / 2,
@@ -156,6 +169,83 @@ public sealed class MiniMapRenderer
                     color,
                     usePalette: isCc,
                     clipBounds);
+            });
+    }
+
+    private void DrawCityLabels(
+        SpriteBatch spriteBatch,
+        World world,
+        Vector2 mapCenter,
+        int centerTileX,
+        int centerTileY,
+        int radius,
+        int tilePixelSize,
+        Rectangle clipBounds,
+        int homeCommandCenterGridX,
+        int homeCommandCenterGridY)
+    {
+        if (_font is null)
+        {
+            _font = _assets.LoadFont(LegacySpriteNames.UiFont);
+        }
+
+        if (_font is null)
+        {
+            return;
+        }
+
+        world.Query(
+            in BuildingQuery,
+            (ref BuildingRef building, ref Transform2D _) =>
+            {
+                if (!BuildingCatalog.IsCommandCenter(building.TypeCode)
+                    || !CityCatalog.IsValidCityId(building.CityId))
+                {
+                    return;
+                }
+
+                var footprintCenterX = building.GridAnchorX - 1;
+                var footprintCenterY = building.GridAnchorY - 1;
+                if (Math.Abs(footprintCenterX - centerTileX) > radius + 2
+                    || Math.Abs(footprintCenterY - centerTileY) > radius + 2)
+                {
+                    return;
+                }
+
+                var name = CityCatalog.GetName(building.CityId);
+                var isOwn = building.GridAnchorX == homeCommandCenterGridX
+                    && building.GridAnchorY == homeCommandCenterGridY;
+                var color = isOwn ? OwnCcColor : OtherCcColor;
+                var scale = new Vector2(0.45f, 0.45f);
+                var size = _font.MeasureString(name) * scale;
+                var screenX = mapCenter.X + (footprintCenterX - centerTileX) * tilePixelSize - size.X / 2f;
+                var screenY = mapCenter.Y + (footprintCenterY - centerTileY) * tilePixelSize + tilePixelSize * 1.5f;
+                if (screenX < clipBounds.Left || screenY < clipBounds.Top
+                    || screenX + size.X > clipBounds.Right || screenY + size.Y > clipBounds.Bottom)
+                {
+                    return;
+                }
+
+                spriteBatch.DrawString(
+                    _font,
+                    name,
+                    new Vector2(screenX + 1f, screenY + 1f),
+                    new Color(0, 0, 0, 180),
+                    0f,
+                    Vector2.Zero,
+                    scale,
+                    SpriteEffects.None,
+                    0f);
+                spriteBatch.DrawString(
+                    _font,
+                    name,
+                    new Vector2(screenX, screenY),
+                    color,
+                    0f,
+                    Vector2.Zero,
+                    scale,
+                    SpriteEffects.None,
+                    0f);
             });
     }
 

@@ -143,7 +143,10 @@ public sealed class ScreenUiRenderer
 
             var focused = line.StartsWith("> ", StringComparison.Ordinal);
             var display = focused ? line[2..] : line.TrimStart();
-            var isField = display.Contains(':', StringComparison.Ordinal);
+            // Only treat short "Label: value" rows as fields — not status text with host:port.
+            var colon = display.IndexOf(':');
+            var labelPart = colon > 0 ? display[..colon] : string.Empty;
+            var isField = colon is > 0 and < 16 && !labelPart.Contains(' ', StringComparison.Ordinal);
 
             if (isField)
             {
@@ -184,7 +187,7 @@ public sealed class ScreenUiRenderer
         }
     }
 
-    public void DrawMenuButton(SpriteBatch spriteBatch, Rectangle bounds, string label, bool selected)
+    public void DrawMenuButton(SpriteBatch spriteBatch, Rectangle bounds, string label, bool selected, bool titleFont = true)
     {
         var pixel = _assets.Pixel;
         var fill = selected ? MenuTheme.ButtonFocusFill : MenuTheme.ButtonIdleFill;
@@ -201,7 +204,7 @@ public sealed class ScreenUiRenderer
         }
 
         var color = selected ? MenuTheme.TextAccent : MenuTheme.TextSecondary;
-        DrawCenteredInBounds(spriteBatch, label, bounds, color, title: true);
+        DrawCenteredInBounds(spriteBatch, label, bounds, color, title: titleFont);
     }
 
     public void DrawFieldRow(SpriteBatch spriteBatch, Rectangle bounds, string text, bool focused)
@@ -226,6 +229,18 @@ public sealed class ScreenUiRenderer
         }
 
         text = SanitizeForSpriteFont(text);
+        var maxTextWidth = bounds.Width - 28;
+        if (_bodyFont.MeasureString(text).X > maxTextWidth)
+        {
+            // Prefer showing the end (caret / latest digits) when the value is long.
+            while (text.Length > 1 && _bodyFont.MeasureString("…" + text).X > maxTextWidth)
+            {
+                text = text[1..];
+            }
+
+            text = "…" + text;
+        }
+
         var size = _bodyFont.MeasureString(text);
         var position = new Vector2(
             bounds.X + 14,

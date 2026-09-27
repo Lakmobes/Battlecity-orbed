@@ -46,7 +46,7 @@ public sealed class MeetingScene : IScene
         _chatInput.Reset();
         _client.EnterMeetingRoom();
         _chatLog.Append(
-            "Welcome to the meeting room. Click a city to apply. Press Enter to chat.",
+            "Welcome to the meeting room. Up/Down select a city, Enter to apply, Tab to chat, R to refresh.",
             ChatColorResolver.System);
     }
 
@@ -81,6 +81,11 @@ public sealed class MeetingScene : IScene
             {
                 _selectedCityIndex = (_selectedCityIndex + 1) % _cities.Count;
             }
+
+            if (menuInput.ConfirmPressed)
+            {
+                ApplyToCity(_selectedCityIndex);
+            }
         }
 
         var keyboard = Keyboard.GetState();
@@ -89,7 +94,8 @@ public sealed class MeetingScene : IScene
             RefreshCityList();
         }
 
-        var chatUpdate = _chatInput.Update(keyboard);
+        // Tab opens lobby chat so Enter stays free for Apply.
+        var chatUpdate = _chatInput.Update(keyboard, openKey: Keys.Tab);
         if (chatUpdate.Submitted && !string.IsNullOrWhiteSpace(chatUpdate.Message))
         {
             _client.SendMeetingChat(chatUpdate.Message);
@@ -255,7 +261,7 @@ public sealed class MeetingScene : IScene
         {
             _ui.DrawText(
                 spriteBatch,
-                "Click a city to apply",
+                "Click a city or press Enter to apply",
                 panel.X + MeetingRoomLayout.PanelPadding,
                 panel.Bottom - 24,
                 MenuTheme.TextMuted);
@@ -305,7 +311,7 @@ public sealed class MeetingScene : IScene
         {
             _ui.DrawText(
                 spriteBatch,
-                "Press Enter to chat",
+                "Press Tab to chat",
                 panel.X + MeetingRoomLayout.PanelPadding,
                 panel.Bottom - 26,
                 MenuTheme.TextMuted);
@@ -316,11 +322,11 @@ public sealed class MeetingScene : IScene
     {
         var refresh = MeetingRoomLayout.RefreshButton;
         var refreshHover = refresh.Contains(_previousLogicalMouse);
-        _ui.DrawMenuButton(spriteBatch, refresh, "Refresh (R)", selected: refreshHover);
+        _ui.DrawMenuButton(spriteBatch, refresh, "Refresh (R)", selected: refreshHover, titleFont: false);
 
         _ui.DrawCenteredText(
             spriteBatch,
-            $"Player {_client.PlayerId}  |  Up/Down highlight  |  Esc quit",
+            $"Player {_client.PlayerId}  |  Up/Down select  |  Enter apply  |  Tab chat  |  Esc quit",
             screenWidth / 2,
             UiLayout.LogicalHeight - 28,
             MenuTheme.TextMuted);

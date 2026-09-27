@@ -72,6 +72,7 @@ public sealed class InGameOnlineScene : IScene
     private readonly InGameChatInput _chatInput = new();
     private bool _showSettingsMenu;
     private int _settingsSelectedIndex;
+    private AdminEditPacket? _cachedAdminEdit;
 
     public InGameOnlineScene(SceneContext context, GameClient client)
     {
@@ -96,7 +97,8 @@ public sealed class InGameOnlineScene : IScene
             CreateDeathOverlayRenderer(),
             CreateOrbedOverlayRenderer(),
             CreateResearchCompleteOverlayRenderer(),
-            CreateChatOverlayRenderer());
+            CreateChatOverlayRenderer(),
+            CreateNameplateRenderer());
 
         _tileMap = InGameWorldLoader.LoadTileMap();
         _simulation.TileMap = _tileMap;
@@ -613,6 +615,13 @@ public sealed class InGameOnlineScene : IScene
                 case GameClientEventKind.AppendNews:
                     AppendNewsChat(networkEvent.NewsText);
                     break;
+                case GameClientEventKind.StartingCity:
+                    AppendStartingCityChat(networkEvent.StartingCityId);
+                    break;
+                case GameClientEventKind.AdminEdit:
+                    _cachedAdminEdit = networkEvent.AdminEdit;
+                    AppendAdminEditChat(networkEvent.AdminEdit);
+                    break;
                 case GameClientEventKind.Orbed:
                     _simulation.ApplyNetworkOrb(
                         networkEvent.Orbed.VictimCity,
@@ -978,7 +987,8 @@ public sealed class InGameOnlineScene : IScene
         var homeCcGridX = 0;
         var homeCcGridY = 0;
         var cityCenterWorldPosition = _cameraFocus;
-        Vector2? nearestOrbableCity = null;
+        Vector2? nearestOtherCity = null;
+        var nearestOtherIsOrbable = false;
         if (_simulation.TryGetCityBuild(observerCityId, out var homeCityForCompass))
         {
             homeCcGridX = homeCityForCompass.CommandCenterGridX;
@@ -992,6 +1002,8 @@ public sealed class InGameOnlineScene : IScene
                 cityCenterWorldPosition = new Vector2(homeReference.X, homeReference.Y);
             }
 
+            // Prefer nearest orbable city; otherwise point at nearest other CC so the outer
+            // arrow is always visible (cities start non-orbable in MP).
             if (CommandCenterLookup.TryFindNearestOtherWorldPosition(
                     _simulation.World,
                     homeCityForCompass.CommandCenterGridX,
@@ -1000,7 +1012,18 @@ public sealed class InGameOnlineScene : IScene
                     out var orbTarget,
                     cityId => _simulation.TryGetCityBuild(cityId, out var orbBuild) && orbBuild.IsOrbable))
             {
-                nearestOrbableCity = new Vector2(orbTarget.X, orbTarget.Y);
+                nearestOtherCity = new Vector2(orbTarget.X, orbTarget.Y);
+                nearestOtherIsOrbable = true;
+            }
+            else if (CommandCenterLookup.TryFindNearestOtherWorldPosition(
+                         _simulation.World,
+                         homeCityForCompass.CommandCenterGridX,
+                         homeCityForCompass.CommandCenterGridY,
+                         new NumericsVector2(_cameraFocus.X, _cameraFocus.Y),
+                         out var nearestTarget,
+                         cityIsOrbable: null))
+            {
+                nearestOtherCity = new Vector2(nearestTarget.X, nearestTarget.Y);
             }
         }
         else if (CommandCenterLookup.TryGetHomeReferenceWorldPosition(_simulation.World, out var anyHomeReference))
@@ -1015,7 +1038,8 @@ public sealed class InGameOnlineScene : IScene
             World = _simulation.World,
             FocusWorldPosition = _cameraFocus,
             CityCenterWorldPosition = cityCenterWorldPosition,
-            NearestOrbableCityWorldPosition = nearestOrbableCity,
+            NearestOtherCityWorldPosition = nearestOtherCity,
+            NearestOtherCityIsOrbable = nearestOtherIsOrbable,
             HomeCommandCenterGridX = homeCcGridX,
             HomeCommandCenterGridY = homeCcGridY,
             ScreenWidth = _camera.ViewportWidth,
@@ -1023,8 +1047,15 @@ public sealed class InGameOnlineScene : IScene
             ShowMiniMap = _showMiniMap,
             ShowStatusPanel = _showStatusPanel,
             LoadedCityName = _context.SelectedCity,
-            BuildingCount = _simulation.CountBuildingsInWorld(),
+            BuildingCount = cityBuild?.CurrentBuildingCount
+                ?? _simulation.CountBuildingsInWorld(),
+            CityTeamCount = CountLocalCityTeam(GetLocalCityId()),
+            CityTeamCapacity = GameConstants.MaxPlayersPerCity,
+            MayorDisplayName = ResolveMayorDisplayName(GetLocalCityId()),
+            LocalPlayerIsMayor = _client.IsMayor,
             PlayerDisplayName = _context.PlayerName,
+            LocalPlayerId = _client.PlayerId,
+            ResolvePlayerDisplayName = id => _remotePlayers?.GetDisplayName(id),
             PlayerHealth = playerHealth,
             PlayerMaxHealth = playerMaxHealth,
             PlayerRespawnSeconds = playerRespawnSeconds,
@@ -1183,6 +1214,46 @@ public sealed class InGameOnlineScene : IScene
 
     private byte GetLocalCityId() => _client.SpawnState?.City ?? 0;
 
+    private int CountLocalCityTeam(byte cityId)
+    {
+        var count = 0;
+        var query = new QueryDescription().WithAll<NetworkIdentity, CityAffiliation>();
+        _simulation.World.Query(
+            in query,
+            (ref CityAffiliation city) =>
+            {
+                if (city.CityId == cityId)
+                {
+                    count++;
+                }
+            });
+        return Math.Max(1, count);
+    }
+
+    private string? ResolveMayorDisplayName(byte cityId)
+    {
+        if (_client.IsMayor)
+        {
+            return _context.PlayerName;
+        }
+
+        string? mayorName = null;
+        var query = new QueryDescription().WithAll<NetworkIdentity, CityAffiliation, MayorStatus>();
+        _simulation.World.Query(
+            in query,
+            (Entity entity, ref CityAffiliation city, ref MayorStatus mayor) =>
+            {
+                if (mayorName is not null || !mayor.IsMayor || city.CityId != cityId)
+                {
+                    return;
+                }
+
+                var playerId = _simulation.World.Get<NetworkIdentity>(entity).PlayerId;
+                mayorName = _remotePlayers.GetDisplayName(playerId) ?? $"Player{playerId}";
+            });
+        return mayorName;
+    }
+
     private string GetLocalChatDisplayName() =>
         _remotePlayers.GetChatDisplayName(_client.PlayerId);
 
@@ -1250,6 +1321,15 @@ public sealed class InGameOnlineScene : IScene
                 break;
             case ChatCommandKind.SetNews:
                 SendAdminSetNews(command.Message);
+                break;
+            case ChatCommandKind.StartingCity:
+                SendStartingCityCommand(command.Message);
+                break;
+            case ChatCommandKind.Account:
+                SendAccountLookup(command.Message);
+                break;
+            case ChatCommandKind.EditAccount:
+                SendAccountEdit(command.Message);
                 break;
             default:
                 if (string.IsNullOrWhiteSpace(command.Message))
@@ -1460,6 +1540,183 @@ public sealed class InGameOnlineScene : IScene
             string.IsNullOrWhiteSpace(news) ? "News cleared." : "News updated.");
     }
 
+    private void SendStartingCityCommand(string argument)
+    {
+        if (string.IsNullOrWhiteSpace(argument))
+        {
+            _client.RequestStartingCity();
+            return;
+        }
+
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can change the starting city.");
+            return;
+        }
+
+        byte cityId;
+        if (byte.TryParse(argument, out var parsedId) && CityCatalog.IsValidCityId(parsedId))
+        {
+            cityId = parsedId;
+        }
+        else if (CityCatalog.TryGetId(argument, out var namedId) && CityCatalog.IsValidCityId(namedId))
+        {
+            cityId = (byte)namedId;
+        }
+        else
+        {
+            InGameChatService.AppendSystem(_chatLog, "Usage: /startcity [id|name]");
+            return;
+        }
+
+        _client.SendChangeStartingCity(cityId);
+        InGameChatService.AppendSystem(_chatLog, $"Starting city set to {CityCatalog.GetName(cityId)} ({cityId}).");
+    }
+
+    private void SendAccountLookup(string username)
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can look up accounts.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            InGameChatService.AppendSystem(_chatLog, "Usage: /account <username>");
+            return;
+        }
+
+        _client.SendAdminEditRequest(username);
+        InGameChatService.AppendSystem(_chatLog, $"Looking up account {username.Trim()}...");
+    }
+
+    private void SendAccountEdit(string argument)
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can edit accounts.");
+            return;
+        }
+
+        if (!TryParseAccountEdit(argument, out var edit, out var error))
+        {
+            InGameChatService.AppendSystem(_chatLog, error);
+            return;
+        }
+
+        _client.SendAdminEdit(edit);
+        _cachedAdminEdit = edit;
+        InGameChatService.AppendSystem(_chatLog, $"Account updated: {edit.Username}");
+    }
+
+    private bool TryParseAccountEdit(string argument, out AdminEditPacket edit, out string error)
+    {
+        edit = default;
+        error = "Usage: /editaccount <user> field=value ...  (points, deaths, admin, town, email, state, name, pass)";
+        if (string.IsNullOrWhiteSpace(argument))
+        {
+            return false;
+        }
+
+        var parts = argument.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var username = parts[0];
+        if (parts.Length < 2)
+        {
+            return false;
+        }
+
+        if (_cachedAdminEdit is not { } cached
+            || !string.Equals(cached.Username, username, StringComparison.OrdinalIgnoreCase))
+        {
+            error = $"Run /account {username} first, then /editaccount {username} field=value ...";
+            return false;
+        }
+
+        var points = cached.Points;
+        var deaths = cached.Deaths;
+        var admin = cached.PlayerType;
+        var town = cached.Town;
+        var email = cached.Email;
+        var state = cached.State;
+        var name = cached.FullName;
+        var pass = string.Empty;
+
+        foreach (var token in parts[1].Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var eq = token.IndexOf('=');
+            if (eq <= 0 || eq >= token.Length - 1)
+            {
+                error = $"Invalid field '{token}'. Use field=value.";
+                return false;
+            }
+
+            var field = token[..eq];
+            var value = token[(eq + 1)..];
+            if (field.Equals("points", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(value, out var p))
+            {
+                points = Math.Max(0, p);
+            }
+            else if (field.Equals("deaths", StringComparison.OrdinalIgnoreCase)
+                     && int.TryParse(value, out var d))
+            {
+                deaths = Math.Max(0, d);
+            }
+            else if (field.Equals("admin", StringComparison.OrdinalIgnoreCase))
+            {
+                admin = value is "1" or "true" or "yes" ? 1 : 0;
+            }
+            else if (field.Equals("town", StringComparison.OrdinalIgnoreCase))
+            {
+                town = value;
+            }
+            else if (field.Equals("email", StringComparison.OrdinalIgnoreCase))
+            {
+                email = value;
+            }
+            else if (field.Equals("state", StringComparison.OrdinalIgnoreCase))
+            {
+                state = value;
+            }
+            else if (field.Equals("name", StringComparison.OrdinalIgnoreCase)
+                     || field.Equals("fullname", StringComparison.OrdinalIgnoreCase))
+            {
+                name = value;
+            }
+            else if (field.Equals("pass", StringComparison.OrdinalIgnoreCase)
+                     || field.Equals("password", StringComparison.OrdinalIgnoreCase))
+            {
+                pass = value;
+            }
+            else
+            {
+                error = $"Unknown field '{field}'.";
+                return false;
+            }
+        }
+
+        edit = new AdminEditPacket(
+            cached.Username,
+            pass,
+            email,
+            name,
+            town,
+            state,
+            points,
+            cached.MonthlyPoints,
+            deaths,
+            cached.Orbs,
+            cached.Assists,
+            admin,
+            cached.Member,
+            cached.Red,
+            cached.Green,
+            cached.Blue,
+            cached.RentalCity);
+        return true;
+    }
+
     private void AppendBanEntryChat(in ServerBanPacket ban)
     {
         var by = string.IsNullOrWhiteSpace(ban.IpAddress) ? "?" : ban.IpAddress;
@@ -1484,6 +1741,32 @@ public sealed class InGameOnlineScene : IScene
 
             InGameChatService.AppendSystem(_chatLog, trimmed);
         }
+    }
+
+    private void AppendStartingCityChat(int cityId)
+    {
+        if (!CityCatalog.IsValidCityId(cityId))
+        {
+            InGameChatService.AppendSystem(_chatLog, $"Starting city id: {cityId}");
+            return;
+        }
+
+        InGameChatService.AppendSystem(
+            _chatLog,
+            $"Starting city: {CityCatalog.GetName((byte)cityId)} ({cityId})");
+    }
+
+    private void AppendAdminEditChat(in AdminEditPacket edit)
+    {
+        InGameChatService.AppendSystem(
+            _chatLog,
+            $"{edit.Username}: pts={edit.Points} deaths={edit.Deaths} admin={edit.PlayerType} town={edit.Town}");
+        InGameChatService.AppendSystem(
+            _chatLog,
+            $"  name={edit.FullName} email={edit.Email} state={edit.State}");
+        InGameChatService.AppendSystem(
+            _chatLog,
+            "  Edit: /editaccount User points=N deaths=N admin=0|1 town=X ...");
     }
 
     private void ApplyLocalWarp(in ServerStateGamePacket warp)
@@ -1655,5 +1938,12 @@ public sealed class InGameOnlineScene : IScene
         var overlay = new ChatOverlayRenderer(_context.Assets);
         overlay.LoadContent();
         return overlay;
+    }
+
+    private TankNameplateRenderer CreateNameplateRenderer()
+    {
+        var nameplates = new TankNameplateRenderer(_context.Assets);
+        nameplates.LoadContent();
+        return nameplates;
     }
 }

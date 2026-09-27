@@ -9,7 +9,7 @@ For developers and contributors, also see [PROJECT-STATUS.md](PROJECT-STATUS.md)
 | Folder | Run this |
 |--------|----------|
 | `Client/` | `BattleCity.Client.exe` — the game |
-| `Server/` | `BattleCity.Server.Host.exe` — Start/Stop, invite copy, admin toggles, ban list / unban |
+| `Server/` | `BattleCity.Server.Host.exe` — Start/Stop, invite copy, admin toggles, ban list / unban, starting city, **AI City** |
 
 No Visual Studio required. Windows x64.
 
@@ -71,6 +71,8 @@ No router port forwarding.
 1. Login → Meeting Room  
 2. First player to apply to an empty city becomes **mayor**  
 3. Later players apply → mayor hires them as soldiers (max 4 per city)  
+
+**Solo practice:** on the Host app, check **AI City** after Start. The server spawns a scripted enemy city (mayor + soldiers) that defend and raid so you have opposition without extra players.
 
 ---
 

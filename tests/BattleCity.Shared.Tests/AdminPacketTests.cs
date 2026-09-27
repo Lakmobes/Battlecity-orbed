@@ -40,4 +40,46 @@ public class AdminPacketTests
         Assert.Equal("HostAdmin", read.IpAddress);
         Assert.Equal("griefing", read.Reason);
     }
+
+    [Fact]
+    public void StartingCityPacket_RoundTrips()
+    {
+        Span<byte> buffer = stackalloc byte[StartingCityPacket.Size];
+        new StartingCityPacket(27).Write(buffer);
+        Assert.Equal(27, StartingCityPacket.Read(buffer).CityId);
+    }
+
+    [Fact]
+    public void AdminEditPacket_RoundTripsCoreFields()
+    {
+        Span<byte> buffer = stackalloc byte[AdminEditPacket.Size];
+        var original = new AdminEditPacket(
+            "Alice",
+            "secret",
+            "a@b.c",
+            "Alice Full",
+            "Berlin",
+            "DE",
+            points: 42,
+            monthlyPoints: 7,
+            deaths: 3,
+            orbs: 1,
+            assists: 2,
+            playerType: 1);
+        original.Write(buffer);
+        var read = AdminEditPacket.Read(buffer);
+        Assert.Equal("Alice", read.Username);
+        Assert.Equal("secret", read.Password);
+        Assert.Equal("a@b.c", read.Email);
+        Assert.Equal("Alice Full", read.FullName);
+        Assert.Equal("Berlin", read.Town);
+        Assert.Equal("DE", read.State);
+        Assert.Equal(42, read.Points);
+        Assert.Equal(7, read.MonthlyPoints);
+        Assert.Equal(3, read.Deaths);
+        Assert.Equal(1, read.Orbs);
+        Assert.Equal(2, read.Assists);
+        Assert.Equal(1, read.PlayerType);
+        Assert.Equal(AdminEditPacket.Size, buffer.Length);
+    }
 }

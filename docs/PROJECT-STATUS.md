@@ -1,18 +1,18 @@
 # Project Status (Handoff)
 
-**Last updated:** 2026-07-26  
+**Last updated:** 2026-09-25  
 **Repo:** C# / MonoGame rewrite of Battle City (legacy C++ remains in `legacy/`)  
 **Goal of this checkpoint:** ship a playable PC build friends can host, with docs so a new contributor can continue.
 
 ## Where things stand
 
-Phases **0–30** in [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) are complete: headless ECS sim, offline sandbox, legacy-framed TCP multiplayer (accounts, meeting/hiring, combat sync, build tree, respawn/warp, etc.).
+Phases **0–41** in [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) are complete: headless ECS sim, offline sandbox, legacy-framed TCP multiplayer (accounts, meeting/hiring, combat sync, build tree, respawn/warp, admin tools, **AI City** opposition, etc.).
 
 On top of that, this checkpoint adds **PC polish and sharing**:
 
 | Area | What’s in |
 |------|-----------|
-| Host UI | `BattleCity.Server.Host` WinForms: Start/Stop, LAN invite copy, player list, admin toggles |
+| Host UI | `BattleCity.Server.Host` WinForms: Start/Stop, LAN invite, player list, admin toggles, bans, starting city, **AI City** |
 | Friend play | `tools/Publish-Release.ps1` → `dist/BattleCity-win-x64.zip` (self-contained Client + Server) |
 | Client UI | Modern 1080p HUD, title/menu theme, login server field (`IP` or `IP:port`) |
 | Gameplay | House population staffing, populated-building bullet immunity, rechargeable cloak/flare |
@@ -89,7 +89,9 @@ Share `dist/BattleCity-win-x64.zip`. Host runs `Server/BattleCity.Server.Host.ex
 
 ## Suggested next work
 
-1. Optional: starting-city admin edit / account editor (`cmChangeStartingCity`, `cmAdminEdit`)
+1. Optional stress harness / Smoke extension for longer sessions
+2. Polish any leftover items in [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md)
+3. Playtest AI City + admin suite; optional release zip refresh
 
 See [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) for the full backlog.
 

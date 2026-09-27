@@ -62,6 +62,8 @@ public static class LevelLoader
     /// </summary>
     public static int SpawnAllCommandCenters(World world, TileMap tileMap)
     {
+        ClearHazardsAroundCommandCenters(tileMap);
+
         var count = 0;
         foreach (var (cityId, gridAnchorX, gridAnchorY) in EnumerateCommandCenters(tileMap))
         {
@@ -70,6 +72,40 @@ public static class LevelLoader
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// Some map.dat CCs (e.g. Cordoba, Rio Cuarto) have lava under the footprint / drive bay.
+    /// Clear hazards so tanks can spawn and the CC is not visually buried in lava.
+    /// </summary>
+    public static void ClearHazardsAroundCommandCenters(TileMap tileMap)
+    {
+        foreach (var (_, gridAnchorX, gridAnchorY) in EnumerateCommandCenters(tileMap))
+        {
+            for (var j = 0; j < 3; j++)
+            {
+                for (var i = 0; i < 3; i++)
+                {
+                    ClearHazardTerrain(tileMap, gridAnchorX - j, gridAnchorY - i);
+                }
+
+                // Southern drive bay — one row below the 3×3 footprint.
+                ClearHazardTerrain(tileMap, gridAnchorX - j, gridAnchorY + 1);
+            }
+        }
+    }
+
+    private static void ClearHazardTerrain(TileMap tileMap, int tileX, int tileY)
+    {
+        if (tileX < 0 || tileY < 0 || tileX >= TileMap.Size || tileY >= TileMap.Size)
+        {
+            return;
+        }
+
+        if (tileMap.Terrain[tileX, tileY] is TerrainTileType.Lava or TerrainTileType.Rock)
+        {
+            tileMap.Terrain[tileX, tileY] = TerrainTileType.Open;
+        }
     }
 
     /// <summary>Legacy 63→0 CityCenter cluster scan.</summary>

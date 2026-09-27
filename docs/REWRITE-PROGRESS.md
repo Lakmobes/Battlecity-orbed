@@ -46,6 +46,8 @@ For the current handoff checkpoint (host UI, modern HUD, population, recharge ab
 - [x] **Phase 37 — Server.Host Ban UI** (ban list + unban)
 - [x] **Phase 38 — Admin Spawn/Shutdown** (`cmAdmin` 6–7; `/spawn`, `/shutdown`)
 - [x] **Phase 39 — Admin Bans/News Wire** (`cmAdmin` 8–10 + `cmChangeNews`; `/bans` `/unban` `/news` `/setnews`)
+- [x] **Phase 40 — Starting City + Account Edit** (`cmChangeStartingCity` / `cmAdminEdit`; `/startcity`, `/account`, `/editaccount`)
+- [x] **Phase 41 — AI City** (Host toggle; scripted enemy mayor + soldiers via `BotAi` + network player sync)
 
 Finance HUD (`smFinance`) is intentionally **out of scope** for this rewrite.
 
@@ -79,14 +81,16 @@ There is **no fixed total phase count** — phases are added incrementally as le
 | 37 | Host UI | Ban list + unban in `BattleCity.Server.Host` |
 | 38 | `cmAdmin` 6–7 | Spawn item into inventory / remote shutdown (`/spawn`, `/shutdown`) |
 | 39 | `cmAdmin` 8–10 + `cmChangeNews` | Ban list / unban / news over the wire (`/bans` `/unban` `/news` `/setnews`) |
+| 40 | `cmStartingCity` / `cmChangeStartingCity` / `cmAdminEdit` | Meeting seed city + account editor (`/startcity`, `/account`, `/editaccount`) |
+| 41 | Host AI City | Scripted enemy city (mayor + soldiers) for solo / light MP opposition |
 
-Likely next targets: starting-city admin edit; optional `cmAdminEdit` account editor; polish leftover deltas in [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md).
+Likely next targets: polish leftover deltas in [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md); optional stress / Smoke extension; playtest / release zip refresh.
 
 **Play Online (Local Server)** auto-starts an embedded `GameServer` on `127.0.0.1:5643` (or reuses an existing listener). Friend hosting still uses Server.Host.
 
 CI (`.github/workflows/build.yml`) runs unit tests then `tools/BattleCity.Smoke` (1 mayor + 3 soldiers join + move).
 
-Phases **0–39** are complete (40 numbered milestones including Phase 0).
+Phases **0–41** are complete (42 numbered milestones including Phase 0).
 
 ## Build & Run
 

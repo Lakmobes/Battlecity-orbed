@@ -9,7 +9,7 @@ public static class MeetingRoomLayout
     public const int HeaderHeight = 26;
     public const int PanelPadding = 14;
     public const int PanelTop = 88;
-    public const int PanelBottomMargin = 88;
+    public const int PanelBottomMargin = 100;
     public const int FooterReserved = 40;
 
     public static Rectangle CitiesPanel =>
@@ -18,8 +18,9 @@ public static class MeetingRoomLayout
     public static Rectangle ChatPanel =>
         new(UiLayout.LogicalWidth / 2 + 16, PanelTop, UiLayout.LogicalWidth / 2 - 48, UiLayout.LogicalHeight - PanelTop - PanelBottomMargin);
 
+    /// <summary>Above the footer bar so the label stays fully on-screen.</summary>
     public static Rectangle RefreshButton =>
-        new(32, UiLayout.LogicalHeight - 68, 148, 36);
+        new(32, UiLayout.LogicalHeight - MenuTheme.FooterHeight - 52, 160, MenuTheme.MenuButtonHeight - 12);
 
     public static Rectangle QuitHint =>
         new(UiLayout.LogicalWidth / 2 + 16, UiLayout.LogicalHeight - 64, UiLayout.LogicalWidth / 2 - 48, 28);

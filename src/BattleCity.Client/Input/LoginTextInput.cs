@@ -2,10 +2,12 @@ using Microsoft.Xna.Framework.Input;
 
 namespace BattleCity.Client.Input;
 
+/// <summary>Single-line text field with caret for login / chat entry.</summary>
 public sealed class LoginTextInput
 {
     private readonly int _maxLength;
     private string _text = string.Empty;
+    private int _caret;
     private KeyboardState _previousKeyboard;
 
     public LoginTextInput(int maxLength = 15)
@@ -15,7 +17,13 @@ public sealed class LoginTextInput
 
     public string Text => _text;
 
-    public void SetText(string text) => _text = Trim(text);
+    public int Caret => _caret;
+
+    public void SetText(string text)
+    {
+        _text = Trim(text);
+        _caret = _text.Length;
+    }
 
     public void Update()
     {
@@ -24,14 +32,56 @@ public sealed class LoginTextInput
 
         if (ctrl && WasPressed(keyboard, Keys.V) && NativeClipboard.TryGetText(out var pasted))
         {
-            _text = Trim(_text + pasted);
+            Insert(pasted);
             _previousKeyboard = keyboard;
             return;
         }
 
-        // Ignore other keystrokes while Ctrl is held (Ctrl+C / Ctrl+A etc.).
         if (ctrl)
         {
+            _previousKeyboard = keyboard;
+            return;
+        }
+
+        if (WasPressed(keyboard, Keys.Left))
+        {
+            _caret = Math.Max(0, _caret - 1);
+            _previousKeyboard = keyboard;
+            return;
+        }
+
+        if (WasPressed(keyboard, Keys.Right))
+        {
+            _caret = Math.Min(_text.Length, _caret + 1);
+            _previousKeyboard = keyboard;
+            return;
+        }
+
+        if (WasPressed(keyboard, Keys.Home))
+        {
+            _caret = 0;
+            _previousKeyboard = keyboard;
+            return;
+        }
+
+        if (WasPressed(keyboard, Keys.End))
+        {
+            _caret = _text.Length;
+            _previousKeyboard = keyboard;
+            return;
+        }
+
+        if (WasPressed(keyboard, Keys.Delete) && _caret < _text.Length)
+        {
+            _text = _text.Remove(_caret, 1);
+            _previousKeyboard = keyboard;
+            return;
+        }
+
+        if (WasPressed(keyboard, Keys.Back) && _caret > 0)
+        {
+            _text = _text.Remove(_caret - 1, 1);
+            _caret--;
             _previousKeyboard = keyboard;
             return;
         }
@@ -44,18 +94,43 @@ public sealed class LoginTextInput
             }
         }
 
-        if (WasPressed(keyboard, Keys.Back) && _text.Length > 0)
+        _previousKeyboard = keyboard;
+    }
+
+    /// <summary>Visible field string with caret when focused.</summary>
+    public string FormatDisplay(bool mask, bool focused)
+    {
+        var display = mask ? new string('*', _text.Length) : _text;
+        if (!focused)
         {
-            _text = _text[..^1];
+            return display;
         }
 
-        _previousKeyboard = keyboard;
+        var caret = Math.Clamp(_caret, 0, display.Length);
+        return display[..caret] + "_" + display[caret..];
+    }
+
+    private void Insert(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        var before = _text[.._caret];
+        var after = _text[_caret..];
+        var combined = Trim(before + value + after);
+        var inserted = Math.Min(value.Length, combined.Length - before.Length);
+        _text = combined;
+        _caret = Math.Min(combined.Length, before.Length + Math.Max(0, inserted));
     }
 
     private void AppendKey(Keys key, KeyboardState keyboard)
     {
         if (key is Keys.Enter or Keys.Escape or Keys.Tab or Keys.Up or Keys.Down
-            or Keys.LeftControl or Keys.RightControl or Keys.LeftAlt or Keys.RightAlt)
+            or Keys.Left or Keys.Right or Keys.Home or Keys.End or Keys.Delete or Keys.Back
+            or Keys.LeftControl or Keys.RightControl or Keys.LeftAlt or Keys.RightAlt
+            or Keys.LeftShift or Keys.RightShift)
         {
             return;
         }
@@ -66,7 +141,7 @@ public sealed class LoginTextInput
             return;
         }
 
-        _text = Trim(_text + character.Value);
+        Insert(character.Value.ToString());
     }
 
     private string Trim(string value) =>
@@ -96,12 +171,18 @@ public sealed class LoginTextInput
             return (char)('0' + (key - Keys.D0));
         }
 
+        if (key >= Keys.NumPad0 && key <= Keys.NumPad9)
+        {
+            return (char)('0' + (key - Keys.NumPad0));
+        }
+
         return key switch
         {
             Keys.Space => ' ',
             Keys.OemMinus => shift ? '_' : '-',
-            Keys.OemPeriod => '.',
+            Keys.OemPeriod or Keys.Decimal => '.',
             Keys.OemSemicolon => shift ? ':' : null,
+            Keys.Divide => '/',
             _ => null,
         };
     }

@@ -55,14 +55,23 @@ public sealed class CityRegistry
         StartingCityId = StartingCityOptions[random.Next(StartingCityOptions.Length)];
     }
 
-    public void SetStartingCityForTests(byte cityId)
+    public bool TrySetStartingCity(byte cityId)
     {
         if (!CityCatalog.IsValidCityId(cityId))
         {
-            throw new ArgumentOutOfRangeException(nameof(cityId));
+            return false;
         }
 
         StartingCityId = cityId;
+        return true;
+    }
+
+    public void SetStartingCityForTests(byte cityId)
+    {
+        if (!TrySetStartingCity(cityId))
+        {
+            throw new ArgumentOutOfRangeException(nameof(cityId));
+        }
     }
 
     /// <summary>

@@ -98,6 +98,7 @@ public sealed class GameSimulation : IDisposable
     private readonly List<PendingRespawnEvent> _pendingRespawnEvents = [];
     private readonly List<ServerAddItemPacket> _pendingFactoryAddItems = [];
     private readonly List<ServerBuildingPacket> _pendingBombBuildingRemovals = [];
+    private readonly List<ServerShotPacket> _pendingBotShots = [];
 
     public GameSoundEvent[] ConsumeSoundEvents() => _audioBuffer.Drain();
 
@@ -462,7 +463,13 @@ public sealed class GameSimulation : IDisposable
                 Height = GameConstants.TileSize - GameConstants.PlayerCollisionInset * 2,
                 Layer = CollisionLayer.Player,
             },
-            new BotController { AggroRangePixels = aggroRangePixels },
+            new BotController
+            {
+                AggroRangePixels = aggroRangePixels,
+                Role = BotRoles.Defend,
+                HomeX = position.X,
+                HomeY = position.Y,
+            },
             new PatrolBehavior(),
             new TankFacing { Direction = 16, TurnCooldownSeconds = 0f },
             new Health { Current = GameConstants.MaxHealth, Max = GameConstants.MaxHealth },
@@ -470,6 +477,60 @@ public sealed class GameSimulation : IDisposable
             new CityAffiliation { CityId = cityId },
             new TankStatus());
     }
+
+    /// <summary>
+    /// Online AI City tank — network-synced player entity driven by <see cref="BotController"/>.
+    /// </summary>
+    public Entity CreateNetworkBotPlayer(
+        Vector2 position,
+        byte playerId,
+        int cityId,
+        bool isMayor,
+        byte botRole,
+        float aggroRangePixels = 2400f)
+    {
+        var entity = CreateNetworkPlayerEntity(position, playerId, cityId);
+        _world.Add(
+            entity,
+            new BotController
+            {
+                AggroRangePixels = aggroRangePixels,
+                Role = botRole,
+                HomeX = position.X,
+                HomeY = position.Y,
+            });
+        SetNetworkPlayerMayor(playerId, isMayor);
+        return entity;
+    }
+
+    public void SetNetworkBotGoal(byte playerId, Vector2 goal)
+    {
+        if (!TryGetNetworkPlayerEntity(playerId, out var entity) || !_world.Has<BotController>(entity))
+        {
+            return;
+        }
+
+        ref var bot = ref _world.Get<BotController>(entity);
+        bot.GoalX = goal.X;
+        bot.GoalY = goal.Y;
+        bot.HasGoal = true;
+    }
+
+    public bool TryConsumeBotNetworkShot(out ServerShotPacket shot)
+    {
+        if (_pendingBotShots.Count == 0)
+        {
+            shot = default;
+            return false;
+        }
+
+        shot = _pendingBotShots[0];
+        _pendingBotShots.RemoveAt(0);
+        return true;
+    }
+
+    private void ReportBotNetworkShot(byte playerId, ushort x, ushort y, byte direction) =>
+        _pendingBotShots.Add(new ServerShotPacket(playerId, x, y, direction, type: 0));
 
     public Entity CreatePatrolEntity(Vector2 position, Vector2 velocity, int spriteSourceX = 0)
     {
@@ -700,7 +761,11 @@ public sealed class GameSimulation : IDisposable
         MovementSystem.UpdateNonBullets(_world, deltaSeconds);
         AdvanceAllWeaponTimers(deltaSeconds);
         WeaponSystem.Update(_world, deltaSeconds, TryResolveCityBuildForPlayer, _audioBuffer, ReportLocalShot);
-        BotAiSystem.UpdateFiring(_world, deltaSeconds, _audioBuffer);
+        BotAiSystem.UpdateFiring(
+            _world,
+            deltaSeconds,
+            _audioBuffer,
+            reportNetworkShot: ReportBotNetworkShot);
         ItemDropSystem.Update(_world, _tileMap, _audioBuffer, SuppressLocalItemDrops, TryResolveCityBuildForPlayer);
         BombSystem.Update(_world, deltaSeconds, _audioBuffer, CreateBombSimulationHooks());
         ItemAnimationSystem.Update(_world, deltaSeconds);

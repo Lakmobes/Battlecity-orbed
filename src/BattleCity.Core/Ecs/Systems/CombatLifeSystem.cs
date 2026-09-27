@@ -63,7 +63,10 @@ public static class CombatLifeSystem
                         return;
                     }
 
-                    if (isNetworkPlayer && !networkPlayersUseLocalHealthDeath)
+                    // Clients wait for smDeath for remote humans. Authoritative bots have no
+                    // client to report cmDeath — always resolve their HP<=0 death locally.
+                    var isScriptedBot = world.Has<BotController>(entity);
+                    if (isNetworkPlayer && !networkPlayersUseLocalHealthDeath && !isScriptedBot)
                     {
                         return;
                     }

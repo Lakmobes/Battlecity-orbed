@@ -158,6 +158,11 @@ public sealed class EntityRenderer
                     }
                 }
 
+                if (world.Has<Health>(entity) && world.Get<Health>(entity).Current <= 0)
+                {
+                    return;
+                }
+
                 var drawTransform = transform;
                 if (world.Has<PlacedItemRef>(entity))
                 {

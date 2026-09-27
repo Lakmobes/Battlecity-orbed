@@ -198,6 +198,135 @@ public sealed class AccountDatabase : IDisposable
         }
     }
 
+    public bool TryGetAccountForAdminEdit(string username, out AccountRecord? account)
+    {
+        account = null;
+        username = NormalizeUsername(username);
+        if (string.IsNullOrEmpty(username))
+        {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            using var query = _connection.CreateCommand();
+            query.CommandText = """
+                SELECT id, username, display_name, town, email, state, points, deaths, is_admin
+                FROM accounts
+                WHERE username = $username
+                LIMIT 1;
+                """;
+            query.Parameters.AddWithValue("$username", username);
+            using var reader = query.ExecuteReader();
+            if (!reader.Read())
+            {
+                return false;
+            }
+
+            account = new AccountRecord
+            {
+                Id = reader.GetInt64(0),
+                Username = reader.GetString(1),
+                DisplayName = reader.GetString(2),
+                Town = reader.GetString(3),
+                Email = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                State = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                Points = reader.GetInt32(6),
+                Deaths = reader.GetInt32(7),
+                IsAdmin = reader.GetInt32(8) != 0,
+            };
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Applies admin account edits. Empty <paramref name="newPassword"/> keeps the current hash.
+    /// </summary>
+    public bool TryApplyAdminEdit(
+        string username,
+        string? newPassword,
+        string displayName,
+        string town,
+        string email,
+        string state,
+        int points,
+        int deaths,
+        bool isAdmin)
+    {
+        username = NormalizeUsername(username);
+        if (string.IsNullOrEmpty(username) || !IsValidUsername(username))
+        {
+            return false;
+        }
+
+        points = Math.Max(0, points);
+        deaths = Math.Max(0, deaths);
+        displayName = string.IsNullOrWhiteSpace(displayName) ? username : displayName.Trim();
+        town = string.IsNullOrWhiteSpace(town) ? "Buenos Aires" : town.Trim();
+        email = (email ?? string.Empty).Trim();
+        state = (state ?? string.Empty).Trim();
+        // Username "admin" stays admin unless explicitly demoted via Host (legacy convenience).
+        if (string.Equals(username, "admin", StringComparison.OrdinalIgnoreCase))
+        {
+            isAdmin = true;
+        }
+
+        lock (_sync)
+        {
+            if (!string.IsNullOrWhiteSpace(newPassword))
+            {
+                var (hash, salt) = PasswordHasher.HashPassword(newPassword.Trim());
+                using var updatePass = _connection.CreateCommand();
+                updatePass.CommandText = """
+                    UPDATE accounts SET
+                        password_hash = $hash,
+                        password_salt = $salt,
+                        display_name = $displayName,
+                        town = $town,
+                        email = $email,
+                        state = $state,
+                        points = $points,
+                        deaths = $deaths,
+                        is_admin = $isAdmin
+                    WHERE username = $username;
+                    """;
+                updatePass.Parameters.AddWithValue("$hash", hash);
+                updatePass.Parameters.AddWithValue("$salt", salt);
+                updatePass.Parameters.AddWithValue("$displayName", displayName);
+                updatePass.Parameters.AddWithValue("$town", town);
+                updatePass.Parameters.AddWithValue("$email", email);
+                updatePass.Parameters.AddWithValue("$state", state);
+                updatePass.Parameters.AddWithValue("$points", points);
+                updatePass.Parameters.AddWithValue("$deaths", deaths);
+                updatePass.Parameters.AddWithValue("$isAdmin", isAdmin ? 1 : 0);
+                updatePass.Parameters.AddWithValue("$username", username);
+                return updatePass.ExecuteNonQuery() > 0;
+            }
+
+            using var update = _connection.CreateCommand();
+            update.CommandText = """
+                UPDATE accounts SET
+                    display_name = $displayName,
+                    town = $town,
+                    email = $email,
+                    state = $state,
+                    points = $points,
+                    deaths = $deaths,
+                    is_admin = $isAdmin
+                WHERE username = $username;
+                """;
+            update.Parameters.AddWithValue("$displayName", displayName);
+            update.Parameters.AddWithValue("$town", town);
+            update.Parameters.AddWithValue("$email", email);
+            update.Parameters.AddWithValue("$state", state);
+            update.Parameters.AddWithValue("$points", points);
+            update.Parameters.AddWithValue("$deaths", deaths);
+            update.Parameters.AddWithValue("$isAdmin", isAdmin ? 1 : 0);
+            update.Parameters.AddWithValue("$username", username);
+            return update.ExecuteNonQuery() > 0;
+        }
+    }
+
     public void IncrementDeaths(string username)
     {
         username = NormalizeUsername(username);

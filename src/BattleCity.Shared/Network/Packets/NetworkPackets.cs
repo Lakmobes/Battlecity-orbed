@@ -1346,3 +1346,198 @@ public readonly struct ServerBanPacket
         bytes.AsSpan(0, Math.Min(bytes.Length, destination.Length)).CopyTo(destination);
     }
 }
+
+/// <summary>Legacy <c>cmStartingCity</c> / <c>cmChangeStartingCity</c> / <c>smStartingCity</c>.</summary>
+public readonly struct StartingCityPacket
+{
+    public const int Size = 4;
+
+    public StartingCityPacket(int cityId) => CityId = cityId;
+
+    public int CityId { get; }
+
+    public static StartingCityPacket Read(ReadOnlySpan<byte> buffer) =>
+        new(BinaryPrimitives.ReadInt32LittleEndian(buffer));
+
+    public void Write(Span<byte> buffer) =>
+        BinaryPrimitives.WriteInt32LittleEndian(buffer, CityId);
+}
+
+/// <summary>Legacy <c>cmAdminEditRequest</c> — request account row by username.</summary>
+public readonly struct ClientAdminEditRequestPacket
+{
+    public const int Size = 15;
+
+    public ClientAdminEditRequestPacket(string username) => Username = username;
+
+    public string Username { get; }
+
+    public static ClientAdminEditRequestPacket Read(ReadOnlySpan<byte> buffer) =>
+        new(ReadFixedAscii(buffer.Slice(0, Size)));
+
+    public void Write(Span<byte> buffer) => WriteFixedAscii(buffer.Slice(0, Size), Username);
+
+    private static string ReadFixedAscii(ReadOnlySpan<byte> buffer)
+    {
+        var length = buffer.IndexOf((byte)0);
+        if (length < 0)
+        {
+            length = buffer.Length;
+        }
+
+        return Encoding.ASCII.GetString(buffer[..length]);
+    }
+
+    private static void WriteFixedAscii(Span<byte> destination, string value)
+    {
+        destination.Clear();
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        var bytes = Encoding.ASCII.GetBytes(value);
+        bytes.AsSpan(0, Math.Min(bytes.Length, destination.Length)).CopyTo(destination);
+    }
+}
+
+/// <summary>
+/// Legacy <c>sCMAdminEdit</c> / <c>smAdminEdit</c> layout.
+/// Remake persists User/Pass/Email/FullName/Town/State/Points/Deaths/IsAdmin;
+/// other legacy fields round-trip as zeros.
+/// </summary>
+public readonly struct AdminEditPacket
+{
+    public const int Size = 171;
+
+    public AdminEditPacket(
+        string username,
+        string password,
+        string email,
+        string fullName,
+        string town,
+        string state,
+        int points,
+        int monthlyPoints,
+        int deaths,
+        int orbs,
+        int assists,
+        int playerType,
+        byte member = 0,
+        byte red = 0,
+        byte green = 0,
+        byte blue = 0,
+        int rentalCity = 0)
+    {
+        Username = username;
+        Password = password;
+        Email = email;
+        FullName = fullName;
+        Town = town;
+        State = state;
+        Points = points;
+        MonthlyPoints = monthlyPoints;
+        Deaths = deaths;
+        Orbs = orbs;
+        Assists = assists;
+        PlayerType = playerType;
+        Member = member;
+        Red = red;
+        Green = green;
+        Blue = blue;
+        RentalCity = rentalCity;
+    }
+
+    public string Username { get; }
+    public string Password { get; }
+    public string Email { get; }
+    public string FullName { get; }
+    public string Town { get; }
+    public string State { get; }
+    public int Points { get; }
+    public int MonthlyPoints { get; }
+    public int Deaths { get; }
+    public int Orbs { get; }
+    public int Assists { get; }
+    /// <summary>Legacy <c>IsAdmin</c> / playerType.</summary>
+    public int PlayerType { get; }
+    public byte Member { get; }
+    public byte Red { get; }
+    public byte Green { get; }
+    public byte Blue { get; }
+    public int RentalCity { get; }
+
+    public static AdminEditPacket Read(ReadOnlySpan<byte> buffer)
+    {
+        var offset = 0;
+        var user = ReadFixedAscii(buffer.Slice(offset, 15)); offset += 15;
+        var pass = ReadFixedAscii(buffer.Slice(offset, 15)); offset += 15;
+        var email = ReadFixedAscii(buffer.Slice(offset, 50)); offset += 50;
+        var fullName = ReadFixedAscii(buffer.Slice(offset, 20)); offset += 20;
+        var town = ReadFixedAscii(buffer.Slice(offset, 15)); offset += 15;
+        var state = ReadFixedAscii(buffer.Slice(offset, 15)); offset += 15;
+        var points = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(offset)); offset += 4;
+        var monthly = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(offset)); offset += 4;
+        var deaths = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(offset)); offset += 4;
+        var orbs = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(offset)); offset += 4;
+        var assists = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(offset)); offset += 4;
+        var playerType = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(offset)); offset += 4;
+        var member = buffer[offset++];
+        var red = buffer[offset++];
+        var green = buffer[offset++];
+        var blue = buffer[offset++];
+        offset += 9; // Tank..Tank9 unused in remake
+        var rental = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(offset));
+        return new AdminEditPacket(
+            user, pass, email, fullName, town, state,
+            points, monthly, deaths, orbs, assists, playerType,
+            member, red, green, blue, rental);
+    }
+
+    public void Write(Span<byte> buffer)
+    {
+        buffer.Clear();
+        var offset = 0;
+        WriteFixedAscii(buffer.Slice(offset, 15), Username); offset += 15;
+        WriteFixedAscii(buffer.Slice(offset, 15), Password); offset += 15;
+        WriteFixedAscii(buffer.Slice(offset, 50), Email); offset += 50;
+        WriteFixedAscii(buffer.Slice(offset, 20), FullName); offset += 20;
+        WriteFixedAscii(buffer.Slice(offset, 15), Town); offset += 15;
+        WriteFixedAscii(buffer.Slice(offset, 15), State); offset += 15;
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(offset), Points); offset += 4;
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(offset), MonthlyPoints); offset += 4;
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(offset), Deaths); offset += 4;
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(offset), Orbs); offset += 4;
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(offset), Assists); offset += 4;
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(offset), PlayerType); offset += 4;
+        buffer[offset++] = Member;
+        buffer[offset++] = Red;
+        buffer[offset++] = Green;
+        buffer[offset++] = Blue;
+        offset += 9; // tanks left zero
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(offset), RentalCity);
+    }
+
+    private static string ReadFixedAscii(ReadOnlySpan<byte> buffer)
+    {
+        var length = buffer.IndexOf((byte)0);
+        if (length < 0)
+        {
+            length = buffer.Length;
+        }
+
+        return Encoding.ASCII.GetString(buffer[..length]);
+    }
+
+    private static void WriteFixedAscii(Span<byte> destination, string value)
+    {
+        destination.Clear();
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        var bytes = Encoding.ASCII.GetBytes(value);
+        bytes.AsSpan(0, Math.Min(bytes.Length, destination.Length)).CopyTo(destination);
+    }
+}

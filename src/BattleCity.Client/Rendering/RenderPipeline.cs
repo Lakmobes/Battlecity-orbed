@@ -17,6 +17,7 @@ public sealed class RenderPipeline
     private readonly OrbedOverlayRenderer _orbedOverlay;
     private readonly ResearchCompleteOverlayRenderer _researchCompleteOverlay;
     private readonly ChatOverlayRenderer _chatOverlay;
+    private readonly TankNameplateRenderer _nameplates;
 
     public RenderPipeline(
         TerrainRenderer terrain,
@@ -28,7 +29,8 @@ public sealed class RenderPipeline
         DeathOverlayRenderer deathOverlay,
         OrbedOverlayRenderer orbedOverlay,
         ResearchCompleteOverlayRenderer researchCompleteOverlay,
-        ChatOverlayRenderer chatOverlay)
+        ChatOverlayRenderer chatOverlay,
+        TankNameplateRenderer nameplates)
     {
         _terrain = terrain;
         _entities = entities;
@@ -40,6 +42,7 @@ public sealed class RenderPipeline
         _orbedOverlay = orbedOverlay;
         _researchCompleteOverlay = researchCompleteOverlay;
         _chatOverlay = chatOverlay;
+        _nameplates = nameplates;
     }
 
     public void DrawWorld(SpriteBatch spriteBatch, in RenderContext context)
@@ -51,6 +54,7 @@ public sealed class RenderPipeline
         _buildingOverlays.Draw(spriteBatch, context.World, context.CityBuild);
         _buildPreview.Draw(spriteBatch, in context);
         _entities.DrawActors(spriteBatch);
+        _nameplates.Draw(spriteBatch, in context);
     }
 
     public void DrawScreen(SpriteBatch spriteBatch, in RenderContext context)

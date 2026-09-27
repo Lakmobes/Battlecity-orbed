@@ -17,6 +17,9 @@ public enum ChatCommandKind
     Unban,
     News,
     SetNews,
+    StartingCity,
+    Account,
+    EditAccount,
 }
 
 public readonly struct ParsedChatCommand
@@ -138,6 +141,32 @@ public static class ChatCommandParser
         if (line.Equals("/setnews", StringComparison.OrdinalIgnoreCase))
         {
             return new ParsedChatCommand(ChatCommandKind.SetNews, string.Empty);
+        }
+
+        if (line.Equals("/startcity", StringComparison.OrdinalIgnoreCase)
+            || line.Equals("/startingcity", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ParsedChatCommand(ChatCommandKind.StartingCity, string.Empty);
+        }
+
+        if (line.StartsWith("/startcity ", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ParsedChatCommand(ChatCommandKind.StartingCity, line[11..].Trim());
+        }
+
+        if (line.StartsWith("/startingcity ", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ParsedChatCommand(ChatCommandKind.StartingCity, line[14..].Trim());
+        }
+
+        if (line.StartsWith("/account ", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ParsedChatCommand(ChatCommandKind.Account, line[9..].Trim());
+        }
+
+        if (line.StartsWith("/editaccount ", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ParsedChatCommand(ChatCommandKind.EditAccount, line[13..].Trim());
         }
 
         return new ParsedChatCommand(ChatCommandKind.Normal, line);
