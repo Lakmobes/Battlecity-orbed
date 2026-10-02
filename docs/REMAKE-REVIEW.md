@@ -15,11 +15,11 @@ The four playtest fixes from this pass are at the top. The rest is the deeper au
 
 - The original item list calls it **Bomb** (`Structs.cpp` `ItemList`).
 - The original build menu calls the building **Bazooka Research / Bazooka Factory** (types 401 / 101). That building produces Bombs.
-- The remake build menu currently says **Bomb Research / Bomb Factory**, so the label matches the item name.
-- An older header (`CConstants.h`) used the word “Bazooka” for the **Laser** building instead. The remake follows `Structs.cpp`: Laser factory is the Cougar missile, Bazooka factory is the Bomb.
+- The remake build menu says **Bomb Research / Bomb Factory**. That stays the bomb, and it keeps the current bomb rules.
+- The building that makes the Cougar missile is **Missile Research / Missile Factory** (type 100). The tank’s normal shot is still the laser.
 - The original build menu called the cloak building **Time Bomb Research / Time Bomb Factory**. The remake menu says **Cloak**.
 
-Confirm: keep the menu label **Bomb**, or change it back to **Bazooka**?
+Bomb stays Bomb. The old “Bazooka Factory” label is not coming back.
 
 ## 2. Kill points
 
@@ -90,7 +90,7 @@ These were already chosen before this pass. Say if any of them should go back to
 | Compass | One 8-way arrow toward the city index formula | Arrow toward your command center’s drive pad, plus a second arrow toward the nearest city you can orb |
 | Home / respawn point | Join stored `CityX` / `CityY` from the city-index formula | Command center drive pad |
 | New cities | Each city starts with a command center only | Same online. Offline still uses the demo city layout |
-| Cougar missile | Produced on the Laser factory bay and picked up | Spawn still grants **1** if the Laser factory exists. Extra missiles now sit on the bay again (they are not auto-inventory) |
+| Cougar missile | Produced on the missile factory bay and picked up | Spawn still grants **1** if the Missile factory exists. Extra missiles stay on the bay (they are not auto-inventory) |
 | Cloak / flare without the 10 second bar | You carried a stack (max 4) and each use consumed one | While the factory stands, use does not consume the stack. The bar refills after 10 seconds. Inventory count stays at 1 |
 | Chat type size | Bitmap font at the original UI scale | In-game chat and meeting-room chat draw at **85%** of the UI font. The rest of the HUD is unchanged |
 | Minimap city names | No names on the minimap | Names drawn larger, in white (gold for your city), with a black outline |

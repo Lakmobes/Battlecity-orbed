@@ -18,8 +18,8 @@ public static class BuildingCatalog
     [
         "Hospital",
         "House",
-        "Laser Research",
-        "Laser Factory",
+        "Missile Research",
+        "Missile Factory",
         "Turret Research",
         "Turret Factory",
         "Cloak Research",

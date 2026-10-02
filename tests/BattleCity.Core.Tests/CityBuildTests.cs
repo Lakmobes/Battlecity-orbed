@@ -281,7 +281,7 @@ public sealed class CityBuildTests
 
         ref var complete = ref simulation.World.Get<CityResearchCompleteState>(player);
         Assert.True(complete.ShowOverlay);
-        Assert.Contains("Laser Factory", complete.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Missile Factory", complete.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -346,7 +346,7 @@ public sealed class CityBuildTests
         }
 
         Assert.Equal(-1, build.ResearchStatus[0]);
-        Assert.Equal(1, build.CanBuild[3]); // Laser Factory unlocked
+        Assert.Equal(1, build.CanBuild[3]); // Missile Factory unlocked
         Assert.Equal(1, build.CanBuild[6]); // Time Bomb (Cloak) Research unlocked via tree
         Assert.Equal(1, build.CanBuild[8]); // MedKit Research unlocked via tree
     }

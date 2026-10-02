@@ -14,7 +14,7 @@ public static class CityBuildInitializer
     {
         Array.Clear(build.CanBuild, 0, build.CanBuild.Length);
         build.CanBuild[1] = 1; // House
-        build.CanBuild[2] = 1; // Laser Research
+        build.CanBuild[2] = 1; // Missile Research
         build.CanBuild[4] = 1; // Turret Research
     }
 

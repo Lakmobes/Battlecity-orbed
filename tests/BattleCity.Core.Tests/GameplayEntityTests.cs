@@ -512,7 +512,7 @@ public class GameplayEntityTests
         Assert.Equal(0, empty.Cloak);
 
         var build = new CityBuildState();
-        build.CanBuild[BuildingCatalog.GetFactoryMenuIndex(0)] = 2; // Laser Factory
+        build.CanBuild[BuildingCatalog.GetFactoryMenuIndex(0)] = 2; // Missile Factory
         build.CanBuild[BuildingCatalog.GetFactoryMenuIndex(EconomyConstants.CloakResearchTreeIndex)] = 2;
         build.CanBuild[BuildingCatalog.GetFactoryMenuIndex(EconomyConstants.FlareResearchTreeIndex)] = 2;
 
