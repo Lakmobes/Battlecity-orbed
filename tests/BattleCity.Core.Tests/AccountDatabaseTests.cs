@@ -110,4 +110,42 @@ public sealed class AccountDatabaseTests : IDisposable
         Assert.Equal(4, account.Deaths);
         Assert.True(account.IsAdmin);
     }
+
+    [Fact]
+    public void AdjustPoints_RollsMonthAndKeepsSeasonUntilReset()
+    {
+        Assert.Equal(AccountCreateResult.Created, _accounts.TryCreateAccount(
+            "Ace", "secret123", "Buenos Aires", string.Empty, "Ace", string.Empty));
+        Assert.Equal(AccountCreateResult.Created, _accounts.TryCreateAccount(
+            "Bee", "secret123", "Buenos Aires", string.Empty, "Bee", string.Empty));
+
+        _accounts.AdjustPoints("Ace", 10, "2026-09");
+        _accounts.AdjustPoints("Ace", 5, "2026-09");
+        _accounts.AdjustPoints("Bee", 4, "2026-09");
+
+        var september = _accounts.ListTopByPoints("monthly_points", 10);
+        Assert.Equal(["Ace", "Bee"], september.Select(account => account.Username).ToArray());
+        Assert.Equal(15, september[0].MonthlyPoints);
+        Assert.Equal(15, september[0].Points);
+        Assert.Equal(15, september[0].SeasonPoints);
+
+        _accounts.AdjustPoints("Ace", 3, "2026-10");
+        var october = _accounts.ListTopByPoints("points", 10).Single(account => account.Username == "Ace");
+        Assert.Equal(18, october.Points);
+        Assert.Equal(3, october.MonthlyPoints);
+        Assert.Equal(18, october.SeasonPoints);
+
+        _accounts.StartSeason("  Spring Cup  ");
+        Assert.Equal("Spring Cup", _accounts.SeasonName);
+        var reset = _accounts.ListTopByPoints("points", 10).Single(account => account.Username == "Ace");
+        Assert.Equal(0, reset.SeasonPoints);
+        Assert.Equal(18, reset.Points);
+        Assert.Equal(3, reset.MonthlyPoints);
+        Assert.Empty(_accounts.ListTopByPoints("season_points", 10));
+
+        _accounts.AdjustPoints("Ace", -1000, "2026-10");
+        Assert.DoesNotContain(
+            _accounts.ListTopByPoints("points", 10),
+            account => account.Username == "Ace");
+    }
 }

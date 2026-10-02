@@ -4,8 +4,10 @@ using Arch.Core;
 
 using BattleCity.Core.Ai;
 using BattleCity.Core.Audio;
+using BattleCity.Core.Collision;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Gameplay;
+using BattleCity.Core.Maps;
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
 
@@ -20,7 +22,7 @@ public static class BotAiSystem
     private static readonly QueryDescription BotQuery =
         new QueryDescription().WithAll<BotController, Transform2D, TankFacing, Velocity, CityAffiliation, Health, TankLifeState, TankStatus, SpriteRef>();
 
-    public static void UpdateMovement(World world, float deltaSeconds)
+    public static void UpdateMovement(World world, float deltaSeconds, TileMap? tileMap = null)
     {
         world.Query(
             in BotQuery,
@@ -33,6 +35,7 @@ public static class BotAiSystem
                 }
 
                 facing.TurnCooldownSeconds = Math.Max(0f, facing.TurnCooldownSeconds - deltaSeconds);
+                bot.DetourSeconds = Math.Max(0f, bot.DetourSeconds - deltaSeconds);
 
                 var botCenter = TurretTargeting.GetTankCenter(transform.Position);
                 var hasTarget = TurretTargeting.TryFindNearestEnemy(
@@ -63,6 +66,20 @@ public static class BotAiSystem
                 }
 
                 var desiredDirection = TurretTargeting.WorldPositionToLegacyDirection(botCenter, steerTarget);
+                if (bot.DetourSeconds > 0f)
+                {
+                    desiredDirection = bot.DetourDirection;
+                }
+                else if (!CanDrive(tileMap, transform.Position, InputSystem.ToTravelDirection(desiredDirection)))
+                {
+                    if (TryFindOpenFacing(tileMap, transform.Position, desiredDirection, out var detour))
+                    {
+                        bot.DetourDirection = detour;
+                        bot.DetourSeconds = 0.8f;
+                        desiredDirection = detour;
+                    }
+                }
+
                 TryTurnToward(ref facing, desiredDirection, deltaSeconds);
 
                 var distance = Vector2.Distance(botCenter, steerTarget);
@@ -175,5 +192,52 @@ public static class BotAiSystem
         }
 
         facing.TurnCooldownSeconds = TankFacing.TurnIntervalSeconds;
+    }
+
+    private static bool CanDrive(TileMap? map, Vector2 tankPosition, int travelDirection)
+    {
+        if (map is null)
+        {
+            return true;
+        }
+
+        var velocity = InputSystem.ComputeLegacyVelocity(travelDirection, 1, GameConstants.MovementSpeedPlayer);
+        if (velocity.LengthSquared() < 1f)
+        {
+            return false;
+        }
+
+        var ahead = tankPosition + (Vector2.Normalize(velocity) * GameConstants.TileSize);
+        var tileX = (int)((ahead.X + (GameConstants.TileSize / 2f)) / GameConstants.TileSize);
+        var tileY = (int)((ahead.Y + (GameConstants.TileSize / 2f)) / GameConstants.TileSize);
+        if (tileX < 0 || tileY < 0 || tileX >= TileMap.Size || tileY >= TileMap.Size)
+        {
+            return false;
+        }
+
+        return !TerrainCollision.IsBlockingTile(map.Terrain[tileX, tileY]);
+    }
+
+    private static bool TryFindOpenFacing(TileMap? map, Vector2 tankPosition, int desiredFacing, out int facing)
+    {
+        facing = desiredFacing;
+        if (map is null)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<int> offsets = [2, -2, 4, -4, 6, -6, 8, -8, 10, -10];
+        foreach (var offset in offsets)
+        {
+            var candidate = desiredFacing + offset;
+            candidate = (candidate % TankFacing.DirectionCount + TankFacing.DirectionCount) % TankFacing.DirectionCount;
+            if (CanDrive(map, tankPosition, InputSystem.ToTravelDirection(candidate)))
+            {
+                facing = candidate;
+                return true;
+            }
+        }
+
+        return false;
     }
 }

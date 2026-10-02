@@ -14,6 +14,11 @@ public struct BotController
     public float GoalX;
     public float GoalY;
     public bool HasGoal;
+
+    /// <summary>Facing used while steering around lava, rock, or a wall.</summary>
+    public int DetourDirection;
+
+    public float DetourSeconds;
 }
 
 public static class BotRoles

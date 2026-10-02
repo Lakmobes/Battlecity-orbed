@@ -215,27 +215,25 @@ public sealed class MiniMapRenderer
                 var name = CityCatalog.GetName(building.CityId);
                 var isOwn = building.GridAnchorX == homeCommandCenterGridX
                     && building.GridAnchorY == homeCommandCenterGridY;
-                var color = isOwn ? OwnCcColor : OtherCcColor;
-                var scale = new Vector2(0.45f, 0.45f);
+                var color = isOwn ? new Color(255, 236, 140) : Color.White;
+                var scale = new Vector2(0.72f, 0.72f);
                 var size = _font.MeasureString(name) * scale;
                 var screenX = mapCenter.X + (footprintCenterX - centerTileX) * tilePixelSize - size.X / 2f;
                 var screenY = mapCenter.Y + (footprintCenterY - centerTileY) * tilePixelSize + tilePixelSize * 1.5f;
-                if (screenX < clipBounds.Left || screenY < clipBounds.Top
-                    || screenX + size.X > clipBounds.Right || screenY + size.Y > clipBounds.Bottom)
+                var centerX = screenX + size.X / 2f;
+                var centerY = screenY + size.Y / 2f;
+                if (centerX < clipBounds.Left || centerY < clipBounds.Top
+                    || centerX > clipBounds.Right || centerY > clipBounds.Bottom)
                 {
                     return;
                 }
 
-                spriteBatch.DrawString(
-                    _font,
-                    name,
-                    new Vector2(screenX + 1f, screenY + 1f),
-                    new Color(0, 0, 0, 180),
-                    0f,
-                    Vector2.Zero,
-                    scale,
-                    SpriteEffects.None,
-                    0f);
+                var outline = new Color(0, 0, 0, 230);
+                DrawCityName(spriteBatch, name, screenX - 1f, screenY, outline, scale);
+                DrawCityName(spriteBatch, name, screenX + 1f, screenY, outline, scale);
+                DrawCityName(spriteBatch, name, screenX, screenY - 1f, outline, scale);
+                DrawCityName(spriteBatch, name, screenX, screenY + 1f, outline, scale);
+
                 spriteBatch.DrawString(
                     _font,
                     name,
@@ -247,6 +245,25 @@ public sealed class MiniMapRenderer
                     SpriteEffects.None,
                     0f);
             });
+    }
+
+    private void DrawCityName(SpriteBatch spriteBatch, string name, float x, float y, Color color, Vector2 scale)
+    {
+        if (_font is null)
+        {
+            return;
+        }
+
+        spriteBatch.DrawString(
+            _font,
+            name,
+            new Vector2(x, y),
+            color,
+            0f,
+            Vector2.Zero,
+            scale,
+            SpriteEffects.None,
+            0f);
     }
 
     private void DrawBuildingMarker(

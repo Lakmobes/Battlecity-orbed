@@ -70,4 +70,6 @@ public enum ServerMessageId : byte
     Cloak = 63,
     AutoBuild = 64,
     StartingCity = 65,
+    /// <summary>Top-10 board: overall, monthly, or the host's current season.</summary>
+    RankBoard = 66,
 }

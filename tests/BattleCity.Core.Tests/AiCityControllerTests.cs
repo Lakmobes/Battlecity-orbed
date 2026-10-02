@@ -12,7 +12,30 @@ namespace BattleCity.Core.Tests;
 public class AiCityControllerTests
 {
     [Fact]
-    public void TryEnable_SpawnsMayorAndSoldiersInFreeCity()
+    public void Sync_DoesNotSpawnUntilAHumanIsInGame()
+    {
+        using var simulation = CreateMpSimulation();
+        if (simulation is null)
+        {
+            return;
+        }
+
+        var controller = new AiCityController();
+        controller.Arm(1, AiCityStance.Balanced);
+        var change = controller.Sync(
+            simulation,
+            new CityRegistry(),
+            new CityMayorRegistry(),
+            () => 1,
+            _ => { },
+            Array.Empty<(byte, byte, bool)>());
+
+        Assert.False(controller.IsActive);
+        Assert.Empty(change.Spawned);
+    }
+
+    [Fact]
+    public void Sync_SpawnsMayorAndSoldiersWhenAHumanIsInGame()
     {
         using var simulation = CreateMpSimulation();
         if (simulation is null)
@@ -25,59 +48,28 @@ public class AiCityControllerTests
         var mayors = new CityMayorRegistry();
         var controller = new AiCityController();
         var nextId = (byte)1;
+        controller.Arm(1, AiCityStance.Balanced);
 
-        Assert.True(controller.TryEnable(
+        var change = controller.Sync(
             simulation,
             cities,
             mayors,
-            allocatePlayerId: () => nextId++,
-            releasePlayerId: _ => { },
-            humanPlayers: Array.Empty<(byte, byte, bool)>(),
-            out var message));
+            () => nextId++,
+            _ => { },
+            [(PlayerId: 200, CityId: 0, InGame: true)]);
 
-        Assert.Contains("AI City enabled", message);
-        Assert.True(controller.IsEnabled);
+        Assert.NotNull(change.Message);
+        Assert.Contains("AI cities active", change.Message);
+        Assert.True(controller.IsActive);
         Assert.Equal(AiCityController.DefaultSoldierCount + 1, controller.Bots.Count);
-        Assert.True(mayors.HasMayor(controller.CityId));
+        Assert.Single(controller.CityIds);
+        Assert.True(mayors.HasMayor(controller.CityIds[0]));
         Assert.Contains(controller.Bots, bot => bot.IsMayor && bot.Role == BotRoles.Defend);
         Assert.Contains(controller.Bots, bot => !bot.IsMayor && bot.Role == BotRoles.Attack);
-
-        foreach (var bot in controller.Bots)
-        {
-            Assert.True(simulation.TryGetNetworkPlayerSnapshot(bot.PlayerId, out _));
-            Assert.True(simulation.TryGetNetworkPlayerEntity(bot.PlayerId, out var entity));
-            Assert.True(simulation.World.Has<BotController>(entity));
-        }
     }
 
     [Fact]
-    public void TryEnable_FailsWhenAlreadyEnabled()
-    {
-        using var simulation = CreateMpSimulation();
-        if (simulation is null)
-        {
-            return;
-        }
-
-        var cities = new CityRegistry();
-        cities.SetStartingCityForTests(27);
-        var mayors = new CityMayorRegistry();
-        var controller = new AiCityController();
-        var nextId = (byte)1;
-        byte Allocate() => nextId++;
-
-        Assert.True(controller.TryEnable(
-            simulation, cities, mayors, Allocate, _ => { },
-            Array.Empty<(byte, byte, bool)>(), out _));
-
-        Assert.False(controller.TryEnable(
-            simulation, cities, mayors, Allocate, _ => { },
-            Array.Empty<(byte, byte, bool)>(), out var message));
-        Assert.Contains("already enabled", message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Disable_RemovesBotsAndMayor()
+    public void Sync_SpawnsMultipleCitiesAndStandsDownWhenHumansLeave()
     {
         using var simulation = CreateMpSimulation();
         if (simulation is null)
@@ -91,26 +83,50 @@ public class AiCityControllerTests
         var controller = new AiCityController();
         var nextId = (byte)1;
         var released = new List<byte>();
+        controller.Arm(2, AiCityStance.LeanDefense);
 
-        Assert.True(controller.TryEnable(
+        controller.Sync(
             simulation, cities, mayors,
             () => nextId++,
             released.Add,
-            Array.Empty<(byte, byte, bool)>(),
-            out _));
+            [(200, 0, true)]);
 
-        var cityId = controller.CityId;
-        var botIds = controller.Bots.Select(bot => bot.PlayerId).ToList();
+        Assert.Equal(2, controller.CityIds.Distinct().Count());
+        Assert.All(controller.Bots, bot => Assert.Equal(BotRoles.Defend, bot.Role));
 
-        controller.Disable(simulation, mayors, released.Add);
+        var change = controller.Sync(
+            simulation, cities, mayors,
+            () => nextId++,
+            released.Add,
+            Array.Empty<(byte, byte, bool)>());
 
-        Assert.False(controller.IsEnabled);
-        Assert.False(mayors.HasMayor(cityId));
-        Assert.Equal(botIds.Count, released.Count);
-        foreach (var id in botIds)
+        Assert.False(controller.IsActive);
+        Assert.NotEmpty(change.Removed);
+        Assert.Contains("standing down", change.Message);
+    }
+
+    [Fact]
+    public void Sync_LeanOffenseSendsSoldiersToAttack()
+    {
+        using var simulation = CreateMpSimulation();
+        if (simulation is null)
         {
-            Assert.False(simulation.TryGetNetworkPlayerSnapshot(id, out _));
+            return;
         }
+
+        var cities = new CityRegistry();
+        cities.SetStartingCityForTests(27);
+        var controller = new AiCityController();
+        var nextId = (byte)1;
+        controller.Arm(1, AiCityStance.LeanOffense);
+        controller.Sync(
+            simulation, cities, new CityMayorRegistry(),
+            () => nextId++,
+            _ => { },
+            [(200, 0, true)]);
+
+        Assert.All(controller.Bots.Where(bot => bot.IsMayor), bot => Assert.Equal(BotRoles.Defend, bot.Role));
+        Assert.All(controller.Bots.Where(bot => !bot.IsMayor), bot => Assert.Equal(BotRoles.Attack, bot.Role));
     }
 
     [Fact]
@@ -124,19 +140,17 @@ public class AiCityControllerTests
 
         var cities = new CityRegistry();
         cities.SetStartingCityForTests(27);
-        var mayors = new CityMayorRegistry();
         var controller = new AiCityController();
         var nextId = (byte)1;
-
-        Assert.True(controller.TryEnable(
-            simulation, cities, mayors,
+        controller.Arm(1, AiCityStance.Balanced);
+        controller.Sync(
+            simulation, cities, new CityMayorRegistry(),
             () => nextId++,
             _ => { },
-            Array.Empty<(byte, byte, bool)>(),
-            out _));
+            [(200, 0, true)]);
 
-        var humanId = nextId++;
-        var humanCity = (byte)((controller.CityId + 1) % 64);
+        var humanId = (byte)201;
+        var humanCity = (byte)((controller.CityIds[0] + 1) % 64);
         simulation.CreateNetworkPlayerEntity(new Vector2(500f, 500f), humanId, humanCity);
 
         controller.RefreshAttackGoals(

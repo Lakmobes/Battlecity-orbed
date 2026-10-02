@@ -153,7 +153,7 @@ public static class ItemCatalog
             or Data.ItemType.Dfg
             or Data.ItemType.Flare;
 
-    /// <summary>Inventory cleared back to factories on death (not cloak/rocket/flare upgrades).</summary>
+    /// <summary>Inventory cleared back to factories on death (not cloak, flare, or bazooka/bomb).</summary>
     public static bool ReturnsToFactoryOnDeath(Data.ItemType type) =>
-        IsPlaceable(type) && type != Data.ItemType.Flare;
+        IsPlaceable(type) && type is not (Data.ItemType.Flare or Data.ItemType.Bomb);
 }

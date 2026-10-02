@@ -24,10 +24,14 @@ internal sealed class MainForm : Form
     private readonly Button _unbanButton = new();
     private readonly Button _refreshBansButton = new();
     private readonly Label _adminHint = new();
+    private readonly TextBox _seasonName = new();
+    private readonly Button _startSeasonButton = new();
     private readonly NumericUpDown _startingCityInput = new();
     private readonly Button _applyStartingCityButton = new();
     private readonly Label _startingCityLabel = new();
     private readonly CheckBox _aiCityCheck = new();
+    private readonly NumericUpDown _aiCityCountInput = new();
+    private readonly ComboBox _aiCityStance = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new();
     private bool _suppressAiCityToggle;
 
@@ -132,10 +136,29 @@ internal sealed class MainForm : Form
         _startingCityLabel.Margin = new Padding(8, 8, 0, 0);
         controls.Controls.Add(_startingCityLabel);
 
-        _aiCityCheck.Text = "AI City";
+        _aiCityCheck.Text = "AI cities";
         _aiCityCheck.AutoSize = true;
         _aiCityCheck.Margin = new Padding(16, 6, 0, 0);
         controls.Controls.Add(_aiCityCheck);
+
+        _aiCityCountInput.Minimum = 1;
+        _aiCityCountInput.Maximum = AiCityController.MaxCities;
+        _aiCityCountInput.Value = 1;
+        _aiCityCountInput.Width = 42;
+        _aiCityCountInput.Margin = new Padding(8, 4, 0, 0);
+        controls.Controls.Add(_aiCityCountInput);
+
+        _aiCityStance.DropDownStyle = ComboBoxStyle.DropDownList;
+        _aiCityStance.Width = 130;
+        _aiCityStance.Margin = new Padding(8, 4, 0, 0);
+        _aiCityStance.Items.AddRange(
+        [
+            AiCityController.StanceLabel(AiCityStance.LeanDefense),
+            AiCityController.StanceLabel(AiCityStance.Balanced),
+            AiCityController.StanceLabel(AiCityStance.LeanOffense),
+        ]);
+        _aiCityStance.SelectedIndex = 1;
+        controls.Controls.Add(_aiCityStance);
 
         left.Controls.Add(controls, 0, 0);
 
@@ -285,10 +308,36 @@ internal sealed class MainForm : Form
         _adminHint.Text =
             "Toggle admin takes effect immediately for online players.\n" +
             "Username \"admin\" is always treated as admin.\n" +
-            "Bans block login (registered name or guest display name).";
+            "Bans block login (registered name or guest display name).\n" +
+            "Start new season zeros seasonal points for every account.";
         _adminHint.AutoSize = true;
         _adminHint.Margin = new Padding(0, 8, 0, 0);
-        right.Controls.Add(_adminHint, 0, 4);
+
+        var seasonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            AutoSize = true,
+            WrapContents = false,
+            Margin = new Padding(0, 8, 0, 0),
+        };
+        seasonPanel.Controls.Add(new Label
+        {
+            Text = "Season name",
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 4),
+        });
+        _seasonName.Text = "Season 1";
+        _seasonName.Width = 220;
+        _seasonName.MaxLength = 24;
+        seasonPanel.Controls.Add(_seasonName);
+        _startSeasonButton.Text = "Start new season";
+        _startSeasonButton.AutoSize = true;
+        _startSeasonButton.Enabled = false;
+        _startSeasonButton.Margin = new Padding(0, 6, 0, 0);
+        seasonPanel.Controls.Add(_startSeasonButton);
+        seasonPanel.Controls.Add(_adminHint);
+        right.Controls.Add(seasonPanel, 0, 4);
     }
 
     private void WireEvents()
@@ -298,11 +347,14 @@ internal sealed class MainForm : Form
         _copyInviteButton.Click += (_, _) => CopyInvite();
         _applyStartingCityButton.Click += (_, _) => ApplyStartingCity();
         _aiCityCheck.CheckedChanged += (_, _) => ToggleAiCity();
+        _aiCityCountInput.ValueChanged += (_, _) => ReconfigureAiCities();
+        _aiCityStance.SelectedIndexChanged += (_, _) => ReconfigureAiCities();
         _lanAddresses.SelectedIndexChanged += (_, _) => RefreshShareBox();
         _accounts.ItemCheck += OnAccountItemCheck;
         _unbanButton.Click += (_, _) => UnbanSelected();
         _refreshBansButton.Click += (_, _) => ReloadBans();
         _bans.SelectedIndexChanged += (_, _) => UpdateUnbanButtonState();
+        _startSeasonButton.Click += (_, _) => StartNewSeason();
         FormClosing += (_, _) => StopServer();
 
         _refreshTimer.Interval = 500;
@@ -358,6 +410,10 @@ internal sealed class MainForm : Form
             RefreshPlayers();
             RefreshShareBox();
             RefreshStartingCity();
+            if (!string.Equals(_server.SeasonName, "Season", StringComparison.Ordinal))
+            {
+                _seasonName.Text = _server.SeasonName;
+            }
         }
         catch (Exception ex)
         {
@@ -366,6 +422,41 @@ internal sealed class MainForm : Form
             MessageBox.Show(this, ex.Message, "Could not start server", MessageBoxButtons.OK, MessageBoxIcon.Error);
             UpdateUiState(running: false);
         }
+    }
+
+    private void StartNewSeason()
+    {
+        if (_server is null || !_server.IsRunning)
+        {
+            MessageBox.Show(this, "Start the server first.", "Season", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var name = _seasonName.Text.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = "Season";
+        }
+
+        var confirm = MessageBox.Show(
+            this,
+            $"Start \"{name}\"? This sets every account's seasonal points back to zero.",
+            "New season",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning);
+        if (confirm != DialogResult.Yes)
+        {
+            return;
+        }
+
+        if (!_server.TryStartSeason(name, out var message))
+        {
+            MessageBox.Show(this, message, "Season", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        _seasonName.Text = _server.SeasonName;
+        _statusLabel.Text = message;
     }
 
     private void StopServer()
@@ -771,6 +862,10 @@ internal sealed class MainForm : Form
         _applyStartingCityButton.Enabled = running;
         _startingCityInput.Enabled = running;
         _aiCityCheck.Enabled = running;
+        _aiCityCountInput.Enabled = running;
+        _aiCityStance.Enabled = running;
+        _startSeasonButton.Enabled = running;
+        _seasonName.Enabled = running;
         if (!running)
         {
             _suppressAiCityToggle = true;
@@ -794,7 +889,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var enabled = _server.IsAiCityEnabled;
+        var enabled = _server.IsAiCityArmed;
         if (_aiCityCheck.Checked == enabled)
         {
             return;
@@ -814,9 +909,9 @@ internal sealed class MainForm : Form
 
         if (_aiCityCheck.Checked)
         {
-            if (!_server.TryEnableAiCity(out var message))
+            if (!_server.TryArmAiCities(SelectedAiCityCount(), SelectedAiStance(), out var message))
             {
-                MessageBox.Show(this, message, "AI City", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, message, "AI cities", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 RefreshAiCityCheck();
                 return;
             }
@@ -826,9 +921,32 @@ internal sealed class MainForm : Form
         else
         {
             _server.DisableAiCity();
-            _statusLabel.Text = "AI City disabled.";
+            _statusLabel.Text = "AI cities disarmed.";
         }
     }
+
+    private void ReconfigureAiCities()
+    {
+        if (_suppressAiCityToggle || _server is null || !_aiCityCheck.Checked)
+        {
+            return;
+        }
+
+        if (_server.TryArmAiCities(SelectedAiCityCount(), SelectedAiStance(), out var message))
+        {
+            _statusLabel.Text = message;
+        }
+    }
+
+    private int SelectedAiCityCount() => (int)_aiCityCountInput.Value;
+
+    private AiCityStance SelectedAiStance() =>
+        _aiCityStance.SelectedIndex switch
+        {
+            0 => AiCityStance.LeanDefense,
+            2 => AiCityStance.LeanOffense,
+            _ => AiCityStance.Balanced,
+        };
 
     private void RefreshStartingCity()
     {

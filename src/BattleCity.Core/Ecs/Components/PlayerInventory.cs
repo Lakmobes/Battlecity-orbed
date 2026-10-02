@@ -177,6 +177,25 @@ public struct PlayerInventory
         return true;
     }
 
+    public void Clear(ItemType type)
+    {
+        switch (type)
+        {
+            case ItemType.Cloak: Cloak = 0; break;
+            case ItemType.Rocket: Rocket = 0; break;
+            case ItemType.MedKit: MedKit = 0; break;
+            case ItemType.Bomb: Bomb = 0; break;
+            case ItemType.Mine: Mine = 0; break;
+            case ItemType.Orb: Orb = 0; break;
+            case ItemType.Flare: Flare = 0; break;
+            case ItemType.Dfg: Dfg = 0; break;
+            case ItemType.Wall: Wall = 0; break;
+            case ItemType.Turret: Turret = 0; break;
+            case ItemType.Sleeper: Sleeper = 0; break;
+            case ItemType.Plasma: Plasma = 0; break;
+        }
+    }
+
     public void CycleSelection(int delta)
     {
         if (delta == 0 || HudItems.Length == 0)

@@ -38,7 +38,7 @@ public class RespawnNetworkTests
     }
 
     [Fact]
-    public void LocalPlayer_RespawnsOptimisticallyWhenTimerExpires()
+    public void LocalPlayer_StaysDeadUntilServerWarp()
     {
         using var simulation = new GameSimulation();
         simulation.TileMap = TileMap.CreateEmpty();
@@ -46,6 +46,7 @@ public class RespawnNetworkTests
 
         var spawn = new Vector2(48f, 96f);
         var entity = simulation.CreatePlayerEntity(spawn);
+        simulation.World.Get<Transform2D>(entity).Position = new Vector2(400f, 400f);
         ref var life = ref simulation.World.Get<TankLifeState>(entity);
         life.IsDead = true;
         life.RespawnTimerSeconds = 0f;
@@ -54,9 +55,9 @@ public class RespawnNetworkTests
 
         simulation.Tick(0.016f);
 
-        Assert.False(simulation.World.Get<TankLifeState>(entity).IsDead);
-        Assert.Equal(GameConstants.MaxHealth, simulation.World.Get<Health>(entity).Current);
-        Assert.Equal(CollisionLayer.Player, simulation.World.Get<Collider>(entity).Layer);
+        Assert.True(simulation.World.Get<TankLifeState>(entity).IsDead);
+        Assert.Equal(new Vector2(400f, 400f), simulation.World.Get<Transform2D>(entity).Position);
+        Assert.Equal(0, simulation.World.Get<Health>(entity).Current);
     }
 
     [Fact]

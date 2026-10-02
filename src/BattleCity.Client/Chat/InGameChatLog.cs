@@ -17,7 +17,12 @@ public readonly struct ChatLine
 
 public sealed class InGameChatLog
 {
-    private const int MaxLines = 8;
+    private readonly int _maxLines;
+
+    public InGameChatLog(int maxLines = 8)
+    {
+        _maxLines = Math.Clamp(maxLines, 1, 40);
+    }
     private const int WrapWidth = 75;
 
     private readonly Queue<ChatLine> _lines = new();
@@ -28,7 +33,7 @@ public sealed class InGameChatLog
     {
         foreach (var wrapped in Wrap(text))
         {
-            if (_lines.Count >= MaxLines)
+            if (_lines.Count >= _maxLines)
             {
                 _lines.Dequeue();
             }

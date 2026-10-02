@@ -1,4 +1,5 @@
 using BattleCity.Shared.Audio;
+using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
 
 using Microsoft.Xna.Framework.Audio;
@@ -73,8 +74,17 @@ public sealed class AudioService
 
     public void PlayAt(SoundId sound, float listenerX, float listenerY, float worldX, float worldY, float volume = 1f)
     {
-        var pan = ComputePan(listenerX, worldX);
-        Play(sound, volume, pan);
+        var distance = MathF.Sqrt(
+            ((worldX - listenerX) * (worldX - listenerX))
+            + ((worldY - listenerY) * (worldY - listenerY)));
+        var heard = ComputeDistanceVolume(distance);
+        if (heard <= 0f)
+        {
+            return;
+        }
+
+        var pan = ComputePan(listenerX, worldX, distance);
+        Play(sound, volume * heard, pan);
     }
 
     public void SetEngineRunning(bool running)
@@ -151,10 +161,34 @@ public sealed class AudioService
         }
     }
 
-    private static float ComputePan(float listenerX, float worldX)
+    /// <summary>
+    /// On-screen (and just off) stays loud. Volume falls off out to the radar radius, then cuts out.
+    /// </summary>
+    internal static float ComputeDistanceVolume(float distance)
     {
-        const float range = 1200f;
+        const float fullVolumeRadius = 1200f;
+        const float maxRadius = ClientConstants.RadarSize;
+        if (distance >= maxRadius)
+        {
+            return 0f;
+        }
+
+        if (distance <= fullVolumeRadius)
+        {
+            return 1f;
+        }
+
+        return 1f - ((distance - fullVolumeRadius) / (maxRadius - fullVolumeRadius));
+    }
+
+    private static float ComputePan(float listenerX, float worldX, float distance)
+    {
+        if (distance < 1f)
+        {
+            return 0f;
+        }
+
         var delta = worldX - listenerX;
-        return Math.Clamp(delta / range, -1f, 1f);
+        return Math.Clamp(delta / 1200f, -1f, 1f);
     }
 }

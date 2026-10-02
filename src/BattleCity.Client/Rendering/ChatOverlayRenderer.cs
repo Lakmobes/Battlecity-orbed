@@ -9,9 +9,9 @@ namespace BattleCity.Client.Rendering;
 
 public sealed class ChatOverlayRenderer
 {
-    private const int LineHeight = 18;
-    private const int InputLineHeight = 20;
-    private const float TextScale = 1f;
+    private const int LineHeight = 15;
+    private const int InputLineHeight = 18;
+    private const float TextScale = 0.85f;
     private static readonly Color PanelBackground = new(0, 0, 0, 140);
     private static readonly Color InputBackground = new(0, 0, 0, 180);
 

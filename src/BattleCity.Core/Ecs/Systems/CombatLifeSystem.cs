@@ -103,6 +103,12 @@ public static class CombatLifeSystem
                     return;
                 }
 
+                // Online local player stays down until the server warp places them on the city pad.
+                if (hooks.SuppressLocalPlayerRespawn && world.Has<InputControlled>(entity))
+                {
+                    return;
+                }
+
                 // Remote tanks on clients / server network tanks: wait for Warp / ProcessNetworkPlayerRespawns.
                 if (world.Has<NetworkIdentity>(entity) && hooks.DeferNetworkPlayerRespawn)
                 {

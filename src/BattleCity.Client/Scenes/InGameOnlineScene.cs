@@ -109,6 +109,7 @@ public sealed class InGameOnlineScene : IScene
         _simulation.ReturnInventoryPlaceablesOnDeath = false;
         _simulation.SuppressLocalPlayerRespawn = true;
         _simulation.DeferRemotePlayerRespawn = true;
+        _simulation.DeferPlacedItemDestruction = true;
         _simulation.NetworkPlayersUseLocalHealthDeath = false;
         _simulation.NetworkPlayersUseLocalBulletDamage = false;
         _simulation.ReportLocalShot = shot => _client.SendShoot(shot);

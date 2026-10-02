@@ -259,9 +259,30 @@ public sealed class GameServer : IDisposable
 
     public bool TryApplyAdminEdit(in AdminEditPacket edit) => ApplyAdminEditFromPacket(edit);
 
-    public bool IsAiCityEnabled => _aiCity.IsEnabled;
+    public string SeasonName => _accounts.SeasonName;
 
-    public bool TryEnableAiCity(out string message)
+    public bool TryStartSeason(string name, out string message)
+    {
+        if (!_started)
+        {
+            message = "Server is not running.";
+            return false;
+        }
+
+        _accounts.StartSeason(name);
+        message = $"Season started: {_accounts.SeasonName}. Seasonal points were reset.";
+        return true;
+    }
+
+    public bool IsAiCityArmed => _aiCity.IsArmed;
+
+    public bool IsAiCityActive => _aiCity.IsActive;
+
+    public int AiCityCount => _aiCity.RequestedCityCount;
+
+    public AiCityStance AiCityStance => _aiCity.Stance;
+
+    public bool TryArmAiCities(int cityCount, AiCityStance stance, out string message)
     {
         if (!_started || !_worldReady)
         {
@@ -269,45 +290,27 @@ public sealed class GameServer : IDisposable
             return false;
         }
 
-        var humans = SnapshotHumanPlayers();
-        if (!_aiCity.TryEnable(
-                _simulation,
-                _cities,
-                _mayors,
-                AllocateBotPlayerId,
-                ReleaseBotPlayerId,
-                humans,
-                out message))
-        {
-            return false;
-        }
-
-        BroadcastAiCityJoin();
-        BroadcastCityListToMeetingClients();
-        _aiCity.RefreshAttackGoals(_simulation, humans);
+        _aiCity.Arm(cityCount, stance);
+        var change = SyncAiCities();
+        message = change.Message
+            ?? $"AI cities armed ({AiCityController.StanceLabel(stance)}, {Math.Clamp(cityCount, 1, AiCityController.MaxCities)}). They appear when a player enters a city.";
         Console.WriteLine(message);
         return true;
     }
 
     public void DisableAiCity()
     {
-        if (!_aiCity.IsEnabled)
+        if (!_aiCity.IsArmed && !_aiCity.IsActive)
         {
             return;
         }
 
-        var cityId = _aiCity.CityId;
-        Span<byte> clearPlayer = stackalloc byte[1];
-        foreach (var bot in _aiCity.Bots.ToList())
+        _aiCity.Disarm();
+        var change = SyncAiCities();
+        if (!string.IsNullOrWhiteSpace(change.Message))
         {
-            clearPlayer[0] = bot.PlayerId;
-            BroadcastAll(ServerMessageId.ClearPlayer, clearPlayer);
-            BroadcastLobbyExcept(bot.PlayerId, ServerMessageId.ClearPlayer, clearPlayer);
+            Console.WriteLine(change.Message);
         }
-
-        _aiCity.Disable(_simulation, _mayors, ReleaseBotPlayerId);
-        BroadcastCityListToMeetingClients();
-        Console.WriteLine($"AI City disabled (was city {cityId}).");
     }
 
     private void AcceptPendingConnections()
@@ -384,19 +387,56 @@ public sealed class GameServer : IDisposable
         }
     }
 
-    private void BroadcastAiCityJoin()
+    private AiCityPresenceChange SyncAiCities()
     {
-        if (!_aiCity.IsEnabled)
+        var change = _aiCity.Sync(
+            _simulation,
+            _cities,
+            _mayors,
+            AllocateBotPlayerId,
+            ReleaseBotPlayerId,
+            SnapshotHumanPlayers());
+        ApplyAiPresenceChange(change);
+        return change;
+    }
+
+    private void ApplyAiPresenceChange(AiCityPresenceChange change)
+    {
+        if (change.Removed.Count > 0)
         {
-            return;
+            BroadcastBotClears(change.Removed);
         }
 
+        if (change.Spawned.Count > 0)
+        {
+            BroadcastBotJoins(change.Spawned);
+        }
+
+        if (change.Removed.Count > 0 || change.Spawned.Count > 0)
+        {
+            BroadcastCityListToMeetingClients();
+        }
+    }
+
+    private void BroadcastBotClears(IReadOnlyList<AiBotPlayer> bots)
+    {
+        Span<byte> clearPlayer = stackalloc byte[1];
+        foreach (var bot in bots)
+        {
+            clearPlayer[0] = bot.PlayerId;
+            BroadcastAll(ServerMessageId.ClearPlayer, clearPlayer);
+            BroadcastLobbyExcept(bot.PlayerId, ServerMessageId.ClearPlayer, clearPlayer);
+        }
+    }
+
+    private void BroadcastBotJoins(IReadOnlyList<AiBotPlayer> bots)
+    {
         Span<byte> joinData = stackalloc byte[ServerJoinDataPacket.Size];
         Span<byte> playerData = stackalloc byte[ServerPlayerDataPacket.Size];
         Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
         Span<byte> points = stackalloc byte[ServerPointsUpdatePacket.Size];
 
-        foreach (var bot in _aiCity.Bots)
+        foreach (var bot in bots)
         {
             new ServerJoinDataPacket(
                 bot.PlayerId,
@@ -421,7 +461,13 @@ public sealed class GameServer : IDisposable
 
     private void BroadcastAiCityUpdates(float deltaSeconds)
     {
-        if (!_aiCity.IsEnabled)
+        var change = SyncAiCities();
+        if (!string.IsNullOrWhiteSpace(change.Message))
+        {
+            Console.WriteLine(change.Message);
+        }
+
+        if (!_aiCity.IsActive)
         {
             return;
         }
@@ -436,6 +482,11 @@ public sealed class GameServer : IDisposable
         Span<byte> updatePayload = stackalloc byte[ServerUpdatePacket.Size];
         foreach (var bot in _aiCity.Bots)
         {
+            if (_simulation.IsNetworkPlayerDead(bot.PlayerId))
+            {
+                continue;
+            }
+
             if (!_simulation.TryGetNetworkPlayerSnapshot(bot.PlayerId, out var snapshot))
             {
                 continue;
@@ -455,7 +506,7 @@ public sealed class GameServer : IDisposable
 
     private void SendAiBotsToJoiner(ClientSession joiner)
     {
-        if (!_aiCity.IsEnabled)
+        if (!_aiCity.IsActive)
         {
             return;
         }
@@ -547,6 +598,11 @@ public sealed class GameServer : IDisposable
                 break;
             case ClientMessageId.RefreshList:
                 SendCityList(session);
+                if (session.State == PlayerSessionState.Meeting)
+                {
+                    SendLobbyStatus(session);
+                }
+
                 break;
             case ClientMessageId.Update:
                 HandleUpdate(session, packet.Payload.Span);
@@ -622,6 +678,9 @@ public sealed class GameServer : IDisposable
                 break;
             case ClientMessageId.ChangeStartingCity:
                 HandleChangeStartingCity(session, packet.Payload.Span);
+                break;
+            case ClientMessageId.RequestRankBoard:
+                HandleRankBoardRequest(session, packet.Payload.Span);
                 break;
             case ClientMessageId.AdminEditRequest:
                 HandleAdminEditRequest(session, packet.Payload.Span);
@@ -850,6 +909,165 @@ public sealed class GameServer : IDisposable
     {
         session.State = PlayerSessionState.Meeting;
         SendCityList(session);
+        SendLobbyStatus(session);
+    }
+
+    private void SendLobbyStatus(ClientSession session)
+    {
+        var online = 0;
+        var inCity = 0;
+        var occupied = new Dictionary<byte, CityOccupancy>();
+        foreach (var other in _sessions.Values)
+        {
+            online++;
+            if (!other.IsInGame || !CityCatalog.IsValidCityId(other.CityId))
+            {
+                continue;
+            }
+
+            inCity++;
+            if (!occupied.TryGetValue(other.CityId, out var row))
+            {
+                row = new CityOccupancy();
+            }
+
+            row.Humans++;
+            if (other.IsMayor && string.IsNullOrEmpty(row.Mayor))
+            {
+                row.Mayor = other.DisplayName;
+            }
+
+            occupied[other.CityId] = row;
+        }
+
+        if (_aiCity.IsActive)
+        {
+            foreach (var bot in _aiCity.Bots)
+            {
+                if (!CityCatalog.IsValidCityId(bot.CityId))
+                {
+                    continue;
+                }
+
+                if (!occupied.TryGetValue(bot.CityId, out var row))
+                {
+                    row = new CityOccupancy();
+                }
+
+                row.Ai++;
+                if (bot.IsMayor && string.IsNullOrEmpty(row.Mayor))
+                {
+                    row.Mayor = bot.DisplayName;
+                }
+
+                occupied[bot.CityId] = row;
+            }
+        }
+
+        var lines = new List<string>
+        {
+            $"Server: {online} online, {inCity} in a city.",
+        };
+        if (occupied.Count == 0)
+        {
+            lines.Add("No cities are occupied.");
+        }
+        else
+        {
+            foreach (var pair in occupied.OrderBy(pair => pair.Key))
+            {
+                var row = pair.Value;
+                var line = new System.Text.StringBuilder();
+                line.Append(CityCatalog.GetName(pair.Key)).Append(": ");
+                if (row.Humans > 0)
+                {
+                    line.Append(row.Humans).Append(row.Humans == 1 ? " player" : " players");
+                }
+
+                if (row.Ai > 0)
+                {
+                    if (row.Humans > 0)
+                    {
+                        line.Append(", ");
+                    }
+
+                    line.Append(row.Ai).Append(" AI");
+                }
+
+                if (!string.IsNullOrEmpty(row.Mayor))
+                {
+                    line.Append(" (Mayor: ").Append(row.Mayor).Append(')');
+                }
+
+                lines.Add(line.ToString());
+            }
+        }
+
+        foreach (var line in lines)
+        {
+            var text = line.Length > 200 ? line[..200] : line;
+            SendAsciiNews(session, text);
+        }
+    }
+
+    private static void SendAsciiNews(ClientSession session, string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        const int chunkSize = 220;
+        var bytes = System.Text.Encoding.ASCII.GetBytes(text);
+        for (var offset = 0; offset < bytes.Length; offset += chunkSize)
+        {
+            var length = Math.Min(chunkSize, bytes.Length - offset);
+            session.SendServer(ServerMessageId.AppendNews, bytes.AsSpan(offset, length));
+        }
+    }
+
+    private void HandleRankBoardRequest(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (session.State is not (PlayerSessionState.Meeting or PlayerSessionState.LoggedIn))
+        {
+            return;
+        }
+
+        var board = payload.Length > 0 ? payload[0] : (byte)0;
+        if (board > 2)
+        {
+            board = 0;
+        }
+
+        var column = board switch
+        {
+            1 => "monthly_points",
+            2 => "season_points",
+            _ => "points",
+        };
+
+        var top = _accounts.ListTopByPoints(column, RankBoardPacket.MaxRows);
+        var rows = new List<(string Name, int Points)>(top.Count);
+        foreach (var account in top)
+        {
+            var name = string.IsNullOrWhiteSpace(account.DisplayName) ? account.Username : account.DisplayName;
+            var points = board switch
+            {
+                1 => account.MonthlyPoints,
+                2 => account.SeasonPoints,
+                _ => account.Points,
+            };
+            rows.Add((name, points));
+        }
+
+        session.SendServer(ServerMessageId.RankBoard, RankBoardPacket.Create(board, _accounts.SeasonName, rows));
+    }
+
+    private struct CityOccupancy
+    {
+        public int Humans;
+        public int Ai;
+        public string? Mayor;
     }
 
     private void SendCityList(ClientSession session)
@@ -1405,6 +1623,18 @@ public sealed class GameServer : IDisposable
         {
             addItem.Write(payload);
             BroadcastAll(ServerMessageId.AddItem, payload);
+        }
+
+        Span<byte> pickedUp = stackalloc byte[ServerPickedUpPacket.Size];
+        while (_simulation.TryConsumeFactoryDeposit(out var deposit))
+        {
+            if (!TryGetSession(deposit.PlayerId, out var session))
+            {
+                continue;
+            }
+
+            new ServerPickedUpPacket(0, active: 0, (byte)deposit.ItemType).Write(pickedUp);
+            session.SendServer(ServerMessageId.PickedUp, pickedUp);
         }
     }
 
@@ -2068,7 +2298,7 @@ public sealed class GameServer : IDisposable
             account.Town,
             account.State,
             account.Points,
-            monthlyPoints: 0,
+            account.MonthlyPoints,
             account.Deaths,
             orbs: 0,
             assists: 0,
@@ -2329,6 +2559,17 @@ public sealed class GameServer : IDisposable
             {
                 RecordDeathPointChanges(session, deathEvent.KillerCity);
             }
+            else if (CityCatalog.IsValidCityId(deathEvent.KillerCity))
+            {
+                // AI tanks are not accounts. A city that kills one still pays the legacy +2.
+                foreach (var ally in GetInGameSessions())
+                {
+                    if (ally.CityId == deathEvent.KillerCity)
+                    {
+                        AdjustSessionPoints(ally, DeathPointTransfers.PointTransferAmount);
+                    }
+                }
+            }
 
             Console.WriteLine($"Player {deathEvent.PlayerId} died (server combat)");
         }
@@ -2398,6 +2639,12 @@ public sealed class GameServer : IDisposable
                 new ServerRemoveItemPacket(explosionEvent.RemovedItemId).Write(removePayload);
                 BroadcastAll(ServerMessageId.RemItem, removePayload);
             }
+        }
+
+        while (_simulation.TryConsumeDestroyedNetworkItem(out var destroyedItemId))
+        {
+            new ServerRemoveItemPacket(destroyedItemId).Write(removePayload);
+            BroadcastAll(ServerMessageId.RemItem, removePayload);
         }
     }
 

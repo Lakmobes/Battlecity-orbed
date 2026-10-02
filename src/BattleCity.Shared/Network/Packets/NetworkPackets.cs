@@ -1541,3 +1541,84 @@ public readonly struct AdminEditPacket
         bytes.AsSpan(0, Math.Min(bytes.Length, destination.Length)).CopyTo(destination);
     }
 }
+
+public static class RankBoardPacket
+{
+    public const int HeaderSize = 26;
+    public const int RowSize = 20;
+    public const int MaxRows = 10;
+
+    public static byte[] Create(byte board, string seasonName, IReadOnlyList<(string Name, int Points)> rows)
+    {
+        var count = (byte)Math.Min(rows.Count, MaxRows);
+        var buffer = new byte[HeaderSize + (count * RowSize)];
+        buffer[0] = board;
+        buffer[1] = count;
+        WriteFixed(buffer.AsSpan(2, 24), seasonName);
+        for (var i = 0; i < count; i++)
+        {
+            var offset = HeaderSize + (i * RowSize);
+            WriteFixed(buffer.AsSpan(offset, 16), rows[i].Name);
+            BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset + 16, 4), rows[i].Points);
+        }
+
+        return buffer;
+    }
+
+    public static bool TryRead(
+        ReadOnlySpan<byte> payload,
+        out byte board,
+        out string seasonName,
+        out (string Name, int Points)[] rows)
+    {
+        board = 0;
+        seasonName = string.Empty;
+        rows = [];
+        if (payload.Length < HeaderSize)
+        {
+            return false;
+        }
+
+        board = payload[0];
+        var count = Math.Min((int)payload[1], MaxRows);
+        if (payload.Length < HeaderSize + (count * RowSize))
+        {
+            return false;
+        }
+
+        seasonName = ReadFixed(payload.Slice(2, 24));
+        rows = new (string Name, int Points)[count];
+        for (var i = 0; i < count; i++)
+        {
+            var offset = HeaderSize + (i * RowSize);
+            rows[i] = (
+                ReadFixed(payload.Slice(offset, 16)),
+                BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(offset + 16, 4)));
+        }
+
+        return true;
+    }
+
+    private static void WriteFixed(Span<byte> destination, string value)
+    {
+        destination.Clear();
+        if (string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        var bytes = Encoding.ASCII.GetBytes(value);
+        bytes.AsSpan(0, Math.Min(bytes.Length, destination.Length)).CopyTo(destination);
+    }
+
+    private static string ReadFixed(ReadOnlySpan<byte> source)
+    {
+        var end = source.IndexOf((byte)0);
+        if (end < 0)
+        {
+            end = source.Length;
+        }
+
+        return Encoding.ASCII.GetString(source[..end]).Trim();
+    }
+}

@@ -162,6 +162,17 @@ public static class BuildingCommandService
                 world.Destroy(entity);
             }
         }
+
+        var inventoryQuery = new QueryDescription().WithAll<PlayerInventory, CityAffiliation>();
+        world.Query(
+            in inventoryQuery,
+            (ref PlayerInventory inventory, ref CityAffiliation city) =>
+            {
+                if (city.CityId == cityId && product is Shared.Data.ItemType.Cloak or Shared.Data.ItemType.Flare)
+                {
+                    inventory.Clear(product);
+                }
+            });
     }
 
     private static void ApplyBuiltPermissions(CityBuildState build, int menuIndex, int typeCode)

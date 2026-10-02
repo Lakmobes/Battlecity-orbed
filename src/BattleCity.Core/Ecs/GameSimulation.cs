@@ -75,6 +75,9 @@ public sealed class GameSimulation : IDisposable
     /// <summary>When true, dying tanks return placeables to factory bays.</summary>
     public bool ReturnInventoryPlaceablesOnDeath { get; set; } = true;
 
+    /// <summary>When true, placed items are removed only by <c>smRemItem</c> (online clients).</summary>
+    public bool DeferPlacedItemDestruction { get; set; }
+
     /// <summary>When true, local player respawn waits for authoritative <c>smWarp</c>.</summary>
     public bool SuppressLocalPlayerRespawn { get; set; }
 
@@ -94,6 +97,8 @@ public sealed class GameSimulation : IDisposable
 
     private readonly List<ServerHpPacket> _pendingHpEvents = new();
     private readonly List<ServerItemLifePacket> _pendingItemLifeEvents = [];
+    private readonly List<ushort> _pendingDestroyedItemIds = [];
+    private readonly List<FactoryDepositEvent> _pendingFactoryDeposits = [];
     private readonly List<PendingExplosionEvent> _pendingExplosionEvents = [];
     private readonly List<PendingRespawnEvent> _pendingRespawnEvents = [];
     private readonly List<ServerAddItemPacket> _pendingFactoryAddItems = [];
@@ -757,7 +762,7 @@ public sealed class GameSimulation : IDisposable
         CityOrbedNotificationSystem.Update(_world, deltaSeconds);
         ResearchCompleteNotificationSystem.Update(_world, deltaSeconds);
         InputSystem.Update(_world, deltaSeconds);
-        BotAiSystem.UpdateMovement(_world, deltaSeconds);
+        BotAiSystem.UpdateMovement(_world, deltaSeconds, _tileMap);
         MovementSystem.UpdateNonBullets(_world, deltaSeconds);
         AdvanceAllWeaponTimers(deltaSeconds);
         WeaponSystem.Update(_world, deltaSeconds, TryResolveCityBuildForPlayer, _audioBuffer, ReportLocalShot);
@@ -781,7 +786,8 @@ public sealed class GameSimulation : IDisposable
                 allocateNetworkItemId: ReportFactoryItemSpawnsToNetwork ? AllocateNetworkItemId : null,
                 reportSpawn: ReportFactoryItemSpawnsToNetwork
                     ? packet => _pendingFactoryAddItems.Add(packet)
-                    : null);
+                    : null,
+                tryDepositInInventory: TryDepositFactoryProduct);
         }
         TurretAiSystem.Update(_world, deltaSeconds, _audioBuffer);
         BulletSystem.PrepareMovement(_world, deltaSeconds);
@@ -794,7 +800,9 @@ public sealed class GameSimulation : IDisposable
             QueueNetworkPlayerHpIfChanged,
             applyDamageToNetworkPlayers: !NetworkPlayersUseLocalBulletDamage,
             defendedCityId: _cityBuild?.CityId ?? 0,
-            onPlacedItemDamaged: ReportItemLifeToNetwork ? QueueNetworkItemLifeIfNeeded : null);
+            onPlacedItemDamaged: ReportItemLifeToNetwork ? QueueNetworkItemLifeIfNeeded : null,
+            onPlacedItemDestroyed: ReportItemLifeToNetwork ? QueueDestroyedPlacedItem : null,
+            destroyPlacedItems: !DeferPlacedItemDestruction);
         CombatLifeSystem.Update(
             _world,
             deltaSeconds,
@@ -867,6 +875,32 @@ public sealed class GameSimulation : IDisposable
 
         hpEvent = _pendingHpEvents[0];
         _pendingHpEvents.RemoveAt(0);
+        return true;
+    }
+
+    public bool TryConsumeDestroyedNetworkItem(out ushort itemId)
+    {
+        if (_pendingDestroyedItemIds.Count == 0)
+        {
+            itemId = 0;
+            return false;
+        }
+
+        itemId = _pendingDestroyedItemIds[0];
+        _pendingDestroyedItemIds.RemoveAt(0);
+        return true;
+    }
+
+    public bool TryConsumeFactoryDeposit(out FactoryDepositEvent deposit)
+    {
+        if (_pendingFactoryDeposits.Count == 0)
+        {
+            deposit = default;
+            return false;
+        }
+
+        deposit = _pendingFactoryDeposits[0];
+        _pendingFactoryDeposits.RemoveAt(0);
         return true;
     }
 
@@ -1007,11 +1041,17 @@ public sealed class GameSimulation : IDisposable
             return;
         }
 
-        ApplyRespawnState(
-            entity,
-            Vector2.Zero,
-            (byte)Math.Clamp(_world.Get<CityAffiliation>(entity).CityId, 0, byte.MaxValue),
-            playWarpAudio: false);
+        var cityId = _world.Has<CityAffiliation>(entity)
+            ? _world.Get<CityAffiliation>(entity).CityId
+            : 0;
+        var position = _world.Get<Transform2D>(entity).Position;
+        if (TryGetCityRespawnPosition(cityId, out var spawn, out var resolvedCityId))
+        {
+            position = spawn;
+            cityId = resolvedCityId;
+        }
+
+        ApplyRespawnState(entity, position, (byte)Math.Clamp(cityId, 0, byte.MaxValue), playWarpAudio: false);
     }
 
     public bool TryGetCityRespawnPosition(int cityId, out Vector2 position, out byte resolvedCityId)
@@ -1113,6 +1153,27 @@ public sealed class GameSimulation : IDisposable
         }
 
         ref var health = ref _world.Get<Health>(entity);
+        if (packet.Health <= 0)
+        {
+            health.Current = 0;
+            if (_world.Has<TankLifeState>(entity))
+            {
+                ref var life = ref _world.Get<TankLifeState>(entity);
+                if (!life.IsDead)
+                {
+                    life.IsDead = true;
+                    life.RespawnTimerSeconds = GameConstants.TimerRespawn / 1000f;
+                }
+            }
+
+            return;
+        }
+
+        if (_world.Has<TankLifeState>(entity) && _world.Get<TankLifeState>(entity).IsDead)
+        {
+            return;
+        }
+
         health.Current = Math.Clamp(packet.Health, 0, health.Max);
     }
 
@@ -2335,6 +2396,96 @@ public sealed class GameSimulation : IDisposable
             new ServerItemLifePacket(itemId, ItemDamageSync.LegacyBurnLifeValue));
     }
 
+    private void QueueDestroyedPlacedItem(Entity entity)
+    {
+        if (!_world.IsAlive(entity) || !_world.Has<NetworkItemRef>(entity))
+        {
+            return;
+        }
+
+        var itemId = _world.Get<NetworkItemRef>(entity).ItemId;
+        if (itemId != 0)
+        {
+            _pendingDestroyedItemIds.Add(itemId);
+        }
+    }
+
+    private bool TryDepositFactoryProduct(int cityId, ItemType product)
+    {
+        if (!IsAutoInventoryProduct(product))
+        {
+            return false;
+        }
+
+        Entity chosen = default;
+        var found = false;
+        var preferMayor = false;
+        var refreshAlreadyHeld = false;
+        var query = new QueryDescription().WithAll<PlayerInventory, CityAffiliation, TankLifeState>();
+        _world.Query(
+            in query,
+            (Entity entity, ref PlayerInventory inventory, ref CityAffiliation city, ref TankLifeState life) =>
+            {
+                if (life.IsDead || city.CityId != cityId)
+                {
+                    return;
+                }
+
+                if (inventory.GetCount(product) >= AutoInventoryCap(product))
+                {
+                    if (product is ItemType.Cloak or ItemType.Flare)
+                    {
+                        refreshAlreadyHeld = true;
+                    }
+
+                    return;
+                }
+
+                var isMayor = _world.Has<MayorStatus>(entity) && _world.Get<MayorStatus>(entity).IsMayor;
+                if (!found || (isMayor && !preferMayor))
+                {
+                    chosen = entity;
+                    found = true;
+                    preferMayor = isMayor;
+                }
+            });
+
+        if (!found || !_world.IsAlive(chosen))
+        {
+            return refreshAlreadyHeld;
+        }
+
+        ref var chosenInventory = ref _world.Get<PlayerInventory>(chosen);
+        if (!chosenInventory.TryAdd(product))
+        {
+            return false;
+        }
+
+        if (_world.Has<NetworkIdentity>(chosen))
+        {
+            _pendingFactoryDeposits.Add(new FactoryDepositEvent(
+                _world.Get<NetworkIdentity>(chosen).PlayerId,
+                product));
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Flare, cloak, and bazooka (bomb factory) go straight into inventory.
+    /// Walls, turrets, medkits, and the rest stay on the factory bay.
+    /// </summary>
+    private static bool IsAutoInventoryProduct(ItemType product) =>
+        product is ItemType.Cloak or ItemType.Flare or ItemType.Bomb;
+
+    /// <summary>
+    /// Cloak and flare stay at one and refresh. Bazookas stack up to the normal carry limit.
+    /// </summary>
+    private static int AutoInventoryCap(ItemType product) =>
+        product is ItemType.Cloak or ItemType.Flare
+            ? 1
+            : ItemCatalog.MaxCarryCount[(int)product];
+
     private bool ApplyDeathState(Entity entity, byte killerCity, bool playEffects)
     {
         ref var life = ref _world.Get<TankLifeState>(entity);
@@ -2857,3 +3008,5 @@ public sealed class GameSimulation : IDisposable
 public readonly record struct PendingExplosionEvent(ServerExplosionPacket Explosion, ushort RemovedItemId = 0);
 
 public readonly record struct PendingRespawnEvent(byte PlayerId, Vector2 Position, byte CityId);
+
+public readonly record struct FactoryDepositEvent(byte PlayerId, ItemType ItemType);

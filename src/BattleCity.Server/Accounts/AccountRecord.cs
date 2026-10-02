@@ -16,6 +16,10 @@ public sealed class AccountRecord
 
     public int Points { get; init; }
 
+    public int MonthlyPoints { get; init; }
+
+    public int SeasonPoints { get; init; }
+
     public int Deaths { get; init; }
 
     public bool IsAdmin { get; init; }

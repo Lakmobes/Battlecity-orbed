@@ -22,6 +22,9 @@ public static class MeetingRoomLayout
     public static Rectangle RefreshButton =>
         new(32, UiLayout.LogicalHeight - MenuTheme.FooterHeight - 52, 160, MenuTheme.MenuButtonHeight - 12);
 
+    public static Rectangle RanksButton =>
+        new(208, UiLayout.LogicalHeight - MenuTheme.FooterHeight - 52, 160, MenuTheme.MenuButtonHeight - 12);
+
     public static Rectangle QuitHint =>
         new(UiLayout.LogicalWidth / 2 + 16, UiLayout.LogicalHeight - 64, UiLayout.LogicalWidth / 2 - 48, 28);
 

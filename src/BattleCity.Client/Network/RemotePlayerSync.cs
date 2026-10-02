@@ -254,19 +254,11 @@ public sealed class RemotePlayerSync
 
         ref var health = ref _world.Get<Health>(entity);
 
-        ref var transform = ref _world.Get<Transform2D>(entity);
-
-
-
         life.IsDead = false;
 
         life.KillerCityId = EntityCityLookup.UnknownCity;
 
         health.Current = health.Max;
-
-        transform.Position = Vector2.Zero;
-
-        transform.PreviousPosition = Vector2.Zero;
 
         if (_world.Has<Collider>(entity))
 

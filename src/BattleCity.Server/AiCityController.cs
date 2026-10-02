@@ -4,45 +4,212 @@ using BattleCity.Core.City;
 using BattleCity.Core.Ecs;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Shared.Catalogs;
-using BattleCity.Shared.Network.Packets;
 
 namespace BattleCity.Server;
 
-/// <summary>Server-side scripted enemy city (mayor + soldiers) for solo / light MP.</summary>
+public enum AiCityStance
+{
+    /// <summary>Mayor and soldiers hold the city.</summary>
+    LeanDefense = 0,
+
+    /// <summary>Mayor and one soldier defend; the rest raid.</summary>
+    Balanced = 1,
+
+    /// <summary>Mayor holds home; every soldier raids. Longer aggro.</summary>
+    LeanOffense = 2,
+}
+
+/// <summary>Result of aligning armed AI cities with whether humans are in a city.</summary>
+public readonly struct AiCityPresenceChange
+{
+    public AiCityPresenceChange(
+        IReadOnlyList<AiBotPlayer> spawned,
+        IReadOnlyList<AiBotPlayer> removed,
+        string? message)
+    {
+        Spawned = spawned;
+        Removed = removed;
+        Message = message;
+    }
+
+    public IReadOnlyList<AiBotPlayer> Spawned { get; }
+
+    public IReadOnlyList<AiBotPlayer> Removed { get; }
+
+    public string? Message { get; }
+
+    public static AiCityPresenceChange None { get; } = new([], [], null);
+}
+
+/// <summary>
+/// Scripted enemy cities. The host arms them; tanks only exist while at least one human is in a city.
+/// </summary>
 public sealed class AiCityController
 {
     public const int DefaultSoldierCount = 3;
+    public const int MaxCities = 4;
 
-    private readonly List<AiBotPlayer> _bots = [];
+    private readonly List<AiCitySlot> _cities = [];
+    private int _appliedCityCount = -1;
+    private AiCityStance _appliedStance;
 
-    public bool IsEnabled => _bots.Count > 0;
+    public bool IsArmed { get; private set; }
 
-    public byte CityId { get; private set; }
+    public bool IsActive => _cities.Count > 0;
 
-    public IReadOnlyList<AiBotPlayer> Bots => _bots;
+    public int RequestedCityCount { get; private set; } = 1;
 
-    public void Clear()
+    public AiCityStance Stance { get; private set; } = AiCityStance.Balanced;
+
+    public IReadOnlyList<byte> CityIds => _cities.Select(city => city.CityId).ToList();
+
+    public IReadOnlyList<AiBotPlayer> Bots => _cities.SelectMany(city => city.Bots).ToList();
+
+    public void Arm(int cityCount, AiCityStance stance)
     {
-        _bots.Clear();
-        CityId = 0;
+        RequestedCityCount = Math.Clamp(cityCount, 1, MaxCities);
+        Stance = stance;
+        IsArmed = true;
     }
 
-    public bool TryEnable(
+    public void Disarm() => IsArmed = false;
+
+    public AiCityPresenceChange Sync(
         GameSimulation simulation,
         CityRegistry cities,
         CityMayorRegistry mayors,
         Func<byte> allocatePlayerId,
         Action<byte> releasePlayerId,
-        IEnumerable<(byte PlayerId, byte CityId, bool InGame)> humanPlayers,
-        out string message)
+        IEnumerable<(byte PlayerId, byte CityId, bool InGame)> humanPlayers)
     {
-        if (IsEnabled)
+        var humans = humanPlayers as IReadOnlyList<(byte PlayerId, byte CityId, bool InGame)>
+            ?? humanPlayers.ToList();
+        var humansInGame = humans.Any(human => human.InGame);
+
+        if (!IsArmed || !humansInGame)
         {
-            message = "AI City already enabled.";
-            return false;
+            if (_cities.Count == 0)
+            {
+                return AiCityPresenceChange.None;
+            }
+
+            var removed = TakeAllBots();
+            Despawn(simulation, mayors, releasePlayerId, removed);
+            _appliedCityCount = -1;
+            var why = !IsArmed
+                ? "AI cities disarmed."
+                : "AI cities standing down (no players in a city).";
+            return new AiCityPresenceChange([], removed, why);
         }
 
-        if (!TryPickCity(cities, mayors, humanPlayers, out var cityId))
+        if (_cities.Count > 0
+            && _appliedCityCount == RequestedCityCount
+            && _appliedStance == Stance)
+        {
+            return AiCityPresenceChange.None;
+        }
+
+        var cleared = TakeAllBots();
+        Despawn(simulation, mayors, releasePlayerId, cleared);
+
+        var spawned = new List<AiBotPlayer>();
+        var reserved = new HashSet<byte>();
+        for (var i = 0; i < RequestedCityCount; i++)
+        {
+            if (!TrySpawnCity(
+                    simulation,
+                    cities,
+                    mayors,
+                    allocatePlayerId,
+                    humans,
+                    reserved,
+                    out var slot,
+                    out _))
+            {
+                break;
+            }
+
+            _cities.Add(slot);
+            reserved.Add(slot.CityId);
+            spawned.AddRange(slot.Bots);
+        }
+
+        RefreshAttackGoals(simulation, humans);
+        _appliedCityCount = RequestedCityCount;
+        _appliedStance = Stance;
+
+        if (spawned.Count == 0)
+        {
+            return new AiCityPresenceChange([], cleared, "AI cities armed, but no free city was available.");
+        }
+
+        var names = string.Join(", ", _cities.Select(city => $"{CityCatalog.GetName(city.CityId)} ({city.CityId})"));
+        var message =
+            $"AI cities active ({StanceLabel(Stance)}): {names} — {spawned.Count} bots.";
+        return new AiCityPresenceChange(spawned, cleared, message);
+    }
+
+    public void RefreshAttackGoals(
+        GameSimulation simulation,
+        IEnumerable<(byte PlayerId, byte CityId, bool InGame)> humanPlayers)
+    {
+        if (!IsActive)
+        {
+            return;
+        }
+
+        var goals = new List<Vector2>();
+        foreach (var human in humanPlayers)
+        {
+            if (!human.InGame)
+            {
+                continue;
+            }
+
+            if (simulation.TryGetCityRespawnPosition(human.CityId, out var pos, out _))
+            {
+                goals.Add(pos);
+                continue;
+            }
+
+            if (simulation.TryGetNetworkPlayerPosition(human.PlayerId, out var tankPos))
+            {
+                goals.Add(tankPos);
+            }
+        }
+
+        if (goals.Count == 0)
+        {
+            return;
+        }
+
+        var goalIndex = 0;
+        foreach (var city in _cities)
+        {
+            var goal = goals[goalIndex % goals.Count];
+            goalIndex++;
+            foreach (var bot in city.Bots)
+            {
+                if (bot.Role == BotRoles.Attack)
+                {
+                    simulation.SetNetworkBotGoal(bot.PlayerId, goal);
+                }
+            }
+        }
+    }
+
+    private bool TrySpawnCity(
+        GameSimulation simulation,
+        CityRegistry cities,
+        CityMayorRegistry mayors,
+        Func<byte> allocatePlayerId,
+        IReadOnlyList<(byte PlayerId, byte CityId, bool InGame)> humans,
+        HashSet<byte> reserved,
+        out AiCitySlot slot,
+        out string message)
+    {
+        slot = null!;
+        if (!TryPickCity(cities, mayors, humans, reserved, out var cityId))
         {
             message = "No free city available for AI.";
             return false;
@@ -65,6 +232,8 @@ public sealed class AiCityController
         }
 
         simulation.EnsureCityBuild(cityId);
+        var aggro = AggroFor(Stance);
+        var bots = new List<AiBotPlayer>();
 
         var mayorId = allocatePlayerId();
         if (mayorId == 0)
@@ -73,14 +242,9 @@ public sealed class AiCityController
             return false;
         }
 
-        simulation.CreateNetworkBotPlayer(
-            spawn,
-            mayorId,
-            cityId,
-            isMayor: true,
-            BotRoles.Defend);
+        simulation.CreateNetworkBotPlayer(spawn, mayorId, cityId, isMayor: true, BotRoles.Defend, aggro);
         mayors.Assign(cityId, mayorId);
-        _bots.Add(new AiBotPlayer(mayorId, $"AI-Mayor-{cityId}", cityId, IsMayor: true, BotRoles.Defend));
+        bots.Add(new AiBotPlayer(mayorId, $"AI-Mayor-{cityId}", cityId, IsMayor: true, BotRoles.Defend));
 
         for (var i = 0; i < DefaultSoldierCount; i++)
         {
@@ -90,98 +254,80 @@ public sealed class AiCityController
                 break;
             }
 
+            var role = RoleForSoldier(Stance, i);
             var offset = new Vector2((i + 1) * 48f, (i % 2) * 48f);
-            var role = i == 0 ? BotRoles.Defend : BotRoles.Attack;
             simulation.CreateNetworkBotPlayer(
                 spawn + offset,
                 soldierId,
                 cityId,
                 isMayor: false,
-                role);
-            _bots.Add(new AiBotPlayer(soldierId, $"AI-Sold-{cityId}-{i + 1}", cityId, IsMayor: false, role));
+                role,
+                aggro);
+            bots.Add(new AiBotPlayer(soldierId, $"AI-Sold-{cityId}-{i + 1}", cityId, IsMayor: false, role));
         }
 
-        CityId = cityId;
-        message = $"AI City enabled at {CityCatalog.GetName(cityId)} ({cityId}) with {_bots.Count} bots.";
+        slot = new AiCitySlot(cityId, Stance, bots);
+        message = $"AI city {CityCatalog.GetName(cityId)}";
         return true;
     }
 
-    public void Disable(
+    private List<AiBotPlayer> TakeAllBots()
+    {
+        var bots = Bots.ToList();
+        _cities.Clear();
+        return bots;
+    }
+
+    private static void Despawn(
         GameSimulation simulation,
         CityMayorRegistry mayors,
-        Action<byte> releasePlayerId)
+        Action<byte> releasePlayerId,
+        IReadOnlyList<AiBotPlayer> bots)
     {
-        if (!IsEnabled)
+        foreach (var mayor in bots.Where(bot => bot.IsMayor))
         {
-            return;
+            mayors.Remove(mayor.CityId, mayor.PlayerId);
         }
 
-        var mayor = _bots.FirstOrDefault(bot => bot.IsMayor);
-        if (mayor is not null)
-        {
-            mayors.Remove(CityId, mayor.PlayerId);
-        }
-
-        foreach (var bot in _bots)
+        foreach (var bot in bots)
         {
             simulation.TryRemoveNetworkPlayer(bot.PlayerId);
             releasePlayerId(bot.PlayerId);
         }
-
-        Clear();
     }
 
-    public void RefreshAttackGoals(
-        GameSimulation simulation,
-        IEnumerable<(byte PlayerId, byte CityId, bool InGame)> humanPlayers)
-    {
-        if (!IsEnabled)
+    private static byte RoleForSoldier(AiCityStance stance, int soldierIndex) =>
+        stance switch
         {
-            return;
-        }
+            AiCityStance.LeanDefense => BotRoles.Defend,
+            AiCityStance.LeanOffense => BotRoles.Attack,
+            _ => soldierIndex == 0 ? BotRoles.Defend : BotRoles.Attack,
+        };
 
-        Vector2? raidTarget = null;
-        foreach (var human in humanPlayers)
+    private static float AggroFor(AiCityStance stance) =>
+        stance switch
         {
-            if (!human.InGame || human.CityId == CityId)
-            {
-                continue;
-            }
+            AiCityStance.LeanDefense => 1600f,
+            AiCityStance.LeanOffense => 3600f,
+            _ => 2400f,
+        };
 
-            if (simulation.TryGetCityRespawnPosition(human.CityId, out var pos, out _))
-            {
-                raidTarget = pos;
-                break;
-            }
-
-            if (simulation.TryGetNetworkPlayerPosition(human.PlayerId, out var tankPos))
-            {
-                raidTarget = tankPos;
-                break;
-            }
-        }
-
-        if (raidTarget is not { } goal)
+    public static string StanceLabel(AiCityStance stance) =>
+        stance switch
         {
-            return;
-        }
-
-        foreach (var bot in _bots)
-        {
-            if (bot.Role == BotRoles.Attack)
-            {
-                simulation.SetNetworkBotGoal(bot.PlayerId, goal);
-            }
-        }
-    }
+            AiCityStance.LeanDefense => "Lean defense",
+            AiCityStance.LeanOffense => "Lean offense",
+            _ => "Balanced",
+        };
 
     private static bool TryPickCity(
         CityRegistry cities,
         CityMayorRegistry mayors,
         IEnumerable<(byte PlayerId, byte CityId, bool InGame)> humans,
+        HashSet<byte> reserved,
         out byte cityId)
     {
-        var occupied = new HashSet<byte>();
+        var occupied = new HashSet<byte>(reserved);
         foreach (var human in humans)
         {
             if (human.InGame)
@@ -190,7 +336,6 @@ public sealed class AiCityController
             }
         }
 
-        // Prefer BA-neighborhood options that are empty and not mayored.
         foreach (var candidate in CityRegistry.StartingCityOptions)
         {
             if (mayors.HasMayor(candidate) || occupied.Contains(candidate))
@@ -202,8 +347,7 @@ public sealed class AiCityController
             return true;
         }
 
-        // Fall back to spiral from current starting city.
-        foreach (var candidate in CityRegistry.EnumerateSpiralCityIds(cities.StartingCityId, citiesWanted: 24))
+        foreach (var candidate in CityRegistry.EnumerateSpiralCityIds(cities.StartingCityId, citiesWanted: 32))
         {
             if (mayors.HasMayor(candidate) || occupied.Contains(candidate))
             {
@@ -216,6 +360,15 @@ public sealed class AiCityController
 
         cityId = 0;
         return false;
+    }
+
+    private sealed class AiCitySlot(byte cityId, AiCityStance stance, List<AiBotPlayer> bots)
+    {
+        public byte CityId { get; } = cityId;
+
+        public AiCityStance Stance { get; } = stance;
+
+        public List<AiBotPlayer> Bots { get; } = bots;
     }
 }
 

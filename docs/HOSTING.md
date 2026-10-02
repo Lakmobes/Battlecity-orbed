@@ -72,7 +72,7 @@ No router port forwarding.
 2. First player to apply to an empty city becomes **mayor**  
 3. Later players apply → mayor hires them as soldiers (max 4 per city)  
 
-**Solo practice:** on the Host app, check **AI City** after Start. The server spawns a scripted enemy city (mayor + soldiers) that defend and raid so you have opposition without extra players.
+**Solo practice:** on the Host app, check **AI cities** after Start, set how many (1–4) and a stance (Lean defense, Balanced, Lean offense). Tanks appear only after a real player enters a city, and leave when nobody is in a city.
 
 ---
 

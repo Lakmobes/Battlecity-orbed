@@ -10,6 +10,7 @@ public enum SceneTransition
     InGameOffline,
     InGameOnline,
     Meeting,
+    Rankings,
     Interview,
     Quit,
 }

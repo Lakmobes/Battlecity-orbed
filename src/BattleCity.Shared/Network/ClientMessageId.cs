@@ -53,4 +53,5 @@ public enum ClientMessageId : byte
     CheatCheck = 48,
     StartingCity = 49,
     ChangeStartingCity = 50,
+    RequestRankBoard = 51,
 }

@@ -92,6 +92,13 @@ public sealed class SceneManager : IDisposable
                 }
 
                 break;
+            case SceneTransition.Rankings:
+                if (Context.NetworkClient is not null)
+                {
+                    ChangeScene(new RankingsScene(Context, Context.NetworkClient));
+                }
+
+                break;
             case SceneTransition.Interview:
                 if (Context.NetworkClient is not null)
                 {

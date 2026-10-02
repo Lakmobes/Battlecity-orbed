@@ -33,7 +33,8 @@ public static class FactoryProductionSystem
         CityBuildState? build,
         float deltaSeconds,
         Func<ushort>? allocateNetworkItemId = null,
-        Action<ServerAddItemPacket>? reportSpawn = null)
+        Action<ServerAddItemPacket>? reportSpawn = null,
+        Func<int, ItemType, bool>? tryDepositInInventory = null)
     {
         if (build is null)
         {
@@ -47,7 +48,7 @@ public static class FactoryProductionSystem
         }
 
         _accumulator = 0f;
-        UpdateCity(world, build, allocateNetworkItemId, reportSpawn);
+        UpdateCity(world, build, allocateNetworkItemId, reportSpawn, tryDepositInInventory);
     }
 
     public static void UpdateAll(
@@ -55,7 +56,8 @@ public static class FactoryProductionSystem
         IEnumerable<CityBuildState> builds,
         float deltaSeconds,
         Func<ushort>? allocateNetworkItemId = null,
-        Action<ServerAddItemPacket>? reportSpawn = null)
+        Action<ServerAddItemPacket>? reportSpawn = null,
+        Func<int, ItemType, bool>? tryDepositInInventory = null)
     {
         _accumulator += deltaSeconds;
         if (_accumulator < ProductionIntervalSeconds)
@@ -66,7 +68,7 @@ public static class FactoryProductionSystem
         _accumulator = 0f;
         foreach (var build in builds)
         {
-            UpdateCity(world, build, allocateNetworkItemId, reportSpawn);
+            UpdateCity(world, build, allocateNetworkItemId, reportSpawn, tryDepositInInventory);
         }
     }
 
@@ -74,7 +76,8 @@ public static class FactoryProductionSystem
         World world,
         CityBuildState build,
         Func<ushort>? allocateNetworkItemId,
-        Action<ServerAddItemPacket>? reportSpawn)
+        Action<ServerAddItemPacket>? reportSpawn,
+        Func<int, ItemType, bool>? tryDepositInInventory)
     {
         world.Query(
             in BuildingQuery,
@@ -122,6 +125,12 @@ public static class FactoryProductionSystem
                 var (bayX, bayY) = BuildingCatalog.GetFactoryBayTile(
                     building.GridAnchorX,
                     building.GridAnchorY);
+
+                if (tryDepositInInventory?.Invoke(cityId, product) == true)
+                {
+                    state.ItemsLeft = Math.Max(0, capacity - CountCityProduct(world, cityId, product));
+                    return;
+                }
 
                 var networkItemId = allocateNetworkItemId?.Invoke() ?? 0;
                 GameplayEntityFactory.CreatePlacedItem(

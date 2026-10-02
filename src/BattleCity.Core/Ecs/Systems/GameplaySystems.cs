@@ -188,7 +188,9 @@ public static class BulletCollisionSystem
         Action<Entity, int, int>? onHealthChanged = null,
         bool applyDamageToNetworkPlayers = true,
         int defendedCityId = 0,
-        Action<Entity, ItemType, int>? onPlacedItemDamaged = null)
+        Action<Entity, ItemType, int>? onPlacedItemDamaged = null,
+        Action<Entity>? onPlacedItemDestroyed = null,
+        bool destroyPlacedItems = true)
     {
         var hits = new List<Entity>();
 
@@ -225,7 +227,9 @@ public static class BulletCollisionSystem
                         damage.Value,
                         hits,
                         audio,
-                        onPlacedItemDamaged))
+                        onPlacedItemDamaged,
+                        onPlacedItemDestroyed,
+                        destroyPlacedItems))
                 {
                     return;
                 }
@@ -354,7 +358,9 @@ public static class BulletCollisionSystem
         int damage,
         List<Entity> hits,
         SimulationAudioBuffer? audio,
-        Action<Entity, ItemType, int>? onPlacedItemDamaged)
+        Action<Entity, ItemType, int>? onPlacedItemDamaged,
+        Action<Entity>? onPlacedItemDestroyed,
+        bool destroyPlacedItems)
     {
         var itemQuery = new QueryDescription().WithAll<PlacedItemRef, Transform2D, Health>();
         var previousBounds = AxisAlignedBox.FromCollider(previousPosition, collider);
@@ -370,8 +376,9 @@ public static class BulletCollisionSystem
             in itemQuery,
             (Entity entity, ref PlacedItemRef item, ref Transform2D transform, ref Health health) =>
             {
-                // Turrets must not damage themselves when their own shot clips the tile.
-                if (hit || entity == owner || !ItemHealth.IsDamageable(item.Type))
+                // Factory stock sits inactive until it is picked up or the factory is destroyed.
+                // Gunfire must not erase it and leave the tile looking empty on one side only.
+                if (hit || entity == owner || !item.Active || !ItemHealth.IsDamageable(item.Type))
                 {
                     return;
                 }
@@ -393,21 +400,30 @@ public static class BulletCollisionSystem
                 hit = true;
                 var impactPoint = itemBounds.TryGetSegmentEntryPoint(previousCenter, currentCenter)
                     ?? itemBounds.ClosestPoint(currentCenter);
-                health.Current = Math.Max(0, health.Current - damage);
-                MaybeTriggerUnderAttack(world, bulletEntity, item.CityId);
+                hits.Add(bulletEntity);
                 audio?.Play(SoundId.Hit, impactPoint);
                 GameplayEntityFactory.CreateExplosion(world, ExplosionKind.Small, impactPoint);
 
+                // Online clients wait for smRemItem so a local hit cannot free a tile the server still occupies.
+                if (!destroyPlacedItems)
+                {
+                    return;
+                }
+
+                health.Current = Math.Max(0, health.Current - damage);
+                MaybeTriggerUnderAttack(world, bulletEntity, item.CityId);
                 if (health.Current <= 0)
                 {
-                    world.Destroy(entity);
+                    onPlacedItemDestroyed?.Invoke(entity);
+                    if (destroyPlacedItems)
+                    {
+                        world.Destroy(entity);
+                    }
                 }
                 else if (ItemDamageSync.ShouldBroadcastItemLife(item.Type, health.Current))
                 {
                     onPlacedItemDamaged?.Invoke(entity, item.Type, health.Current);
                 }
-
-                hits.Add(bulletEntity);
             });
 
         return hit;

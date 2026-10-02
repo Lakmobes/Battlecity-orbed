@@ -211,7 +211,7 @@ public sealed class AccountDatabase : IDisposable
         {
             using var query = _connection.CreateCommand();
             query.CommandText = """
-                SELECT id, username, display_name, town, email, state, points, deaths, is_admin
+                SELECT id, username, display_name, town, email, state, points, monthly_points, deaths, is_admin
                 FROM accounts
                 WHERE username = $username
                 LIMIT 1;
@@ -232,8 +232,9 @@ public sealed class AccountDatabase : IDisposable
                 Email = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
                 State = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
                 Points = reader.GetInt32(6),
-                Deaths = reader.GetInt32(7),
-                IsAdmin = reader.GetInt32(8) != 0,
+                MonthlyPoints = reader.GetInt32(7),
+                Deaths = reader.GetInt32(8),
+                IsAdmin = reader.GetInt32(9) != 0,
             };
             return true;
         }
@@ -339,7 +340,7 @@ public sealed class AccountDatabase : IDisposable
         }
     }
 
-    public void AdjustPoints(string username, int delta)
+    public void AdjustPoints(string username, int delta, string? monthKey = null)
     {
         if (delta == 0)
         {
@@ -347,17 +348,101 @@ public sealed class AccountDatabase : IDisposable
         }
 
         username = NormalizeUsername(username);
+        var month = string.IsNullOrWhiteSpace(monthKey)
+            ? DateTime.Now.ToString("yyyy-MM")
+            : monthKey.Trim();
         lock (_sync)
         {
             using var update = _connection.CreateCommand();
             update.CommandText = """
                 UPDATE accounts
-                SET points = MAX(0, points + $delta)
+                SET points = MAX(0, points + $delta),
+                    monthly_points = CASE
+                        WHEN monthly_period = $month THEN MAX(0, monthly_points + $delta)
+                        ELSE MAX(0, $delta)
+                    END,
+                    monthly_period = $month,
+                    season_points = MAX(0, season_points + $delta)
                 WHERE username = $username;
                 """;
             update.Parameters.AddWithValue("$delta", delta);
+            update.Parameters.AddWithValue("$month", month);
             update.Parameters.AddWithValue("$username", username);
             update.ExecuteNonQuery();
+        }
+    }
+
+    public string SeasonName
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return ReadSetting("season_name") ?? "Season";
+            }
+        }
+    }
+
+    public void StartSeason(string name)
+    {
+        name = string.IsNullOrWhiteSpace(name) ? "Season" : name.Trim();
+        name = new string(name.Where(static ch => ch is >= (char)32 and <= (char)126).ToArray());
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = "Season";
+        }
+
+        if (name.Length > 24)
+        {
+            name = name[..24];
+        }
+
+        lock (_sync)
+        {
+            using var reset = _connection.CreateCommand();
+            reset.CommandText = "UPDATE accounts SET season_points = 0;";
+            reset.ExecuteNonQuery();
+            WriteSetting("season_name", name);
+        }
+    }
+
+    public IReadOnlyList<AccountRecord> ListTopByPoints(string column, int limit)
+    {
+        column = column switch
+        {
+            "monthly_points" => "monthly_points",
+            "season_points" => "season_points",
+            _ => "points",
+        };
+        limit = Math.Clamp(limit, 1, 20);
+
+        lock (_sync)
+        {
+            using var query = _connection.CreateCommand();
+            query.CommandText = $"""
+                SELECT username, display_name, points, monthly_points, season_points
+                FROM accounts
+                WHERE {column} > 0
+                ORDER BY {column} DESC, username COLLATE NOCASE
+                LIMIT {limit};
+                """;
+
+            var results = new List<AccountRecord>();
+            using var reader = query.ExecuteReader();
+            while (reader.Read())
+            {
+                results.Add(new AccountRecord
+                {
+                    Username = reader.GetString(0),
+                    DisplayName = reader.GetString(1),
+                    Town = string.Empty,
+                    Points = reader.GetInt32(2),
+                    MonthlyPoints = reader.GetInt32(3),
+                    SeasonPoints = reader.GetInt32(4),
+                });
+            }
+
+            return results;
         }
     }
 
@@ -409,6 +494,19 @@ public sealed class AccountDatabase : IDisposable
             seedAdmin.CommandText = "UPDATE accounts SET is_admin = 1 WHERE username = 'admin';";
             seedAdmin.ExecuteNonQuery();
         }
+
+        EnsureColumn("accounts", "monthly_points", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn("accounts", "monthly_period", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn("accounts", "season_points", "INTEGER NOT NULL DEFAULT 0");
+
+        using var settings = _connection.CreateCommand();
+        settings.CommandText = """
+            CREATE TABLE IF NOT EXISTS server_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            """;
+        settings.ExecuteNonQuery();
 
         using var bans = _connection.CreateCommand();
         bans.CommandText = """
@@ -520,6 +618,53 @@ public sealed class AccountDatabase : IDisposable
             delete.Parameters.AddWithValue("$username", username);
             return delete.ExecuteNonQuery() > 0;
         }
+    }
+
+    private void EnsureColumn(string table, string column, string definition)
+    {
+        using var info = _connection.CreateCommand();
+        info.CommandText = $"PRAGMA table_info({table});";
+        var exists = false;
+        using (var reader = info.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+
+        if (exists)
+        {
+            return;
+        }
+
+        using var alter = _connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition};";
+        alter.ExecuteNonQuery();
+    }
+
+    private string? ReadSetting(string key)
+    {
+        using var query = _connection.CreateCommand();
+        query.CommandText = "SELECT value FROM server_settings WHERE key = $key LIMIT 1;";
+        query.Parameters.AddWithValue("$key", key);
+        return query.ExecuteScalar() as string;
+    }
+
+    private void WriteSetting(string key, string value)
+    {
+        using var upsert = _connection.CreateCommand();
+        upsert.CommandText = """
+            INSERT INTO server_settings (key, value) VALUES ($key, $value)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            """;
+        upsert.Parameters.AddWithValue("$key", key);
+        upsert.Parameters.AddWithValue("$value", value);
+        upsert.ExecuteNonQuery();
     }
 
     private bool IsBannedUnlocked(string username)

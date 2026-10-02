@@ -21,7 +21,7 @@ public sealed class MeetingScene : IScene
     private readonly ScreenUiRenderer _ui;
     private readonly MenuInputReader _menuInput = new();
     private readonly InGameChatInput _chatInput = new();
-    private readonly InGameChatLog _chatLog = new();
+    private readonly InGameChatLog _chatLog = new(maxLines: 24);
     private readonly List<MeetingCityEntry> _cities = [];
     private int _selectedCityIndex;
     private int _hoverCityIndex = -1;
@@ -46,7 +46,7 @@ public sealed class MeetingScene : IScene
         _chatInput.Reset();
         _client.EnterMeetingRoom();
         _chatLog.Append(
-            "Welcome to the meeting room. Up/Down select a city, Enter to apply, Tab to chat, R to refresh.",
+            "Welcome to the meeting room. Up/Down select a city, Enter to apply, Tab to chat, L for ranks, R to refresh.",
             ChatColorResolver.System);
     }
 
@@ -94,6 +94,13 @@ public sealed class MeetingScene : IScene
             RefreshCityList();
         }
 
+        if (WasPressed(keyboard, Keys.L) && !_chatInput.IsActive)
+        {
+            _context.Audio.Play(SoundId.Click);
+            _context.NetworkClient = _client;
+            return SceneTransition.Rankings;
+        }
+
         // Tab opens lobby chat so Enter stays free for Apply.
         var chatUpdate = _chatInput.Update(keyboard, openKey: Keys.Tab);
         if (chatUpdate.Submitted && !string.IsNullOrWhiteSpace(chatUpdate.Message))
@@ -123,6 +130,12 @@ public sealed class MeetingScene : IScene
             if (MeetingRoomLayout.RefreshButton.Contains(logicalPoint))
             {
                 RefreshCityList();
+            }
+            else if (MeetingRoomLayout.RanksButton.Contains(logicalPoint))
+            {
+                _context.Audio.Play(SoundId.Click);
+                _context.NetworkClient = _client;
+                return SceneTransition.Rankings;
             }
             else if (TryGetCityIndexAtLogical(logicalPoint.X, logicalPoint.Y, out var cityIndex))
             {
@@ -288,8 +301,8 @@ public sealed class MeetingScene : IScene
                 break;
             }
 
-            _ui.DrawText(spriteBatch, line.Text, panel.X + MeetingRoomLayout.PanelPadding, chatY, line.Color);
-            chatY += 18;
+            _ui.DrawText(spriteBatch, line.Text, panel.X + MeetingRoomLayout.PanelPadding, chatY, line.Color, 0.85f);
+            chatY += 15;
         }
 
         if (_chatInput.IsActive)
@@ -324,9 +337,13 @@ public sealed class MeetingScene : IScene
         var refreshHover = refresh.Contains(_previousLogicalMouse);
         _ui.DrawMenuButton(spriteBatch, refresh, "Refresh (R)", selected: refreshHover, titleFont: false);
 
+        var ranks = MeetingRoomLayout.RanksButton;
+        var ranksHover = ranks.Contains(_previousLogicalMouse);
+        _ui.DrawMenuButton(spriteBatch, ranks, "Ranks (L)", selected: ranksHover, titleFont: false);
+
         _ui.DrawCenteredText(
             spriteBatch,
-            $"Player {_client.PlayerId}  |  Up/Down select  |  Enter apply  |  Tab chat  |  Esc quit",
+            $"Player {_client.PlayerId}  |  Up/Down city  |  Enter apply  |  Tab chat  |  Esc quit",
             screenWidth / 2,
             UiLayout.LogicalHeight - 28,
             MenuTheme.TextMuted);

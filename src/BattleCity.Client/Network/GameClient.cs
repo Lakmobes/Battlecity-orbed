@@ -53,6 +53,7 @@ public enum GameClientEventKind
     AdminAction,
     BanEntry,
     AppendNews,
+    RankBoard,
     StartingCity,
     AdminEdit,
     Kicked,
@@ -131,6 +132,12 @@ public readonly struct GameClientEvent
     public ServerBanPacket BanEntry { get; init; }
 
     public string NewsText { get; init; } = string.Empty;
+
+    public byte RankBoardKind { get; init; }
+
+    public string RankSeasonName { get; init; } = string.Empty;
+
+    public (string Name, int Points)[] RankRows { get; init; } = [];
 
     /// <summary>Legacy <c>smKicked</c> payload command byte (Kick/Ban) when present.</summary>
     public byte KickCommand { get; init; }
@@ -323,6 +330,8 @@ public sealed class GameClient : IDisposable
     public void EnterMeetingRoom() => Send(ClientMessageId.SetState, "C"u8);
 
     public void RefreshCityList() => Send(ClientMessageId.RefreshList, " "u8);
+
+    public void RequestRankBoard(byte board) => Send(ClientMessageId.RequestRankBoard, [board]);
 
     public void ApplyToCity(byte cityId)
     {
@@ -953,6 +962,18 @@ public sealed class GameClient : IDisposable
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.AppendNews)
                 {
                     NewsText = System.Text.Encoding.ASCII.GetString(packet.Payload.Span).TrimEnd('\0'),
+                });
+                break;
+            case ServerMessageId.RankBoard when RankBoardPacket.TryRead(
+                packet.Payload.Span,
+                out var rankBoard,
+                out var rankSeason,
+                out var rankRows):
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.RankBoard)
+                {
+                    RankBoardKind = rankBoard,
+                    RankSeasonName = rankSeason,
+                    RankRows = rankRows,
                 });
                 break;
             case ServerMessageId.StartingCity when packet.Payload.Length >= StartingCityPacket.Size:
