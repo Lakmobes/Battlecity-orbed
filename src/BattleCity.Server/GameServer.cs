@@ -35,6 +35,7 @@ public sealed class GameServer : IDisposable
     private readonly HashSet<byte> _botPlayerIds = [];
     private readonly CityBuildPopSync _buildPopSync = new();
     private readonly FactoryItemCountSync _factoryItemCountSync = new();
+    private readonly CityDestructSchedule _cityDestruct = new();
     private byte _nextPlayerId = 1;
     private bool _worldReady;
     private bool _started;
@@ -180,6 +181,7 @@ public sealed class GameServer : IDisposable
         BroadcastPendingHpEvents();
         BroadcastPendingItemLifeEvents();
         BroadcastAiCityUpdates(deltaSeconds);
+        TickAbandonedCities(deltaSeconds);
         RemoveDisconnectedSessions();
 
         if (_shutdownRequested)
@@ -655,6 +657,9 @@ public sealed class GameServer : IDisposable
             case ClientMessageId.Successor:
                 HandleSuccessor(session, packet.Payload.Span);
                 break;
+            case ClientMessageId.SetMayor:
+                HandleSetMayor(session, packet.Payload.Span);
+                break;
             case ClientMessageId.Fired:
                 HandleFired(session, packet.Payload.Span);
                 break;
@@ -1034,30 +1039,38 @@ public sealed class GameServer : IDisposable
         }
 
         var board = payload.Length > 0 ? payload[0] : (byte)0;
-        if (board > 2)
+        if (board > 3)
         {
             board = 0;
         }
 
-        var column = board switch
+        List<(string Name, int Points)> rows;
+        if (board == 3)
         {
-            1 => "monthly_points",
-            2 => "season_points",
-            _ => "points",
-        };
-
-        var top = _accounts.ListTopByPoints(column, RankBoardPacket.MaxRows);
-        var rows = new List<(string Name, int Points)>(top.Count);
-        foreach (var account in top)
+            rows = _accounts.ListTopByPointsPerDeath(RankBoardPacket.MaxRows);
+        }
+        else
         {
-            var name = string.IsNullOrWhiteSpace(account.DisplayName) ? account.Username : account.DisplayName;
-            var points = board switch
+            var column = board switch
             {
-                1 => account.MonthlyPoints,
-                2 => account.SeasonPoints,
-                _ => account.Points,
+                1 => "monthly_points",
+                2 => "season_points",
+                _ => "points",
             };
-            rows.Add((name, points));
+
+            var top = _accounts.ListTopByPoints(column, RankBoardPacket.MaxRows);
+            rows = new List<(string Name, int Points)>(top.Count);
+            foreach (var account in top)
+            {
+                var name = string.IsNullOrWhiteSpace(account.DisplayName) ? account.Username : account.DisplayName;
+                var points = board switch
+                {
+                    1 => account.MonthlyPoints,
+                    2 => account.SeasonPoints,
+                    _ => account.Points,
+                };
+                rows.Add((name, points));
+            }
         }
 
         session.SendServer(ServerMessageId.RankBoard, RankBoardPacket.Create(board, _accounts.SeasonName, rows));
@@ -1340,14 +1353,17 @@ public sealed class GameServer : IDisposable
         recipient.SendServer(ServerMessageId.Comms, packet[..length]);
     }
 
-    private void LeaveGame(ClientSession session)
+    private void LeaveGame(ClientSession session, bool showLeftMessage = true, bool transferMayor = true)
     {
         if (session.State != PlayerSessionState.InGame)
         {
             return;
         }
 
-        NotifyPlayerLeftBattlefield(session);
+        if (showLeftMessage)
+        {
+            NotifyPlayerLeftBattlefield(session);
+        }
 
         var slot = _cities.GetOrCreate(session.CityId);
         if (slot.SuccessorPlayerId == session.PlayerId)
@@ -1378,7 +1394,11 @@ public sealed class GameServer : IDisposable
 
             // Notify client IsMayor=false before transferring (TransferMayor promotes successor).
             SetMayor(session, isMayor: false);
-            TransferMayor(session.CityId, excludedPlayerId: session.PlayerId);
+            if (transferMayor)
+            {
+                TransferMayor(session.CityId, excludedPlayerId: session.PlayerId);
+            }
+
             slot.SuccessorPlayerId = null;
         }
 
@@ -1404,15 +1424,17 @@ public sealed class GameServer : IDisposable
         BroadcastLobbyExcept(session.PlayerId, ServerMessageId.ClearPlayer, clearPlayer);
     }
 
-    private int CountInGamePlayersInCity(byte cityId)
+    private int CountInGamePlayersInCity(byte cityId, byte? excludedPlayerId = null)
     {
         var count = 0;
         foreach (var player in GetInGameSessions())
         {
-            if (player.CityId == cityId)
+            if (player.CityId != cityId || player.PlayerId == excludedPlayerId)
             {
-                count++;
+                continue;
             }
+
+            count++;
         }
 
         return count;
@@ -2588,6 +2610,7 @@ public sealed class GameServer : IDisposable
             BroadcastAll(ServerMessageId.Orbed, payload);
 
             ApplyOrbPointAwards(orbEvent);
+            _cityDestruct.Cancel((byte)orbEvent.VictimCityId);
             BootOrbedVictims((byte)orbEvent.VictimCityId);
 
             Console.WriteLine(
@@ -2620,8 +2643,9 @@ public sealed class GameServer : IDisposable
     {
         foreach (var session in GetInGameSessions().Where(s => s.CityId == victimCityId).ToList())
         {
-            LeaveGame(session);
-            session.SendServer(ServerMessageId.Fired, " "u8);
+            // Legacy wasOrbed calls LeaveGame(showMessage: false, transferMayor: false).
+            // The orbed packet already returns the client to the meeting room.
+            LeaveGame(session, showLeftMessage: false, transferMayor: false);
         }
     }
 
@@ -2836,6 +2860,7 @@ public sealed class GameServer : IDisposable
             || !TryGetSession(successorId, out var successor))
         {
             slot.SuccessorPlayerId = null;
+            BeginCityAbandon(cityId, excludedPlayerId);
             return;
         }
 
@@ -2871,6 +2896,80 @@ public sealed class GameServer : IDisposable
         slot.SuccessorPlayerId = successorId;
     }
 
+    /// <summary>Legacy <c>cmSetMayor</c> — the mayor hands the city to a teammate and stays in the city.</summary>
+    private void HandleSetMayor(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsMayor || !session.IsInGame || payload.Length == 0)
+        {
+            return;
+        }
+
+        var targetId = payload[0];
+        if (targetId == session.PlayerId
+            || !TryGetSession(targetId, out var target)
+            || !target.IsInGame
+            || target.CityId != session.CityId)
+        {
+            return;
+        }
+
+        SetMayor(session, isMayor: false);
+        SetMayor(target, isMayor: true);
+        _cityDestruct.Cancel(session.CityId);
+    }
+
+    private void BeginCityAbandon(byte cityId, byte excludedPlayerId)
+    {
+        if (_mayors.HasMayor(cityId) || CountInGamePlayersInCity(cityId, excludedPlayerId) > 0)
+        {
+            _cityDestruct.Cancel(cityId);
+            return;
+        }
+
+        if (!_simulation.TryGetCityBuild(cityId, out var build) || !build.IsOrbable)
+        {
+            DestroyAbandonedCity(cityId);
+            return;
+        }
+
+        var seconds = EconomyConstants.TimerCityDestruct / 1000f;
+        _cityDestruct.Schedule(cityId, seconds);
+        var name = CityCatalog.IsValidCityId(cityId) ? CityCatalog.GetName(cityId) : cityId.ToString();
+        Console.WriteLine($"{name} has no mayor. It will be destroyed in {seconds:0} seconds.");
+    }
+
+    private void TickAbandonedCities(float deltaSeconds)
+    {
+        foreach (var cityId in _cityDestruct.Tick(deltaSeconds))
+        {
+            if (_mayors.HasMayor(cityId))
+            {
+                continue;
+            }
+
+            var occupant = GetInGameSessions().FirstOrDefault(session => session.CityId == cityId);
+            if (occupant is not null)
+            {
+                SetMayor(occupant, isMayor: true);
+                continue;
+            }
+
+            DestroyAbandonedCity(cityId);
+        }
+    }
+
+    private void DestroyAbandonedCity(byte cityId)
+    {
+        _cityDestruct.Cancel(cityId);
+        _simulation.DestroyAbandonedCity(cityId);
+        Span<byte> payload = stackalloc byte[1];
+        payload[0] = cityId;
+        BroadcastAll(ServerMessageId.DestroyCity, payload);
+        var name = CityCatalog.IsValidCityId(cityId) ? CityCatalog.GetName(cityId) : cityId.ToString();
+        Console.WriteLine($"{name} was destroyed.");
+        BroadcastCityListToMeetingClients();
+    }
+
     private void SetMayor(ClientSession session, bool isMayor)
     {
         session.IsMayor = isMayor;
@@ -2879,6 +2978,7 @@ public sealed class GameServer : IDisposable
         if (isMayor)
         {
             _mayors.Assign(session.CityId, session.PlayerId);
+            _cityDestruct.Cancel(session.CityId);
         }
         else
         {

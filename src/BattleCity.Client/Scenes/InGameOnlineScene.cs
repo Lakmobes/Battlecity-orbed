@@ -623,6 +623,9 @@ public sealed class InGameOnlineScene : IScene
                     _cachedAdminEdit = networkEvent.AdminEdit;
                     AppendAdminEditChat(networkEvent.AdminEdit);
                     break;
+                case GameClientEventKind.DestroyCity:
+                    _simulation.DestroyAbandonedCity(networkEvent.DestroyedCityId);
+                    break;
                 case GameClientEventKind.Orbed:
                     _simulation.ApplyNetworkOrb(
                         networkEvent.Orbed.VictimCity,
@@ -1290,6 +1293,9 @@ public sealed class InGameOnlineScene : IScene
             case ChatCommandKind.Heir:
                 SetMayorHeir(command.Message);
                 break;
+            case ChatCommandKind.SetMayor:
+                TransferMayorship(command.Message);
+                break;
             case ChatCommandKind.Kick:
                 SendAdminModeration(command.Message, AdminCommands.Kick, "kick");
                 break;
@@ -1386,6 +1392,41 @@ public sealed class InGameOnlineScene : IScene
 
         _client.SendSuccessor(heirId);
         InGameChatService.AppendSystem(_chatLog, $"Mayor successor set to {heirName}.");
+    }
+
+    private void TransferMayorship(string argument)
+    {
+        if (!_client.IsMayor)
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only the mayor can hand the city over.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(argument))
+        {
+            InGameChatService.AppendSystem(_chatLog, "Usage: /mayor Name");
+            return;
+        }
+
+        if (!WhisperRecipientMatcher.TryMatch(
+                argument,
+                _client.PlayerId,
+                _remotePlayers.EnumerateDisplayNames(),
+                out var targetId,
+                out var targetName))
+        {
+            InGameChatService.AppendSystem(_chatLog, $"Player not found: {argument}");
+            return;
+        }
+
+        if (!_remotePlayers.TryGetCityId(targetId, out var targetCity) || targetCity != GetLocalCityId())
+        {
+            InGameChatService.AppendSystem(_chatLog, $"{targetName} is not in your city.");
+            return;
+        }
+
+        _client.SendSetMayor(targetId);
+        InGameChatService.AppendSystem(_chatLog, $"Handed the city to {targetName}.");
     }
 
     private void SendAdminModeration(string namePrefix, byte command, string verb)

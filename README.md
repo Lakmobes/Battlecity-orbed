@@ -18,9 +18,9 @@ This repository’s playable path is a **C# + MonoGame** rewrite. The original C
 | Doc | Why read it |
 |-----|-------------|
 | [docs/PROJECT-STATUS.md](docs/PROJECT-STATUS.md) | Current checkpoint, architecture, next tasks |
-| [docs/LEGACY-DELTAS.md](docs/LEGACY-DELTAS.md) | What’s intentionally different from the C++ game |
+| [docs/LEGACY-DELTAS.md](docs/LEGACY-DELTAS.md) | Choices that must not be reverted, how they work, and remaining parity |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | How to build, test, and continue work |
-| [docs/REWRITE-PROGRESS.md](docs/REWRITE-PROGRESS.md) | Phase-by-phase checklist (0–30 done) |
+| [docs/REWRITE-PROGRESS.md](docs/REWRITE-PROGRESS.md) | Phase checklist (0–42 done) |
 | [docs/HOSTING.md](docs/HOSTING.md) | Hosting for friends (LAN / Tailscale) |
 
 ### Requirements
@@ -36,7 +36,8 @@ dotnet run --project src/BattleCity.Client/BattleCity.Client.csproj
 ```
 
 - **Play Offline** — Buenos Aires sandbox  
-- **Play Online** — start a server first (see below), then login → Meeting Room  
+- **Play Online (Local Server)** — starts an embedded server on `127.0.0.1:5643` (or reuses one already running), then login → Meeting Room  
+- **Play with friends** — start Server.Host first (see below), then paste the invite into login **Server**  
 
 ### Host / play with friends (no Visual Studio)
 

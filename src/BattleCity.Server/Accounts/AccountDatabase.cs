@@ -446,6 +446,37 @@ public sealed class AccountDatabase : IDisposable
         }
     }
 
+    /// <summary>
+    /// Legacy monthly-style board: <c>(Points * 10000) / Deaths</c> for accounts with more than 100 deaths.
+    /// </summary>
+    public List<(string Name, int Points)> ListTopByPointsPerDeath(int limit)
+    {
+        limit = Math.Clamp(limit, 1, 20);
+        lock (_sync)
+        {
+            using var query = _connection.CreateCommand();
+            query.CommandText = $"""
+                SELECT username, display_name, (points * 10000) / deaths AS ratio
+                FROM accounts
+                WHERE deaths > 100 AND points > 0
+                ORDER BY ratio DESC, username COLLATE NOCASE
+                LIMIT {limit};
+                """;
+
+            var results = new List<(string Name, int Points)>();
+            using var reader = query.ExecuteReader();
+            while (reader.Read())
+            {
+                var display = reader.GetString(1);
+                var name = string.IsNullOrWhiteSpace(display) ? reader.GetString(0) : display;
+                var ratio = reader.GetInt64(2);
+                results.Add((name, (int)Math.Clamp(ratio, 0, int.MaxValue)));
+            }
+
+            return results;
+        }
+    }
+
     public void Dispose() => _connection.Dispose();
 
     private void EnsureSchema()

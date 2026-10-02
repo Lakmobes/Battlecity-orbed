@@ -59,6 +59,21 @@ public class ChatCommandTests
     }
 
     [Fact]
+    public void Parse_MayorCommand_ExtractsNameWithoutSwallowingMayoral()
+    {
+        var named = ChatCommandParser.Parse("/mayor Alice");
+        Assert.Equal(ChatCommandKind.SetMayor, named.Kind);
+        Assert.Equal("Alice", named.Message);
+
+        var bare = ChatCommandParser.Parse("/mayor");
+        Assert.Equal(ChatCommandKind.SetMayor, bare.Kind);
+        Assert.Equal(string.Empty, bare.Message);
+
+        var other = ChatCommandParser.Parse("/mayoral decree");
+        Assert.Equal(ChatCommandKind.Normal, other.Kind);
+    }
+
+    [Fact]
     public void Parse_KickAndBanCommands_ExtractName()
     {
         var kick = ChatCommandParser.Parse("/kick Alice");

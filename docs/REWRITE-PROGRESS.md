@@ -48,8 +48,9 @@ For the current handoff checkpoint (host UI, modern HUD, population, recharge ab
 - [x] **Phase 39 — Admin Bans/News Wire** (`cmAdmin` 8–10 + `cmChangeNews`; `/bans` `/unban` `/news` `/setnews`)
 - [x] **Phase 40 — Starting City + Account Edit** (`cmChangeStartingCity` / `cmAdminEdit`; `/startcity`, `/account`, `/editaccount`)
 - [x] **Phase 41 — AI City** (Host toggle; scripted enemy mayor + soldiers via `BotAi` + network player sync)
+- [x] **Phase 42 — Abandoned cities, mayor handoff, points per death** (`smDestroyCity`, `cmSetMayor` / `/mayor`, rankings tab 4)
 
-Finance HUD (`smFinance`) is intentionally **out of scope** for this rewrite.
+Finance HUD (`smFinance`) is intentionally **out of scope** for this rewrite. Do not add it unless [LEGACY-DELTAS.md](LEGACY-DELTAS.md) is updated first.
 
 ### Post–Phase 30 — PC polish checkpoint (2026-07)
 
@@ -83,14 +84,15 @@ There is **no fixed total phase count** — phases are added incrementally as le
 | 39 | `cmAdmin` 8–10 + `cmChangeNews` | Ban list / unban / news over the wire (`/bans` `/unban` `/news` `/setnews`) |
 | 40 | `cmStartingCity` / `cmChangeStartingCity` / `cmAdminEdit` | Meeting seed city + account editor (`/startcity`, `/account`, `/editaccount`) |
 | 41 | Host AI City | Scripted enemy city (mayor + soldiers) for solo / light MP opposition |
+| 42 | `smDestroyCity`, `cmSetMayor` | Empty-city destruct (immediate if not orbable, 120s if orbable), `/mayor`, points-per-death board. Orb boot no longer sends Fired. |
 
-Likely next targets: polish leftover deltas in [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md); optional stress / Smoke extension; playtest / release zip refresh.
+Likely next targets are the open rows in [LEGACY-DELTAS.md](LEGACY-DELTAS.md) (AI city buildings, `cmAutoBuild`, player/city info panels, top-20 boards). Do not revert the locked inventory, spawn, compass, or server-authority choices in that file.
 
 **Play Online (Local Server)** auto-starts an embedded `GameServer` on `127.0.0.1:5643` (or reuses an existing listener). Friend hosting still uses Server.Host.
 
 CI (`.github/workflows/build.yml`) runs unit tests then `tools/BattleCity.Smoke` (1 mayor + 3 soldiers join + move).
 
-Phases **0–41** are complete (42 numbered milestones including Phase 0).
+Phases **0–42** are complete (43 numbered milestones including Phase 0).
 
 ## Build & Run
 

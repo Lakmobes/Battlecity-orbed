@@ -3,7 +3,7 @@
 ## Before you change gameplay
 
 1. Prefer putting rules in **`BattleCity.Core`** so offline, client prediction, and server stay aligned.
-2. Check [LEGACY-DELTAS.md](LEGACY-DELTAS.md) so you don’t “fix” an intentional remake choice.
+2. Check [LEGACY-DELTAS.md](LEGACY-DELTAS.md) **before** changing gameplay. The “Do not reverse” section is the list of choices that look like bugs next to the C++ source and are not. Open parity work is the “Still open for parity” section.
 3. For network work: add/adjust packets in `BattleCity.Shared`, handle in `GameServer`, apply in `GameSimulation` / online scene.
 4. Add or extend a test under `tests/` when the rule is pure logic (collision, population, packets).
 
@@ -41,8 +41,9 @@ dotnet run --project tools/BattleCity.Smoke/BattleCity.Smoke.csproj
 ## Where to start reading
 
 1. [PROJECT-STATUS.md](PROJECT-STATUS.md) — checkpoint overview  
-2. [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) — legacy parity audit & fix backlog (cities, spawn, compass)  
+2. [LEGACY-DELTAS.md](LEGACY-DELTAS.md) — locked remake choices and remaining parity  
 3. [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) — what phases already cover  
-4. `GameSimulation` tick order — systems pipeline  
-5. `GameServer` message switch — online authority  
-6. `InGameScene` / `InGameOnlineScene` — client loop  
+4. [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) — cities / spawn / compass audit (done)  
+5. `GameSimulation` tick order — systems pipeline  
+6. `GameServer` message switch — online authority  
+7. `InGameScene` / `InGameOnlineScene` — client loop  

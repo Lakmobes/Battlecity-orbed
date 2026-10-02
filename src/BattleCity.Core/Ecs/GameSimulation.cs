@@ -2763,6 +2763,77 @@ public sealed class GameSimulation : IDisposable
         }
     }
 
+    /// <summary>
+    /// Legacy <c>CCity::destroy</c> / <c>resetToDefault</c> when a city is abandoned.
+    /// Removes every building except the command center, deletes that city's items, and resets the build tree.
+    /// </summary>
+    public void DestroyAbandonedCity(int cityId)
+    {
+        if (!TryGetCityBuild(cityId, out var build))
+        {
+            return;
+        }
+
+        var buildings = new List<Entity>();
+        var buildingQuery = new QueryDescription().WithAll<BuildingRef>();
+        _world.Query(
+            in buildingQuery,
+            (Entity entity, ref BuildingRef building) =>
+            {
+                if (building.CityId == cityId && !BuildingCatalog.IsCommandCenter(building.TypeCode))
+                {
+                    buildings.Add(entity);
+                }
+            });
+
+        foreach (var entity in buildings)
+        {
+            if (!_world.IsAlive(entity) || !_world.Has<BuildingRef>(entity))
+            {
+                continue;
+            }
+
+            ref var building = ref _world.Get<BuildingRef>(entity);
+            if (building.NetworkId != 0)
+            {
+                BuildingCommandService.TryDemolishByNetworkId(_world, build, building.NetworkId);
+            }
+            else
+            {
+                BuildingCommandService.TryDemolishAt(_world, build, building.GridAnchorX, building.GridAnchorY);
+            }
+        }
+
+        var items = new List<Entity>();
+        var itemQuery = new QueryDescription().WithAll<PlacedItemRef>();
+        _world.Query(
+            in itemQuery,
+            (Entity entity, ref PlacedItemRef item) =>
+            {
+                if (item.CityId == cityId)
+                {
+                    items.Add(entity);
+                }
+            });
+
+        foreach (var entity in items)
+        {
+            if (_world.IsAlive(entity))
+            {
+                _world.Destroy(entity);
+            }
+        }
+
+        CityBuildInitializer.ApplyLegacyStartingPermissions(build);
+        build.CurrentBuildingCount = 1;
+        build.MaxBuildingCount = 1;
+        build.HadBombFactory = false;
+        build.HadOrbFactory = false;
+        build.Orbs = 0;
+        Array.Clear(build.ResearchStatus, 0, build.ResearchStatus.Length);
+        Array.Clear(build.ResearchTimers, 0, build.ResearchTimers.Length);
+    }
+
     public bool TryGetPlayerInputMove(out int move)
     {
         var query = new QueryDescription().WithAll<InputControlled, InputCommand>();

@@ -148,4 +148,22 @@ public sealed class AccountDatabaseTests : IDisposable
             _accounts.ListTopByPoints("points", 10),
             account => account.Username == "Ace");
     }
+
+    [Fact]
+    public void ListTopByPointsPerDeath_RequiresMoreThan100Deaths()
+    {
+        Assert.Equal(AccountCreateResult.Created, _accounts.TryCreateAccount(
+            "Low", "secret123", "Buenos Aires", string.Empty, "Low", string.Empty));
+        Assert.Equal(AccountCreateResult.Created, _accounts.TryCreateAccount(
+            "High", "secret123", "Buenos Aires", string.Empty, "High", string.Empty));
+        Assert.True(_accounts.TryApplyAdminEdit("Low", null, "Low", "Buenos Aires", "", "", 500, 100, false));
+        Assert.True(_accounts.TryApplyAdminEdit("High", null, "High", "Buenos Aires", "", "", 200, 200, false));
+
+        var board = _accounts.ListTopByPointsPerDeath(10);
+
+        Assert.DoesNotContain(board, row => row.Name == "Low");
+        var high = Assert.Single(board);
+        Assert.Equal("High", high.Name);
+        Assert.Equal((200 * 10000) / 200, high.Points);
+    }
 }

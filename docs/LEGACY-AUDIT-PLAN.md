@@ -1,13 +1,15 @@
 # Legacy Audit & Parity Plan
 
-**Last updated:** 2026-09-08  
-**Purpose:** Single place to track **what changed** vs the original C++ game (`legacy/`), **what should match**, and **what to fix next** — especially cities, spawning, and compass (reported as feeling “off”).
+**Last updated:** 2026-10-01  
+**Status:** Cities, spawning, and compass backlog below is **done**. Do not reopen those items. Ongoing “do not reverse” rules and remaining server parity live in [LEGACY-DELTAS.md](LEGACY-DELTAS.md).
+
+**Purpose:** Record of the cities / spawning / compass audit against `legacy/`, including what was matched and what was deliberately kept different.
 
 **Companion docs:**
 
 | Doc | Role |
 |-----|------|
-| [LEGACY-DELTAS.md](LEGACY-DELTAS.md) | Short delta cheat sheet (intentional changes + naming traps) |
+| [LEGACY-DELTAS.md](LEGACY-DELTAS.md) | Locked choices, how they work, and parity that is still open |
 | [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) | Phase checklist (network packets, features shipped) |
 | [PROJECT-STATUS.md](PROJECT-STATUS.md) | Handoff / how to run |
 
@@ -273,7 +275,7 @@ Progress as of **2026-09-08**: cities + spawn/compass audit items complete.
 
 1. ~~**Server world layout:**~~ **Decided 2026-09-08:** CC-only multiplayer (`LoadMultiplayerWorld`); offline keeps demo.city.
 2. ~~**Spawn/coords:**~~ **Decided 2026-09-08:** drive platform for spawn + compass (intentional correction vs formula).
-3. **Compass outer ring:** Keep as modern feature or hide until orb mechanics understood?
+3. ~~**Compass outer ring:**~~ **Kept** (2026-10-01). Home arrow is the 8-sector drive-pad arrow. The second arrow points at the nearest orbable city. Do not remove it to match the single original arrow.
 4. ~~**Meeting room:**~~ **Decided 2026-09-08:** full legacy spiral + hiring filters.
 
 Record answers in [LEGACY-DELTAS.md](LEGACY-DELTAS.md) when decided.

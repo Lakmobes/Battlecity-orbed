@@ -1,12 +1,12 @@
 # Project Status (Handoff)
 
-**Last updated:** 2026-09-25  
+**Last updated:** 2026-10-01  
 **Repo:** C# / MonoGame rewrite of Battle City (legacy C++ remains in `legacy/`)  
 **Goal of this checkpoint:** ship a playable PC build friends can host, with docs so a new contributor can continue.
 
 ## Where things stand
 
-Phases **0–41** in [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) are complete: headless ECS sim, offline sandbox, legacy-framed TCP multiplayer (accounts, meeting/hiring, combat sync, build tree, respawn/warp, admin tools, **AI City** opposition, etc.).
+Phases **0–42** in [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) are complete: headless ECS sim, offline sandbox, legacy-framed TCP multiplayer (accounts, meeting/hiring, combat sync, build tree, respawn/warp, admin tools, **AI City** opposition, abandoned-city destruction, mayor handoff, points-per-death rankings).
 
 On top of that, this checkpoint adds **PC polish and sharing**:
 
@@ -81,18 +81,23 @@ Share `dist/BattleCity-win-x64.zip`. Host runs `Server/BattleCity.Server.Host.ex
 | Doc | Purpose |
 |-----|---------|
 | [PROJECT-STATUS.md](PROJECT-STATUS.md) | This handoff overview |
-| [LEGACY-DELTAS.md](LEGACY-DELTAS.md) | Intentional + accidental differences vs C++ |
-| [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) | Full legacy audit, cities/spawn/compass gaps, fix backlog |
+| [LEGACY-DELTAS.md](LEGACY-DELTAS.md) | **Do not reverse** these choices. How cities, inventory, and rankings work. What parity is still open. |
+| [REMAKE-REVIEW.md](REMAKE-REVIEW.md) | Playtest record of the same choices, in plain language |
+| [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) | Cities / spawn / compass audit (that backlog is done) |
 | [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) | Phase checklist and packet history |
 | [HOSTING.md](HOSTING.md) | LAN / Tailscale / firewall for players |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to pick up work safely |
 
 ## Suggested next work
 
-1. Optional stress harness / Smoke extension for longer sessions
-2. Polish any leftover items in [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md)
-3. Playtest AI City + admin suite; optional release zip refresh
+Open parity is listed in [LEGACY-DELTAS.md](LEGACY-DELTAS.md). The cities / spawn / compass audit is finished. Sensible next items:
 
-See [LEGACY-AUDIT-PLAN.md](LEGACY-AUDIT-PLAN.md) for the full backlog.
+1. AI city building template (house, hospital, a factory, walls)
+2. Auto-build from a `.city` file (`cmAutoBuild`), only while the city is not orbable
+3. Click-player and right-click city info panels
+4. Rank boards of 20, if the packet cap of 10 should match the original
+5. Optional stress harness / longer Smoke session
+
+`smFinance` stays out of scope until that decision is explicitly changed.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow tips.

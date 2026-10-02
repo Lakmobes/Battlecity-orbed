@@ -56,6 +56,7 @@ public enum GameClientEventKind
     RankBoard,
     StartingCity,
     AdminEdit,
+    DestroyCity,
     Kicked,
     Error,
     Disconnected,
@@ -143,6 +144,8 @@ public readonly struct GameClientEvent
     public byte KickCommand { get; init; }
 
     public int StartingCityId { get; init; }
+
+    public byte DestroyedCityId { get; init; }
 
     public AdminEditPacket AdminEdit { get; init; }
 
@@ -366,6 +369,19 @@ public sealed class GameClient : IDisposable
         Span<byte> payload = stackalloc byte[1];
         payload[0] = successorPlayerId;
         Send(ClientMessageId.Successor, payload);
+    }
+
+    /// <summary>Legacy <c>cmSetMayor</c> — hand the city to a teammate.</summary>
+    public void SendSetMayor(byte targetPlayerId)
+    {
+        if (!IsInGame || !IsMayor)
+        {
+            return;
+        }
+
+        Span<byte> payload = stackalloc byte[1];
+        payload[0] = targetPlayerId;
+        Send(ClientMessageId.SetMayor, payload);
     }
 
     /// <summary>Legacy <c>cmAdmin</c> — kick/ban/warp/summon/join/spawn/shutdown/bans/news.</summary>
@@ -1016,6 +1032,12 @@ public sealed class GameClient : IDisposable
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.MayorUpdate)
                 {
                     MayorUpdate = mayorUpdate,
+                });
+                break;
+            case ServerMessageId.DestroyCity when packet.Payload.Length >= 1:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.DestroyCity)
+                {
+                    DestroyedCityId = packet.Payload.Span[0],
                 });
                 break;
             case ServerMessageId.Orbed when packet.Payload.Length >= ServerOrbedCityPacket.Size:

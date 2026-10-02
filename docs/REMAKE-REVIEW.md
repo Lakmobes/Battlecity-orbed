@@ -2,6 +2,8 @@
 
 This is a checklist of places the C# remake does **not** match `legacy/`. Each row is something to confirm or reject. “Original” means the C++ client/server in `legacy/`.
 
+**Locked choices** (do not revert these while “fixing parity”) are written up with how the code works in [LEGACY-DELTAS.md](LEGACY-DELTAS.md). This file is the playtest record that led to those choices.
+
 The four playtest fixes from this pass are at the top. The rest is the deeper audit.
 
 ## 1. What just changed
@@ -46,6 +48,8 @@ Original told everyone you died, deleted the items you were holding, and later w
 
 Remake, online: your tank stays dead where it fell until the server warp. You do not get a local revive on the death spot first. Respawn position is the city pad from that warp.
 
+An orbed city does **not** send “fired” or “left the battlefield.” `smOrbed` is what returns those players to the meeting room. That matches `LeaveGame(false, false)` in the original.
+
 Walls, turrets, medkits, mines, orbs, and the other placeables you were carrying still go back to the factory bay on death. The Bazooka (Bomb) stays in inventory. Cloak and flare stay, unless their factory is gone.
 
 ## 5. Buildings you shoot
@@ -74,8 +78,8 @@ Original meeting room had a Top 20 for **lifetime points**, **monthly points**, 
 Remake:
 
 - Meeting chat shows who is online, how many are in a city, and which cities are taken, including AI cities.
-- **L** or the Ranks button opens a page with **overall**, **this month**, and a **season** board. The season name and the reset are set on the server host (“Start new season”).
-- **Points per death is not ported.**
+- **L** or the Ranks button opens a page with **overall**, **this month**, a **season** board, and **per death**. The season name and the reset are set on the server host (“Start new season”).
+- **Points per death** score is `points × 10000 / deaths`. Only accounts with more than 100 deaths are listed. Each board shows **10** names. The original showed **20** and had no season.
 
 Monthly points roll over on the host’s local calendar month, not UTC. A new season zeros season points and does not touch lifetime or monthly points.
 
@@ -95,11 +99,28 @@ These were already chosen before this pass. Say if any of them should go back to
 | Chat type size | Bitmap font at the original UI scale | In-game chat and meeting-room chat draw at **85%** of the UI font. The rest of the HUD is unchanged |
 | Minimap city names | No names on the minimap | Names drawn larger, in white (gold for your city), with a black outline |
 
-## 9. Still not done
+## 9. Server behavior added after the playtest notes
+
+These match the original and should stay.
+
+| What | Remake |
+| --- | --- |
+| Last mayor leaves, city is not orbable | City is destroyed immediately. Houses and factories go. The command center stays. The build tree resets. |
+| Last mayor leaves, city is orbable | The city stays for **2 minutes**. A new mayor cancels that. If nobody comes back, it is destroyed the same way. |
+| Hand the city over now | `/mayor Name` (`cmSetMayor`). You stay in the city. `/heir` is only who inherits if you leave. |
+| Orb vs abandon | An **orb** keeps houses. An **abandoned** city does not. That split is intentional. See [LEGACY-DELTAS.md](LEGACY-DELTAS.md). |
+
+## 10. Still not done
+
+The working list is [LEGACY-DELTAS.md](LEGACY-DELTAS.md) → “Still open for parity.” Short version:
 
 - AI city building (a small template around the command center)
-- Points-per-death board
-- Finance HUD
+- Finance HUD (`smFinance`) — out of scope until explicitly reopened
+- Auto-build from a city file (`cmAutoBuild`)
+- Account self-edit and email recovery
+- Custom tank select (`cmChangeTank`)
+- Click-player and right-click city info panels
+- Rank boards show 10 names; the original showed 20
 - A full stress / soak pass of the server
 
 If a row above is not what you wanted, say which number and what it should do instead.

@@ -506,4 +506,37 @@ public sealed class CityBuildTests
         Assert.Contains(3, simulation.EnumerateCityBuildIds());
         Assert.Contains(9, simulation.EnumerateCityBuildIds());
     }
+
+    [Fact]
+    public void DestroyAbandonedCity_RemovesBuildingsAndResetsBuildTree()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.LoadCityLayout(new CityLayout
+        {
+            CityName = "Test",
+            SourcePath = "test.city",
+            Buildings = [],
+        });
+
+        Assert.True(simulation.TryPlaceBuilding(buildSlot: 2, gridAnchorX: 40, gridAnchorY: 40));
+        Assert.True(simulation.TryGetCityBuild(0, out var build));
+        build.Orbs = 4;
+        build.HadBombFactory = true;
+        build.HadOrbFactory = true;
+        build.MaxBuildingCount = 40;
+        build.CanBuild[9] = 2;
+
+        simulation.DestroyAbandonedCity(0);
+
+        Assert.False(BuildingPlacementValidator.TryFindBuildingAt(simulation.World, 40, 40, out _));
+        Assert.Equal(0, build.Orbs);
+        Assert.False(build.HadBombFactory);
+        Assert.False(build.HadOrbFactory);
+        Assert.Equal(1, build.CurrentBuildingCount);
+        Assert.Equal(1, build.MaxBuildingCount);
+        Assert.Equal(1, build.CanBuild[1]);
+        Assert.Equal(0, build.CanBuild[9]);
+        Assert.False(build.IsOrbable);
+    }
 }

@@ -12,7 +12,7 @@ namespace BattleCity.Client.Scenes;
 
 public sealed class RankingsScene : IScene
 {
-    private static readonly string[] BoardTitles = ["Overall", "This month", "Season"];
+    private static readonly string[] BoardTitles = ["Overall", "This month", "Season", "Per death"];
 
     private readonly SceneContext _context;
     private readonly GameClient _client;
@@ -74,6 +74,10 @@ public sealed class RankingsScene : IScene
         {
             RequestBoard(2);
         }
+        else if (WasPressed(keyboard, Keys.D4) || WasPressed(keyboard, Keys.NumPad4))
+        {
+            RequestBoard(3);
+        }
         else if (WasPressed(keyboard, Keys.Left) || WasPressed(keyboard, Keys.Right))
         {
             var next = WasPressed(keyboard, Keys.Right)
@@ -123,9 +127,12 @@ public sealed class RankingsScene : IScene
             _ui.DrawMenuButton(spriteBatch, tab, BoardTitles[i], selected: _board == i || hover, titleFont: false);
         }
 
+        var boardNote = _board == 3
+            ? "Score is points × 10000 / deaths. Accounts with 100 deaths or fewer are left off."
+            : $"Current season: {_seasonName}";
         _ui.DrawCenteredText(
             spriteBatch,
-            $"Current season: {_seasonName}",
+            boardNote,
             width / 2,
             172,
             MenuTheme.TextMuted);
@@ -154,7 +161,7 @@ public sealed class RankingsScene : IScene
 
         _ui.DrawCenteredText(
             spriteBatch,
-            "1 overall   2 month   3 season   Left/Right switch   Esc back",
+            "1 overall   2 month   3 season   4 per death   Left/Right switch   Esc back",
             width / 2,
             height - 28,
             MenuTheme.TextMuted);
@@ -225,7 +232,7 @@ public sealed class RankingsScene : IScene
 
     private static Rectangle GetTabBounds(int index)
     {
-        const int tabWidth = 360;
+        const int tabWidth = 280;
         const int gap = 16;
         var total = (BoardTitles.Length * tabWidth) + ((BoardTitles.Length - 1) * gap);
         var x = (UiLayout.LogicalWidth - total) / 2;

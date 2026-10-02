@@ -6,6 +6,7 @@ public enum ChatCommandKind
     Global,
     Whisper,
     Heir,
+    SetMayor,
     Kick,
     Ban,
     Warp,
@@ -75,6 +76,13 @@ public static class ChatCommandParser
             // "/heir" / "/heir clear" / "/heir NamePrefix"
             var arg = line.Length <= 5 ? string.Empty : line[5..].Trim();
             return new ParsedChatCommand(ChatCommandKind.Heir, arg);
+        }
+
+        if (line.Equals("/mayor", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("/mayor ", StringComparison.OrdinalIgnoreCase))
+        {
+            var arg = line.Length <= 6 ? string.Empty : line[6..].Trim();
+            return new ParsedChatCommand(ChatCommandKind.SetMayor, arg);
         }
 
         if (line.StartsWith("/kick ", StringComparison.OrdinalIgnoreCase))
