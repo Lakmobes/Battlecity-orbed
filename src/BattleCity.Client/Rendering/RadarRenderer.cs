@@ -14,14 +14,12 @@ namespace BattleCity.Client.Rendering;
 public sealed class RadarRenderer
 {
     private static readonly QueryDescription TankQuery =
-        new QueryDescription().WithAll<Transform2D, NetworkIdentity, CityAffiliation, TankLifeState>();
+        new QueryDescription().WithAll<Transform2D, CityAffiliation, TankLifeState, TankFacing>();
 
-    private static readonly Color AllyColor = new(80, 220, 255);
-    private static readonly Color EnemyColor = new(255, 90, 70);
-    private static readonly Color AdminColor = new(255, 220, 80);
+    private static readonly Color AllyColor = HudTheme.Ally;
+    private static readonly Color EnemyColor = HudTheme.Enemy;
+    private static readonly Color AdminColor = HudTheme.Objective;
     private static readonly Color DeadColor = new(120, 120, 120);
-    private static readonly Color PanelFill = new(8, 10, 18, 200);
-    private static readonly Color CrosshairColor = new(255, 255, 255, 40);
 
     private readonly AssetService _assets;
 
@@ -30,15 +28,29 @@ public sealed class RadarRenderer
         _assets = assets;
     }
 
+    public void DrawBackdrop(SpriteBatch spriteBatch)
+    {
+        var bounds = ModernHudLayout.RadarBounds;
+        var center = new Vector2(bounds.Center.X, bounds.Center.Y);
+        var radius = bounds.Width / 2 - 2;
+        var radarArt = _assets.LoadTexture(HudSpriteNames.Radar);
+        if (radarArt != _assets.Pixel)
+        {
+            spriteBatch.Draw(radarArt, bounds, Color.White);
+        }
+        else
+        {
+            FillCircle(spriteBatch, center, radius, new Color(10, 18, 28, 210));
+            DrawCircleOutline(spriteBatch, center, radius, HudTheme.Accent);
+        }
+    }
+
     public void Draw(SpriteBatch spriteBatch, in RenderContext context)
     {
         var bounds = ModernHudLayout.RadarBounds;
-        HudOverlayHelper.DrawPanel(spriteBatch, _assets, bounds, PanelFill);
-
         var center = new Vector2(bounds.Center.X, bounds.Center.Y);
-        spriteBatch.Draw(_assets.Pixel, new Rectangle(bounds.Center.X, bounds.Y + 4, 1, bounds.Height - 8), CrosshairColor);
-        spriteBatch.Draw(_assets.Pixel, new Rectangle(bounds.X + 4, bounds.Center.Y, bounds.Width - 8, 1), CrosshairColor);
-        spriteBatch.Draw(_assets.Pixel, new Rectangle(bounds.Center.X - 2, bounds.Center.Y - 2, 4, 4), AllyColor);
+        var radius = bounds.Width / 2 - 2;
+        spriteBatch.Draw(_assets.Pixel, new Rectangle(bounds.Center.X - 2, bounds.Center.Y - 2, 5, 5), AllyColor);
 
         var world = context.World;
         var focus = context.FocusWorldPosition;
@@ -50,9 +62,15 @@ public sealed class RadarRenderer
 
         world.Query(
             in TankQuery,
-            (Entity entity, ref Transform2D transform, ref NetworkIdentity identity, ref CityAffiliation city, ref TankLifeState life) =>
+            (Entity entity, ref Transform2D transform, ref CityAffiliation city, ref TankLifeState life) =>
             {
-                if (identity.PlayerId == localPlayerId)
+                if (world.Has<InputControlled>(entity))
+                {
+                    return;
+                }
+
+                if (world.Has<NetworkIdentity>(entity)
+                    && world.Get<NetworkIdentity>(entity).PlayerId == localPlayerId)
                 {
                     return;
                 }
@@ -73,8 +91,9 @@ public sealed class RadarRenderer
 
                 var screenX = (int)(center.X + dx * scale);
                 var screenY = (int)(center.Y + dy * scale);
-                if (screenX < bounds.Left + 2 || screenX > bounds.Right - 4
-                    || screenY < bounds.Top + 2 || screenY > bounds.Bottom - 4)
+                var offsetX = screenX - center.X;
+                var offsetY = screenY - center.Y;
+                if ((offsetX * offsetX) + (offsetY * offsetY) > (radius - 8) * (radius - 8))
                 {
                     return;
                 }
@@ -90,11 +109,72 @@ public sealed class RadarRenderer
                 }
                 else
                 {
-                    var name = resolveName?.Invoke(identity.PlayerId);
+                    string? name = null;
+                    if (world.Has<NetworkIdentity>(entity))
+                    {
+                        name = resolveName?.Invoke(world.Get<NetworkIdentity>(entity).PlayerId);
+                    }
+
                     color = TankSpriteSelector.IsAdminAccount(name) ? AdminColor : EnemyColor;
                 }
 
-                spriteBatch.Draw(_assets.Pixel, new Rectangle(screenX, screenY, 3, 3), color);
+                const int dot = 4;
+                spriteBatch.Draw(_assets.Pixel, new Rectangle(screenX, screenY, dot, dot), color);
             });
+
+        DrawObjective(spriteBatch, center, radius, scale, context.FocusWorldPosition, context.CityCenterWorldPosition);
+        if (context.NearestOtherCityWorldPosition is { } other)
+        {
+            DrawObjective(spriteBatch, center, radius, scale, context.FocusWorldPosition, other);
+        }
+    }
+
+    private void DrawObjective(
+        SpriteBatch spriteBatch,
+        Vector2 center,
+        int radius,
+        float scale,
+        Vector2 focus,
+        Vector2 target)
+    {
+        var dx = target.X - focus.X;
+        var dy = target.Y - focus.Y;
+        var screenX = center.X + dx * scale;
+        var screenY = center.Y + dy * scale;
+        var ox = screenX - center.X;
+        var oy = screenY - center.Y;
+        if ((ox * ox) + (oy * oy) > (radius - 10) * (radius - 10))
+        {
+            return;
+        }
+
+        spriteBatch.Draw(_assets.Pixel, new Rectangle((int)screenX - 2, (int)screenY - 2, 5, 5), HudTheme.Objective);
+    }
+
+    private void FillCircle(SpriteBatch spriteBatch, Vector2 center, int radius, Color color)
+    {
+        var pixel = _assets.Pixel;
+        var cx = (int)center.X;
+        var cy = (int)center.Y;
+        for (var y = -radius; y <= radius; y++)
+        {
+            var dx = (int)Math.Sqrt((radius * radius) - (y * y));
+            spriteBatch.Draw(pixel, new Rectangle(cx - dx, cy + y, dx * 2, 1), color);
+        }
+    }
+
+    private void DrawCircleOutline(SpriteBatch spriteBatch, Vector2 center, int radius, Color color)
+    {
+        var pixel = _assets.Pixel;
+        var cx = (int)center.X;
+        var cy = (int)center.Y;
+        var segments = 48;
+        for (var i = 0; i < segments; i++)
+        {
+            var angle = i / (float)segments * MathF.Tau;
+            var x = cx + (int)(MathF.Cos(angle) * radius);
+            var y = cy + (int)(MathF.Sin(angle) * radius);
+            spriteBatch.Draw(pixel, new Rectangle(x, y, 2, 2), color);
+        }
     }
 }

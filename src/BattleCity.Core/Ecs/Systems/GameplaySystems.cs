@@ -449,6 +449,32 @@ public static class BulletCollisionSystem
             bulletBounds.Top + bulletBounds.Height / 2f);
         var hit = false;
         var ownerIsTurret = IsTurretOwnedBullet(world, bulletEntity);
+        var buildingBounds = new List<AxisAlignedBox>();
+        world.Query(
+            in buildingQuery,
+            (ref BuildingRef building) =>
+            {
+                buildingBounds.Add(BuildingCollision.GetBulletHitBounds(
+                    building.TypeCode,
+                    building.GridAnchorX,
+                    building.GridAnchorY));
+            });
+
+        if (BuildingCornerSeal.BlocksSegment(
+                buildingBounds,
+                bulletBounds,
+                previousBounds,
+                previousCenter,
+                currentCenter))
+        {
+            hits.Add(bulletEntity);
+            var impact = new Vector2(
+                (previousCenter.X + currentCenter.X) / 2f,
+                (previousCenter.Y + currentCenter.Y) / 2f);
+            GameplayEntityFactory.CreateExplosion(world, ExplosionKind.Small, impact);
+            audio?.Play(SoundId.Explode, impact);
+            return true;
+        }
 
         world.Query(
             in buildingQuery,

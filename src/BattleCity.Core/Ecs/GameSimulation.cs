@@ -2433,7 +2433,7 @@ public sealed class GameSimulation : IDisposable
 
                 if (inventory.GetCount(product) >= AutoInventoryCap(product))
                 {
-                    if (product is ItemType.Cloak or ItemType.Flare)
+                    if (product is ItemType.Cloak or ItemType.Flare or ItemType.Rocket)
                     {
                         refreshAlreadyHeld = true;
                     }
@@ -2472,19 +2472,14 @@ public sealed class GameSimulation : IDisposable
     }
 
     /// <summary>
-    /// Flare, cloak, and bazooka (bomb factory) go straight into inventory.
-    /// Walls, turrets, medkits, and the rest stay on the factory bay.
+    /// Cloak, flare, and the missile go straight into inventory while that factory is producing.
+    /// Bombs and everything else wait on the factory bay.
     /// </summary>
     private static bool IsAutoInventoryProduct(ItemType product) =>
-        product is ItemType.Cloak or ItemType.Flare or ItemType.Bomb;
+        product is ItemType.Cloak or ItemType.Flare or ItemType.Rocket;
 
-    /// <summary>
-    /// Cloak and flare stay at one and refresh. Bazookas stack up to the normal carry limit.
-    /// </summary>
-    private static int AutoInventoryCap(ItemType product) =>
-        product is ItemType.Cloak or ItemType.Flare
-            ? 1
-            : ItemCatalog.MaxCarryCount[(int)product];
+    /// <summary>Cloak, flare, and the missile stay at one.</summary>
+    private static int AutoInventoryCap(ItemType product) => 1;
 
     private bool ApplyDeathState(Entity entity, byte killerCity, bool playEffects)
     {

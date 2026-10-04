@@ -212,11 +212,19 @@ public struct PlayerInventory
         for (var step = 0; step < HudItems.Length; step++)
         {
             currentIndex = (currentIndex + delta + HudItems.Length) % HudItems.Length;
-            SelectedItemType = HudItems[currentIndex];
-            if (GetCount(SelectedItemType) > 0)
+            var type = HudItems[currentIndex];
+            if (type is ItemType.Cloak or ItemType.Rocket or ItemType.Flare)
             {
-                return;
+                continue;
             }
+
+            if (GetCount(type) <= 0)
+            {
+                continue;
+            }
+
+            SelectedItemType = type;
+            return;
         }
     }
 

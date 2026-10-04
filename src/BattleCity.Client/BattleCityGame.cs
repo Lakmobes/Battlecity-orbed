@@ -87,7 +87,7 @@ public sealed class BattleCityGame : Game
 
         _spriteBatch.Begin(
             transformMatrix: _presentation.TransformMatrix,
-            samplerState: SamplerState.PointClamp,
+            samplerState: SamplerState.LinearClamp,
             blendState: BlendState.AlphaBlend);
 
         _scenes.DrawScreen(_spriteBatch);

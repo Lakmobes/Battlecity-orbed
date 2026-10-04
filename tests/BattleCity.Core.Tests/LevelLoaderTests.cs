@@ -199,6 +199,8 @@ public class BuildingPlacementTests
     {
         Assert.Equal((0, 288), BuildingSprites.GetSourceOrigin(200));
         Assert.Equal((0, 576), BuildingSprites.GetSourceOrigin(400));
+        Assert.Equal((144, 0), BuildingSprites.GetSourceOrigin(0, 1));
+        Assert.Equal((720, 0), BuildingSprites.GetSourceOrigin(0, 5));
     }
 }
 

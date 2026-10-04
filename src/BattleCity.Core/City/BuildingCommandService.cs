@@ -168,7 +168,8 @@ public static class BuildingCommandService
             in inventoryQuery,
             (ref PlayerInventory inventory, ref CityAffiliation city) =>
             {
-                if (city.CityId == cityId && product is Shared.Data.ItemType.Cloak or Shared.Data.ItemType.Flare)
+                if (city.CityId == cityId
+                    && product is Shared.Data.ItemType.Cloak or Shared.Data.ItemType.Flare or Shared.Data.ItemType.Rocket)
                 {
                     inventory.Clear(product);
                 }

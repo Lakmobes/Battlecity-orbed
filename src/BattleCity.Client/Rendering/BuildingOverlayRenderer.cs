@@ -87,10 +87,14 @@ public sealed class BuildingOverlayRenderer
             return;
         }
 
-        // Full item cell is 48px; research bay needs half-size, factory ~90%.
+        // Factory icon is smaller than the old 43px cell, but stays on the same center.
         var isFactory = BuildingCatalog.IsFactory(typeCode);
-        var iconSize = isFactory ? 43 : 24;
-        var (offsetX, offsetY) = isFactory ? (50, 50) : (18, 106);
+        const int legacyFactorySize = 43;
+        const int legacyFactoryOffset = 50;
+        var iconSize = isFactory ? 34 : 24;
+        var centerShift = isFactory ? (legacyFactorySize - iconSize) / 2f : 0f;
+        var offsetX = isFactory ? legacyFactoryOffset + centerShift : 18f;
+        var offsetY = isFactory ? legacyFactoryOffset + centerShift : 106f;
 
         var (sourceX, sourceY) = ItemSprites.GetWorldSpriteOrigin(itemType);
         var legacySource = new Rectangle(

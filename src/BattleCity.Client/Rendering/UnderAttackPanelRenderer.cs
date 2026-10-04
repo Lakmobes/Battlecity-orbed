@@ -26,7 +26,7 @@ public sealed class UnderAttackPanelRenderer
 
     public void LoadContent()
     {
-        _font = _assets.LoadFont(LegacySpriteNames.UiFont);
+        _font = _assets.LoadFont(LegacySpriteNames.HudFont);
     }
 
     public void Draw(SpriteBatch spriteBatch, in RenderContext context)
@@ -36,44 +36,49 @@ public sealed class UnderAttackPanelRenderer
             return;
         }
 
-        var outerBounds = ModernHudLayout.CompassBounds;
-        var innerBounds = ModernHudLayout.CompassInnerBounds;
-        DrawRing(spriteBatch, outerBounds, new Color(255, 255, 255, 230));
-        DrawRing(spriteBatch, innerBounds, new Color(180, 220, 255, 240));
+        var homeBounds = ModernHudLayout.CompassBounds;
+        var orbBounds = ModernHudLayout.OrbCompassBounds;
+        DrawRing(spriteBatch, homeBounds, new Color(255, 255, 255, 230));
+        DrawRing(spriteBatch, orbBounds, new Color(255, 210, 120, 230));
 
-        var center = new Vector2(outerBounds.Center.X, outerBounds.Center.Y);
         var playerCenter = ToNumerics(context.FocusWorldPosition);
         var homeCenter = ToNumerics(context.CityCenterWorldPosition);
         var homeIndex = CompassArrowHelper.ComputeArrowIndex(playerCenter, homeCenter);
         var underAttackFlash = context is { IsUnderAttack: true, UnderAttackFlashVisible: true };
-        var homeColor = underAttackFlash ? AttackArrowColor : HomeArrowColor;
+        DrawArrowSprite(
+            spriteBatch,
+            new Vector2(homeBounds.Center.X, homeBounds.Center.Y),
+            homeIndex,
+            underAttackFlash ? _assets.HudCompassArrowsRed : _assets.HudCompassArrows,
+            underAttackFlash ? AttackArrowColor : HomeArrowColor);
+        DrawCornerLabel(spriteBatch, homeBounds, "CC", underAttackFlash ? AttackArrowColor : HomeArrowColor, topLeft: true);
 
         if (context.NearestOtherCityWorldPosition is { } targetCity)
         {
             var targetIndex = CompassArrowHelper.ComputeArrowIndex(playerCenter, ToNumerics(targetCity));
-            var targetRadians = CompassArrowHelper.RadiansFromArrowIndex(targetIndex);
-            var targetColor = context.NearestOtherCityIsOrbable ? OrbArrowColor : new Color(200, 200, 210);
-            DrawCompassArrow(spriteBatch, _assets.Pixel, center, targetRadians, targetColor, tipLength: 42f, wingLength: 16f);
+            DrawArrowSprite(
+                spriteBatch,
+                new Vector2(orbBounds.Center.X, orbBounds.Center.Y),
+                targetIndex,
+                _assets.HudCompassOrb,
+                context.NearestOtherCityIsOrbable ? OrbArrowColor : new Color(200, 200, 210));
             DrawCornerLabel(
                 spriteBatch,
-                outerBounds,
+                orbBounds,
                 context.NearestOtherCityIsOrbable ? "ORB" : "CITY",
-                targetColor,
+                context.NearestOtherCityIsOrbable ? OrbArrowColor : new Color(200, 200, 210),
                 topLeft: false);
         }
-
-        DrawLegacyHomeArrow(spriteBatch, center, homeIndex, underAttackFlash, homeColor);
-        DrawCornerLabel(spriteBatch, outerBounds, "CC", homeColor, topLeft: true);
 
         if (underAttackFlash)
         {
             var alert = "ATTACK";
-            var alertScale = new Vector2(0.65f, 0.65f);
+            var alertScale = Vector2.One;
             var alertSize = _font.MeasureString(alert) * alertScale;
             spriteBatch.DrawString(
                 _font,
                 alert,
-                new Vector2(outerBounds.Center.X - alertSize.X / 2f, outerBounds.Bottom - 18),
+                new Vector2(homeBounds.Center.X - alertSize.X / 2f, homeBounds.Bottom - 18),
                 Color.Red,
                 0f,
                 Vector2.Zero,
@@ -83,14 +88,13 @@ public sealed class UnderAttackPanelRenderer
         }
     }
 
-    private void DrawLegacyHomeArrow(
+    private void DrawArrowSprite(
         SpriteBatch spriteBatch,
         Vector2 center,
         int arrowIndex,
-        bool useRedSheet,
+        Texture2D sheet,
         Color fallbackColor)
     {
-        var sheet = useRedSheet ? _assets.HudCompassArrowsRed : _assets.HudCompassArrows;
         if (sheet != _assets.Pixel
             && sheet.Width >= CompassArrowHelper.LegacyArrowFrameSize * CompassArrowHelper.LegacyArrowFrameCount)
         {
@@ -137,7 +141,7 @@ public sealed class UnderAttackPanelRenderer
             return;
         }
 
-        var scale = new Vector2(0.55f, 0.55f);
+        var scale = Vector2.One;
         var size = _font.MeasureString(text) * scale;
         var position = topLeft
             ? new Vector2(bounds.X + 6, bounds.Y + 4)

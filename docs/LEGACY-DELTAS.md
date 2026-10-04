@@ -22,10 +22,11 @@ Read this before changing combat, inventory, cities, spawn, or rankings. Playtes
 
 | Choice | How it works now | Original (do not restore) |
 |--------|------------------|---------------------------|
-| Auto-inventory | Factory production puts **Flare**, **Cloak**, and **Bomb** into a living city member (mayor first). | Every product sat inactive on the bay. Nothing was deposited. |
+| Auto-inventory | Factory production puts **Flare** and **Cloak** into a living city member (mayor first). **Bombs stay on the bomb-factory bay** until someone picks them up. | Every product sat inactive on the bay. Nothing was deposited. |
 | Bay items | Walls, turrets, medkits, mines, orbs, sleepers, plasma, DFG, and Cougar missiles still appear on the factory bay. | Same bay spawn for every product. |
 | Cloak and flare | Count stays **1**. Use starts a **10 second** recharge while that factory stands. Destroying the factory **removes** it from inventory. Rebuilding the factory puts one back. Use does **not** consume the stack. | Stack up to 4. Each use consumed one. No recharge bar. Destroying the factory deleted every item it had made, including ones in hand. |
-| Bomb (“Bazooka”) | Stacks to **20**, spent one per shot. **Not** wiped when its factory is destroyed. **Not** dumped back to the bay on death. | Death deleted every held item (`deleteItemsByPlayer`). Factory destruction deleted that factory’s items. |
+| Bomb (“Bazooka”) | Produced on the factory bay and picked up. Once carried, it stacks to **20**, is spent one per shot, and is **not** wiped when its factory is destroyed or dumped back to the bay on death. | Death deleted every held item. Factory destruction deleted that factory’s items. New bombs appeared only on the bay. |
+| Missile (rocket) | While the Missile factory is producing, one goes straight into inventory and stays there (it is the stronger gun, not ammo). `[` and `]` skip Cloak, Missile, and Flare. | Rockets were ammo consumed per shot, and every factory product sat on the bay. |
 | Other placeables on death | Walls, turrets, medkits, mines, orbs, and the other bay items you were carrying go back to the factory bay. | Death deleted them. |
 | Menu names | Build menu says **Cloak** and **Bomb**. The Cougar building is **Missile Research / Missile Factory** (type 100). The tank’s normal shot is still the laser. | Cloak building was labeled **Time Bomb**. Bomb building was labeled **Bazooka**. Do not put those labels back. |
 

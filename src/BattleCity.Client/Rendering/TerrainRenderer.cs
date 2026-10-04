@@ -18,16 +18,21 @@ public sealed class TerrainRenderer
     private const int LegacyGroundDrawSize = 144;
 
     private readonly AssetService _assets;
+    private readonly LavaSheetComposer _lavaComposer = new();
 
     public TerrainRenderer(AssetService assets)
     {
         _assets = assets;
     }
 
-    public void Draw(SpriteBatch spriteBatch, TileMap tileMap, Rectangle visibleWorldRect)
+    public void Draw(
+        SpriteBatch spriteBatch,
+        TileMap tileMap,
+        Rectangle visibleWorldRect,
+        float animationTime)
     {
         DrawGround(spriteBatch, visibleWorldRect);
-        DrawTerrainTiles(spriteBatch, tileMap, visibleWorldRect);
+        DrawTerrainTiles(spriteBatch, tileMap, visibleWorldRect, animationTime);
     }
 
     private void DrawGround(SpriteBatch spriteBatch, Rectangle visibleWorldRect)
@@ -53,13 +58,18 @@ public sealed class TerrainRenderer
         }
     }
 
-    private void DrawTerrainTiles(SpriteBatch spriteBatch, TileMap tileMap, Rectangle visibleWorldRect)
+    private void DrawTerrainTiles(
+        SpriteBatch spriteBatch,
+        TileMap tileMap,
+        Rectangle visibleWorldRect,
+        float animationTime)
     {
         var minTileX = Math.Clamp(visibleWorldRect.Left / GameConstants.TileSize, 0, TileMap.Size - 1);
         var maxTileX = Math.Clamp(visibleWorldRect.Right / GameConstants.TileSize, 0, TileMap.Size - 1);
         var minTileY = Math.Clamp(visibleWorldRect.Top / GameConstants.TileSize, 0, TileMap.Size - 1);
         var maxTileY = Math.Clamp(visibleWorldRect.Bottom / GameConstants.TileSize, 0, TileMap.Size - 1);
 
+        var lavaTiles = new List<(Rectangle Destination, Rectangle Source)>();
         for (var tileX = minTileX; tileX <= maxTileX; tileX++)
         {
             for (var tileY = minTileY; tileY <= maxTileY; tileY++)
@@ -70,8 +80,6 @@ public sealed class TerrainRenderer
                     continue;
                 }
 
-                var texture = terrain == TerrainTileType.Lava ? _assets.Lava : _assets.Rocks;
-                // AutotileIndices already store legacy source X = neighborBits * 48 (CMap::CalculateTiles).
                 var autotileSourceX = tileMap.AutotileIndices[tileX, tileY];
                 var destination = WorldSpriteMetrics.LegacyWorldDestination(
                     tileX * GameConstants.TileSize,
@@ -81,8 +89,48 @@ public sealed class TerrainRenderer
                 var source = WorldSpriteMetrics.ScaleSource(
                     new Rectangle(autotileSourceX, 0, GameConstants.TileSize, GameConstants.TileSize));
 
-                spriteBatch.Draw(texture, destination, source, Color.White);
+                if (terrain == TerrainTileType.Rock)
+                {
+                    spriteBatch.Draw(_assets.Rocks, destination, source, Color.White);
+                    continue;
+                }
+
+                lavaTiles.Add((destination, source));
             }
+        }
+
+        if (lavaTiles.Count == 0)
+        {
+            return;
+        }
+
+        DrawLavaTiles(spriteBatch, lavaTiles, animationTime);
+    }
+
+    private void DrawLavaTiles(
+        SpriteBatch spriteBatch,
+        List<(Rectangle Destination, Rectangle Source)> lavaTiles,
+        float animationTime)
+    {
+        var lava = _assets.Lava;
+        var fill = _assets.LavaFill;
+        if (fill == _assets.Pixel || lava == _assets.Pixel)
+        {
+            foreach (var tile in lavaTiles)
+            {
+                spriteBatch.Draw(lava, tile.Destination, tile.Source, Color.White);
+            }
+
+            return;
+        }
+
+        var frames = LavaSheetComposer.FrameCount(fill);
+        var frame = (int)(animationTime / 0.45f) % frames;
+        var cell = lavaTiles[0].Source.Width;
+        var sheet = _lavaComposer.Compose(spriteBatch.GraphicsDevice, lava, fill, frame, cell);
+        foreach (var tile in lavaTiles)
+        {
+            spriteBatch.Draw(sheet, tile.Destination, tile.Source, Color.White);
         }
     }
 

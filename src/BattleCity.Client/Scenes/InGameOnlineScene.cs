@@ -744,6 +744,20 @@ public sealed class InGameOnlineScene : IScene
 
     private void HandleBuildInput(UiInputState ui, Vector2 playerCenter, int worldWidth)
     {
+        if (ui.MouseLeftClicked
+            && ModernHudLayout.TryHandleChromeClick(
+                (int)ui.MouseLogicalPosition.X,
+                (int)ui.MouseLogicalPosition.Y,
+                out var toggleMiniMap))
+        {
+            if (toggleMiniMap)
+            {
+                _showMiniMap = !_showMiniMap;
+            }
+
+            return;
+        }
+
         if (!_client.IsMayor && !IsLocalAdmin())
         {
             _showBuildMenu = false;
@@ -1054,6 +1068,7 @@ public sealed class InGameOnlineScene : IScene
             BuildingCount = cityBuild?.CurrentBuildingCount
                 ?? _simulation.CountBuildingsInWorld(),
             CityTeamCount = CountLocalCityTeam(GetLocalCityId()),
+            TeamRoster = CollectTeamRoster(GetLocalCityId()),
             CityTeamCapacity = GameConstants.MaxPlayersPerCity,
             MayorDisplayName = ResolveMayorDisplayName(GetLocalCityId()),
             LocalPlayerIsMayor = _client.IsMayor,
@@ -1072,6 +1087,7 @@ public sealed class InGameOnlineScene : IScene
             UnderAttackFlashVisible = underAttackFlashVisible,
             CityBuild = cityBuild,
             AnimationTime = _animationTime,
+            SpriteBatchTransform = Matrix.Multiply(_camera.ViewMatrix, _context.Presentation.TransformMatrix),
             ShowBuildMenu = _showBuildMenu,
             BuildMenuAnchor = _buildMenuAnchor,
             BuildModeSlot = _buildModeSlot,
@@ -1127,6 +1143,14 @@ public sealed class InGameOnlineScene : IScene
         }
 
         var menu = _menuInput.Poll();
+        var mouseX = (int)ui.MouseLogicalPosition.X;
+        var mouseY = (int)ui.MouseLogicalPosition.Y;
+        var overItem = UiRenderer.TryHitSettingsItem(mouseX, mouseY, out var hoverIndex);
+        var clickedItem = ui.MouseLeftClicked && overItem;
+        if (overItem)
+        {
+            _settingsSelectedIndex = hoverIndex;
+        }
         if (menu.MoveUpPressed)
         {
             _settingsSelectedIndex =
@@ -1140,7 +1164,7 @@ public sealed class InGameOnlineScene : IScene
                 (_settingsSelectedIndex + 1) % UiRenderer.SettingsMenuItems.Length;
         }
 
-        if (menu.ConfirmPressed)
+        if (menu.ConfirmPressed || clickedItem)
         {
             switch (_settingsSelectedIndex)
             {
@@ -1232,6 +1256,52 @@ public sealed class InGameOnlineScene : IScene
                 }
             });
         return Math.Max(1, count);
+    }
+
+    private TeamRosterLine[] CollectTeamRoster(byte cityId)
+    {
+        var mayors = new List<TeamRosterLine>();
+        var soldiers = new List<TeamRosterLine>();
+        var localDead = _simulation.TryGetPlayerLifeState(out var localLife) && localLife.IsDead;
+        var localName = string.IsNullOrWhiteSpace(_context.PlayerName) ? "You" : _context.PlayerName;
+        if (_client.IsMayor)
+        {
+            mayors.Add(new TeamRosterLine(localName, Heading: false, localDead));
+        }
+        else
+        {
+            soldiers.Add(new TeamRosterLine(localName, Heading: false, localDead));
+        }
+
+        var query = new QueryDescription().WithAll<NetworkIdentity, CityAffiliation, MayorStatus>();
+        _simulation.World.Query(
+            in query,
+            (Entity entity, ref NetworkIdentity identity, ref CityAffiliation city, ref MayorStatus mayor) =>
+            {
+                if (city.CityId != cityId || identity.PlayerId == _client.PlayerId)
+                {
+                    return;
+                }
+
+                var name = _remotePlayers.GetDisplayName(identity.PlayerId) ?? $"Player{identity.PlayerId}";
+                var dead = _simulation.World.Has<TankLifeState>(entity)
+                    && _simulation.World.Get<TankLifeState>(entity).IsDead;
+                var line = new TeamRosterLine(name, Heading: false, dead);
+                if (mayor.IsMayor)
+                {
+                    mayors.Add(line);
+                }
+                else
+                {
+                    soldiers.Add(line);
+                }
+            });
+
+        var lines = new List<TeamRosterLine> { new("Mayor", Heading: true, Dead: false) };
+        lines.AddRange(mayors.Count == 0 ? [new TeamRosterLine("-", false, false)] : mayors);
+        lines.Add(new TeamRosterLine("Soldiers", Heading: true, Dead: false));
+        lines.AddRange(soldiers.Count == 0 ? [new TeamRosterLine("-", false, false)] : soldiers);
+        return lines.ToArray();
     }
 
     private string? ResolveMayorDisplayName(byte cityId)

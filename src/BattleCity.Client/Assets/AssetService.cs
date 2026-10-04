@@ -11,6 +11,7 @@ public sealed class AssetService
     private readonly Dictionary<string, SpriteFont> _fonts = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _missingTextures = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _missingFonts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Effect> _effects = new(StringComparer.OrdinalIgnoreCase);
     private Texture2D _pixel = null!;
 
     public AssetService(ContentManager content)
@@ -55,6 +56,7 @@ public sealed class AssetService
 
     public Texture2D Ground => LoadTexture(LegacySpriteNames.Ground);
     public Texture2D Lava => LoadTexture(LegacySpriteNames.Lava);
+    public Texture2D LavaFill => LoadTexture(LegacySpriteNames.LavaFill);
     public Texture2D Rocks => LoadTexture(LegacySpriteNames.Rocks);
     public Texture2D Tanks => LoadTexture(LegacySpriteNames.Tanks);
     public Texture2D MiniMapColors => LoadTexture(LegacySpriteNames.MiniMapColors);
@@ -71,8 +73,28 @@ public sealed class AssetService
     public Texture2D HudCompassArrows => LoadTexture(HudSpriteNames.CompassArrows);
 
     public Texture2D HudCompassArrowsRed => LoadTexture(HudSpriteNames.CompassArrowsRed);
+    public Texture2D HudCompassOrb => LoadTexture(HudSpriteNames.CompassOrb);
     public Texture2D TitleLogo => LoadTexture(TitleSpriteNames.BCLogo);
     public Texture2D TitleCompany => LoadTexture(TitleSpriteNames.Company);
+
+    public Effect? LoadEffect(string contentPath)
+    {
+        if (_effects.TryGetValue(contentPath, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var effect = _content.Load<Effect>(contentPath);
+            _effects[contentPath] = effect;
+            return effect;
+        }
+        catch (ContentLoadException)
+        {
+            return null;
+        }
+    }
 
     public SpriteFont LoadFont(string contentPath)
     {

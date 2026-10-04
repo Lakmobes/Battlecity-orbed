@@ -402,6 +402,23 @@ public class GameplayEntityTests
     }
 
     [Fact]
+    public void WeaponSystem_StoppedRocketShotDoesNotSpendTheMissile()
+    {
+        using var simulation = new GameSimulation();
+        var player = simulation.CreatePlayerEntity(new Vector2(100f, 100f));
+        ref var input = ref simulation.World.Get<InputCommand>(player);
+        ref var inventory = ref simulation.World.Get<PlayerInventory>(player);
+
+        input.FireHeld = true;
+        input.Move = 0;
+        inventory.Rocket = 1;
+
+        simulation.Tick(GameSimulation.FixedDeltaSeconds);
+
+        Assert.Equal(1, inventory.Rocket);
+    }
+
+    [Fact]
     public void ItemDropSystem_PicksUpItemAtTankCenter()
     {
         using var simulation = new GameSimulation();

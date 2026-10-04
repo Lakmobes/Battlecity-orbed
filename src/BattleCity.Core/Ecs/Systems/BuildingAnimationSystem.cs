@@ -1,6 +1,7 @@
 using Arch.Core;
 
 using BattleCity.Core.Ecs.Components;
+using BattleCity.Core.Levels;
 
 namespace BattleCity.Core.Ecs.Systems;
 
@@ -8,7 +9,6 @@ namespace BattleCity.Core.Ecs.Systems;
 public static class BuildingAnimationSystem
 {
     public const float FrameIntervalSeconds = 0.85f;
-    private const int FrameCount = 6;
 
     private static readonly QueryDescription Query =
         new QueryDescription().WithAll<BuildingState>();
@@ -27,7 +27,7 @@ public static class BuildingAnimationSystem
 
                 state.AnimationCooldownSeconds = FrameIntervalSeconds;
                 state.AnimationFrame++;
-                if (state.AnimationFrame >= FrameCount)
+                if (state.AnimationFrame >= BuildingSprites.AnimationColumnCount)
                 {
                     state.AnimationFrame = 0;
                 }

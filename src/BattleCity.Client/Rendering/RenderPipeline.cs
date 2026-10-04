@@ -48,7 +48,7 @@ public sealed class RenderPipeline
     public void DrawWorld(SpriteBatch spriteBatch, in RenderContext context)
     {
         var visible = context.Camera.VisibleWorldRect;
-        _terrain.Draw(spriteBatch, context.TileMap, visible);
+        _terrain.Draw(spriteBatch, context.TileMap, visible, context.AnimationTime);
         _entities.CollectDrawables(context.World, context.CityBuild, context.AnimationTime, context.ObserverCityId);
         _entities.DrawBuildings(spriteBatch);
         _buildingOverlays.Draw(spriteBatch, context.World, context.CityBuild);
@@ -89,16 +89,13 @@ public sealed class RenderPipeline
             _orbedOverlay.Draw(spriteBatch, context.OrbedOverlayMessage, context.OrbedOverlayIsVictim);
         }
 
-        if (context.ChatLines is { Count: > 0 } || context.IsChatting)
-        {
-            _chatOverlay.Draw(
-                spriteBatch,
-                UiLayout.WorldViewportWidth,
-                UiLayout.WorldViewportHeight,
-                context.ChatLines ?? Array.Empty<ChatLine>(),
-                context.IsChatting,
-                context.ChatDraft);
-        }
+        _chatOverlay.Draw(
+            spriteBatch,
+            UiLayout.WorldViewportWidth,
+            UiLayout.WorldViewportHeight,
+            context.ChatLines ?? Array.Empty<ChatLine>(),
+            context.IsChatting,
+            context.ChatDraft);
 
         _ui.Draw(spriteBatch, in context);
     }

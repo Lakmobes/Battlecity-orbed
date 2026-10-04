@@ -109,7 +109,7 @@ public static class FactoryProductionSystem
 
                 var cityId = build.CityId;
                 var capacity = ItemCatalog.MaxCarryCount[(int)product];
-                var held = CountCityProduct(world, cityId, product);
+                var held = CountCityProduct(world, cityId, product, includeInventory: product != ItemType.Bomb);
                 state.ItemsLeft = Math.Max(0, capacity - held);
 
                 if (state.ItemsLeft <= 0)
@@ -128,7 +128,7 @@ public static class FactoryProductionSystem
 
                 if (tryDepositInInventory?.Invoke(cityId, product) == true)
                 {
-                    state.ItemsLeft = Math.Max(0, capacity - CountCityProduct(world, cityId, product));
+                    state.ItemsLeft = Math.Max(0, capacity - CountCityProduct(world, cityId, product, includeInventory: product != ItemType.Bomb));
                     return;
                 }
 
@@ -153,11 +153,11 @@ public static class FactoryProductionSystem
                         networkItemId));
                 }
 
-                state.ItemsLeft = Math.Max(0, capacity - CountCityProduct(world, cityId, product));
+                state.ItemsLeft = Math.Max(0, capacity - CountCityProduct(world, cityId, product, includeInventory: product != ItemType.Bomb));
             });
     }
 
-    public static int CountCityProduct(World world, int cityId, ItemType product)
+    public static int CountCityProduct(World world, int cityId, ItemType product, bool includeInventory = true)
     {
         var count = 0;
 
@@ -171,15 +171,18 @@ public static class FactoryProductionSystem
                 }
             });
 
-        world.Query(
-            in InventoryQuery,
-            (ref PlayerInventory inventory, ref CityAffiliation city) =>
-            {
-                if (city.CityId == cityId)
+        if (includeInventory)
+        {
+            world.Query(
+                in InventoryQuery,
+                (ref PlayerInventory inventory, ref CityAffiliation city) =>
                 {
-                    count += inventory.GetCount(product);
-                }
-            });
+                    if (city.CityId == cityId)
+                    {
+                        count += inventory.GetCount(product);
+                    }
+                });
+        }
 
         return count;
     }

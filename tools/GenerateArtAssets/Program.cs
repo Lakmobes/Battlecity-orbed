@@ -12,6 +12,7 @@ internal static class Program
         var repoRoot = ResolveRepoRoot(args);
         var generateGameSprites = args.Any(static arg => arg is "--game" or "-g");
         var spriteOutput = Path.Combine(repoRoot, "src", "BattleCity.Client", "Content", "Sprites");
+        GenerateIfMissing(Path.Combine(spriteOutput, "LavaFill.png"), GenerateLavaFill);
         var hudOutput = Path.Combine(spriteOutput, "Hud");
         Directory.CreateDirectory(hudOutput);
 
@@ -20,6 +21,12 @@ internal static class Program
         GenerateHudSlot(Path.Combine(hudOutput, "Slot.png"), selected: false);
         GenerateHudSlot(Path.Combine(hudOutput, "SlotSelected.png"), selected: true);
         GenerateCompassRing(Path.Combine(hudOutput, "CompassRing.png"));
+        GenerateIfMissing(Path.Combine(hudOutput, "HealthBar.png"), GenerateHealthBar);
+        GenerateIfMissing(Path.Combine(hudOutput, "HealthFill.png"), GenerateHealthFill);
+        GenerateIfMissing(Path.Combine(hudOutput, "Radar.png"), GenerateRadar);
+        GenerateIfMissing(Path.Combine(hudOutput, "MenuButton.png"), GenerateMenuButton);
+        GenerateIfMissing(Path.Combine(hudOutput, "ActionButton.png"), GenerateActionButton);
+        GenerateIfMissing(Path.Combine(hudOutput, "CompassOrb.png"), GenerateCompassOrb);
 
         if (generateGameSprites)
         {
@@ -51,6 +58,269 @@ internal static class Program
         }
 
         return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+    }
+
+    private static void GenerateIfMissing(string path, Action<string> generate)
+    {
+        if (File.Exists(path))
+        {
+            return;
+        }
+
+        generate(path);
+    }
+
+    private static void GenerateCompassOrb(string path)
+    {
+        const int frame = 40;
+        const int frames = 8;
+        using var image = new Image<Rgba32>(frame * frames, frame);
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var i = 0; i < frames; i++)
+            {
+                var angle = i switch
+                {
+                    0 => 0f, // E
+                    1 => -MathF.PI / 4f, // NE
+                    2 => -MathF.PI / 2f, // N
+                    3 => -3f * MathF.PI / 4f, // NW
+                    4 => MathF.PI, // W
+                    5 => 3f * MathF.PI / 4f, // SW
+                    6 => MathF.PI / 2f, // S
+                    _ => MathF.PI / 4f, // SE
+                };
+                var origin = i * frame;
+                var cx = origin + (frame / 2f);
+                var cy = frame / 2f;
+                var tipX = cx + MathF.Cos(angle) * 14f;
+                var tipY = cy + MathF.Sin(angle) * 14f;
+                for (var y = 2; y < frame - 2; y++)
+                {
+                    var row = accessor.GetRowSpan(y);
+                    for (var x = origin + 2; x < origin + frame - 2; x++)
+                    {
+                        var dx = x - tipX;
+                        var dy = y - tipY;
+                        if ((dx * dx) + (dy * dy) < 36f)
+                        {
+                            row[x] = new Rgba32(255, 170, 40, 255);
+                        }
+                    }
+                }
+            }
+        });
+
+        image.SaveAsPng(path);
+    }
+
+    private static void GenerateHealthBar(string path)
+    {
+        const int width = 256;
+        const int height = 32;
+        using var image = new Image<Rgba32>(width, height);
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < width; x++)
+                {
+                    var edge = x < 3 || y < 3 || x >= width - 3 || y >= height - 3;
+                    row[x] = edge
+                        ? new Rgba32(0, 180, 220, 230)
+                        : new Rgba32(8, 14, 22, 40);
+                }
+            }
+        });
+
+        image.SaveAsPng(path);
+    }
+
+    private static void GenerateHealthFill(string path)
+    {
+        const int width = 128;
+        const int height = 16;
+        using var image = new Image<Rgba32>(width, height);
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < width; x++)
+                {
+                    var t = x / (float)(width - 1);
+                    var r = (byte)(220 - (t * 180));
+                    var g = (byte)(40 + (t * 190));
+                    row[x] = new Rgba32(r, g, 50, 255);
+                }
+            }
+        });
+
+        image.SaveAsPng(path);
+    }
+
+    private static void GenerateLavaFill(string path)
+    {
+        const int size = 96;
+        const int frames = 8;
+        using var image = new Image<Rgba32>(size, size * frames);
+        var bubbles = new (float X, float Phase)[]
+        {
+            (0.30f, 0.0f),
+            (0.62f, 0.35f),
+            (0.45f, 0.7f),
+        };
+
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var frame = 0; frame < frames; frame++)
+            {
+                var originY = frame * size;
+                for (var y = 0; y < size; y++)
+                {
+                    var row = accessor.GetRowSpan(originY + y);
+                    for (var x = 0; x < size; x++)
+                    {
+                        row[x] = new Rgba32(168, 42, 8, 255);
+                    }
+                }
+            }
+        });
+
+        for (var frame = 0; frame < frames; frame++)
+        {
+            var t = frame / (float)frames;
+            foreach (var bubble in bubbles)
+            {
+                var life = (t + bubble.Phase) % 1f;
+                var by = (1.15f - (life * 1.3f)) * (size - 1);
+                var radius = 3f + (life * 7f);
+                var alpha = life < 0.15f ? life / 0.15f : life > 0.8f ? (1f - life) / 0.2f : 1f;
+                StampBubble(image, bubble.X * (size - 1), (frame * size) + by, radius, alpha);
+            }
+        }
+
+        image.SaveAsPng(path);
+    }
+
+    private static void StampBubble(Image<Rgba32> image, float cx, float cy, float radius, float alpha)
+    {
+        if (alpha <= 0.01f)
+        {
+            return;
+        }
+
+        var minX = Math.Max(0, (int)(cx - radius - 1));
+        var maxX = Math.Min(image.Width - 1, (int)(cx + radius + 1));
+        var minY = Math.Max(0, (int)(cy - radius - 1));
+        var maxY = Math.Min(image.Height - 1, (int)(cy + radius + 1));
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = minY; y <= maxY; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = minX; x <= maxX; x++)
+                {
+                    var dx = x - cx;
+                    var dy = y - cy;
+                    var dist = MathF.Sqrt((dx * dx) + (dy * dy));
+                    if (dist > radius)
+                    {
+                        continue;
+                    }
+
+                    var edge = dist > radius - 1.6f;
+                    var amount = alpha * (edge ? 0.85f : 0.45f);
+                    var basePixel = row[x];
+                    row[x] = new Rgba32(
+                        (byte)Math.Clamp(basePixel.R + (70 * amount), 0, 255),
+                        (byte)Math.Clamp(basePixel.G + (50 * amount), 0, 255),
+                        (byte)Math.Clamp(basePixel.B + (20 * amount), 0, 255),
+                        255);
+                }
+            }
+        });
+    }
+
+    private static void GenerateRadar(string path)
+    {
+        const int size = 1024;
+        var center = (size - 1) / 2f;
+        var outer = size * 0.48f;
+        var ringInner = outer - (size * 0.045f);
+        using var image = new Image<Rgba32>(size, size);
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < size; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < size; x++)
+                {
+                    var dx = x - center;
+                    var dy = y - center;
+                    var dist = MathF.Sqrt(dx * dx + dy * dy);
+                    if (dist > outer)
+                    {
+                        row[x] = new Rgba32(0, 0, 0, 0);
+                        continue;
+                    }
+
+                    var ring = dist > ringInner;
+                    row[x] = ring
+                        ? new Rgba32(0, 200, 230, 230)
+                        : new Rgba32(8, 16, 28, 210);
+                }
+            }
+        });
+
+        image.SaveAsPng(path);
+    }
+
+    private static void GenerateMenuButton(string path)
+    {
+        const int width = 176;
+        const int height = 46;
+        using var image = new Image<Rgba32>(width, height);
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < width; x++)
+                {
+                    var edge = x < 2 || y < 2 || x >= width - 2 || y >= height - 2;
+                    row[x] = edge
+                        ? new Rgba32(0, 190, 220, 230)
+                        : new Rgba32(10, 18, 28, 220);
+                }
+            }
+        });
+
+        image.SaveAsPng(path);
+    }
+
+    private static void GenerateActionButton(string path)
+    {
+        const int width = 148;
+        const int height = 34;
+        using var image = new Image<Rgba32>(width, height);
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < width; x++)
+                {
+                    var edge = x < 2 || y < 2 || x >= width - 2 || y >= height - 2;
+                    row[x] = edge
+                        ? new Rgba32(0, 160, 200, 220)
+                        : new Rgba32(12, 22, 34, 210);
+                }
+            }
+        });
+
+        image.SaveAsPng(path);
     }
 
     private static void GenerateHudPanel(string path)

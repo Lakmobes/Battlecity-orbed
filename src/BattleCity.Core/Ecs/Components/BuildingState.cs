@@ -6,7 +6,7 @@ public struct BuildingState
     public int Population;
     public int ItemsLeft;
 
-    /// <summary>0..5; sheet column is <c>AnimationFrame / 2</c> (legacy CBuilding).</summary>
+    /// <summary>Sheet column. One column per frame, six frames across.</summary>
     public int AnimationFrame;
 
     public float AnimationCooldownSeconds;

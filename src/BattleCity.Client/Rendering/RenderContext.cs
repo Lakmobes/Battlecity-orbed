@@ -9,6 +9,8 @@ using Microsoft.Xna.Framework;
 
 namespace BattleCity.Client.Rendering;
 
+public readonly record struct TeamRosterLine(string Text, bool Heading, bool Dead);
+
 public sealed class RenderContext
 {
     public required Camera2D Camera { get; init; }
@@ -27,6 +29,7 @@ public sealed class RenderContext
     public int CityTeamCapacity { get; init; } = GameConstants.MaxPlayersPerCity;
     public string? MayorDisplayName { get; init; }
     public bool LocalPlayerIsMayor { get; init; }
+    public IReadOnlyList<TeamRosterLine> TeamRoster { get; init; } = [];
     public int? PlayerHealth { get; init; }
     public int? PlayerMaxHealth { get; init; }
     public string? PlayerDisplayName { get; init; }
@@ -51,6 +54,7 @@ public sealed class RenderContext
     public CityBuildState? CityBuild { get; init; }
     public int BuildModeSlot { get; init; }
     public float AnimationTime { get; init; }
+    public Matrix SpriteBatchTransform { get; init; } = Matrix.Identity;
     public bool ShowOrbedOverlay { get; init; }
     public bool OrbedOverlayIsVictim { get; init; }
     public string? OrbedOverlayMessage { get; init; }

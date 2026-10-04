@@ -44,7 +44,7 @@ public sealed class UiRenderer
 
     public void LoadContent()
     {
-        _font = _assets.LoadFont(LegacySpriteNames.UiFont);
+        _font = _assets.LoadFont(LegacySpriteNames.HudFont);
         _inventoryPanel.LoadContent();
         _underAttackPanel.LoadContent();
         _buildMenu.LoadContent();
@@ -57,13 +57,8 @@ public sealed class UiRenderer
 
     private void DrawModern(SpriteBatch spriteBatch, in RenderContext context)
     {
-        var pixel = _assets.Pixel;
-        HudOverlayHelper.DrawPanel(spriteBatch, _assets, ModernHudLayout.TopBar, TopBarFill);
-        spriteBatch.Draw(
-            pixel,
-            new Rectangle(0, ModernHudLayout.TopBar.Bottom - 2, UiLayout.LogicalWidth, 2),
-            TopBarAccent);
-        DrawHamburger(spriteBatch, context.ShowSettingsMenu);
+        DrawMenuButton(spriteBatch, context.ShowSettingsMenu);
+        DrawMapButton(spriteBatch, context.ShowMiniMap);
 
         if (context.PlayerInventory.HasValue)
         {
@@ -78,14 +73,10 @@ public sealed class UiRenderer
                 context.FlareRechargeUnlocked);
         }
 
-        _radar.Draw(spriteBatch, in context);
+        _radar.DrawBackdrop(spriteBatch);
         _underAttackPanel.Draw(spriteBatch, in context);
-        DrawCityInfoPanel(spriteBatch, in context);
-
-        if (context.ShowStatusPanel)
-        {
-            DrawStatusPanel(spriteBatch, in context);
-        }
+        _radar.Draw(spriteBatch, in context);
+        DrawInfoCard(spriteBatch, in context);
 
         if (context.ShowBuildMenu && context.CityBuild is not null)
         {
@@ -179,107 +170,136 @@ public sealed class UiRenderer
             context.DenyApplicants ? new Color(255, 180, 90) : MenuTheme.TextMuted);
     }
 
-    private void DrawHamburger(SpriteBatch spriteBatch, bool highlighted)
+    private void DrawMenuButton(SpriteBatch spriteBatch, bool highlighted)
     {
         var bounds = ModernHudLayout.HamburgerBounds;
-        var fill = highlighted ? MenuTheme.ButtonFocusFill : new Color(8, 10, 24, 180);
-        HudOverlayHelper.DrawPanel(spriteBatch, _assets, bounds, fill);
+        var menuArt = _assets.LoadTexture(HudSpriteNames.MenuButton);
+        if (menuArt != _assets.Pixel)
+        {
+            spriteBatch.Draw(menuArt, bounds, Color.White);
+        }
+        else
+        {
+            HudTheme.DrawPanel(spriteBatch, _assets.Pixel, bounds, active: highlighted);
+        }
 
         var pixel = _assets.Pixel;
-        var lineColor = highlighted ? MenuTheme.TextAccent : TextColor;
-        var lineWidth = bounds.Width - 16;
-        var lineHeight = 3;
-        var startX = bounds.X + 8;
-        var gap = 8;
-        var startY = bounds.Y + (bounds.Height - (lineHeight * 3 + gap * 2)) / 2;
+        var lineColor = highlighted ? HudTheme.Accent : HudTheme.Text;
+        var startX = bounds.X + 12;
+        var startY = bounds.Y + 14;
         for (var i = 0; i < 3; i++)
         {
-            spriteBatch.Draw(
-                pixel,
-                new Rectangle(startX, startY + i * (lineHeight + gap), lineWidth, lineHeight),
-                lineColor);
+            spriteBatch.Draw(pixel, new Rectangle(startX, startY + i * 7, 16, 2), lineColor);
+        }
+
+        if (_font is not null)
+        {
+            HudTheme.DrawLabel(
+                spriteBatch,
+                _font,
+                "MENU (ESC)",
+                new Vector2(bounds.X + 38, bounds.Y + 12),
+                highlighted ? HudTheme.Accent : HudTheme.Text,
+                scale: 1f);
         }
     }
 
-    private void DrawCityInfoPanel(SpriteBatch spriteBatch, in RenderContext context)
+    private void DrawMapButton(SpriteBatch spriteBatch, bool mapOpen)
     {
-        if (_font is null || string.IsNullOrWhiteSpace(context.LoadedCityName))
+        var bounds = ModernHudLayout.MapButtonBounds;
+        var art = _assets.LoadTexture(HudSpriteNames.MenuButton);
+        if (art != _assets.Pixel)
+        {
+            spriteBatch.Draw(art, bounds, Color.White);
+        }
+        else
+        {
+            HudTheme.DrawPanel(spriteBatch, _assets.Pixel, bounds, active: mapOpen);
+        }
+
+        if (_font is null)
         {
             return;
         }
 
-        var lines = new List<string> { context.LoadedCityName };
-        if (context.CityTeamCapacity > 0)
-        {
-            var team = context.CityTeamCount > 0
-                ? context.CityTeamCount
-                : 1;
-            lines.Add($"{team}/{context.CityTeamCapacity}");
-        }
-
-        lines.Add($"Buildings: {context.BuildingCount}");
-        if (!context.LocalPlayerIsMayor && !string.IsNullOrWhiteSpace(context.MayorDisplayName))
-        {
-            lines.Add($"Mayor: {context.MayorDisplayName}");
-        }
-        else if (context.LocalPlayerIsMayor)
-        {
-            lines.Add("You are mayor");
-        }
-
-        const int padding = 10;
-        const int lineHeight = 18;
-        var maxWidth = 0f;
-        foreach (var line in lines)
-        {
-            maxWidth = Math.Max(maxWidth, _font.MeasureString(line).X * 0.9f);
-        }
-
-        var panelWidth = (int)maxWidth + padding * 2;
-        var panelHeight = lines.Count * lineHeight + padding * 2;
-        var compass = ModernHudLayout.CompassBounds;
-        var panel = new Rectangle(
-            compass.Right - panelWidth,
-            compass.Bottom + 10,
-            panelWidth,
-            panelHeight);
-
-        HudOverlayHelper.DrawPanel(spriteBatch, _assets, panel, StatusPanelFill);
-
-        var y = panel.Y + padding;
-        for (var i = 0; i < lines.Count; i++)
-        {
-            var color = i == 0 ? MenuTheme.TextAccent : TextColor;
-            var scale = new Vector2(0.9f, 0.9f);
-            var position = new Vector2(panel.X + padding, y);
-            spriteBatch.DrawString(_font, lines[i], position + new Vector2(1f, 1f), TextShadowColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-            spriteBatch.DrawString(_font, lines[i], position, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-            y += lineHeight;
-        }
+        var label = mapOpen ? "MAP ON (M)" : "MAP (M)";
+        var scale = 1f;
+        var size = _font.MeasureString(label) * scale;
+        HudTheme.DrawLabel(
+            spriteBatch,
+            _font,
+            label,
+            new Vector2(bounds.Center.X - size.X / 2f, bounds.Center.Y - size.Y / 2f),
+            mapOpen ? HudTheme.Accent : HudTheme.Text,
+            scale);
     }
 
-    private void DrawStatusPanel(SpriteBatch spriteBatch, in RenderContext context)
+    private void DrawInfoCard(SpriteBatch spriteBatch, in RenderContext context)
     {
         if (_font is null)
         {
             return;
         }
 
-        var textLines = BuildStatusLines(in context);
-        if (textLines.Count == 0)
+        var panel = ModernHudLayout.InfoCard;
+        HudTheme.DrawPanel(spriteBatch, _assets.Pixel, panel, active: false);
+        var y = panel.Y + 8;
+        HudTheme.DrawLabel(spriteBatch, _font, "Location", new Vector2(panel.X + 10, y), HudTheme.TextMuted, 1f);
+        HudTheme.DrawLabel(spriteBatch, _font, context.LoadedCityName ?? "-", new Vector2(panel.X + 140, y), HudTheme.Text, 1f);
+        y += 28;
+        HudTheme.DrawLabel(spriteBatch, _font, "Bldgs", new Vector2(panel.X + 10, y), HudTheme.TextMuted, 1f);
+        HudTheme.DrawLabel(spriteBatch, _font, context.BuildingCount.ToString(), new Vector2(panel.X + 140, y), HudTheme.Text, 1f);
+        y += 28;
+        foreach (var line in context.TeamRoster)
         {
-            return;
+            if (y > panel.Bottom - 18)
+            {
+                break;
+            }
+
+            HudTheme.DrawLabel(
+                spriteBatch,
+                _font,
+                line.Text,
+                new Vector2(panel.X + (line.Heading ? 10 : 22), y),
+                line.Dead ? new Color(255, 90, 80) : line.Heading ? HudTheme.Accent : HudTheme.Text,
+                1f);
+            y += 24;
+        }
+    }
+
+    public static bool TryHitSettingsItem(int x, int y, out int index)
+    {
+        var point = new Point(x, y);
+        for (var i = 0; i < SettingsMenuItems.Length; i++)
+        {
+            if (GetSettingsButtonBounds(i).Contains(point))
+            {
+                index = i;
+                return true;
+            }
         }
 
-        var panel = ModernHudLayout.StatusPanel(textLines.Count);
-        HudOverlayHelper.DrawPanel(spriteBatch, _assets, panel, StatusPanelFill);
+        index = -1;
+        return false;
+    }
 
-        var x = panel.X + ModernHudLayout.StatusPanelPadding;
-        var y = panel.Y + ModernHudLayout.StatusPanelPadding;
-        foreach (var line in textLines)
-        {
-            DrawLine(spriteBatch, x, ref y, line);
-        }
+    public static Rectangle GetSettingsButtonBounds(int index)
+    {
+        const int panelWidth = 480;
+        var itemCount = SettingsMenuItems.Length;
+        var panelHeight = 88 + itemCount * (MenuTheme.MenuButtonHeight + MenuTheme.MenuButtonGap);
+        var panel = new Rectangle(
+            (UiLayout.LogicalWidth - panelWidth) / 2,
+            (UiLayout.LogicalHeight - panelHeight) / 2,
+            panelWidth,
+            panelHeight);
+        var buttonWidth = panelWidth - 64;
+        return new Rectangle(
+            panel.X + 32,
+            panel.Y + 70 + index * (MenuTheme.MenuButtonHeight + MenuTheme.MenuButtonGap),
+            buttonWidth,
+            MenuTheme.MenuButtonHeight);
     }
 
     private void DrawSettingsMenu(SpriteBatch spriteBatch, in RenderContext context)
@@ -319,17 +339,10 @@ public sealed class UiRenderer
             SpriteEffects.None,
             0f);
 
-        var buttonWidth = panelWidth - 64;
-        var buttonX = panel.X + 32;
-        var startY = panel.Y + 70;
         for (var i = 0; i < itemCount; i++)
         {
             var selected = i == context.SettingsSelectedIndex;
-            var bounds = new Rectangle(
-                buttonX,
-                startY + i * (MenuTheme.MenuButtonHeight + MenuTheme.MenuButtonGap),
-                buttonWidth,
-                MenuTheme.MenuButtonHeight);
+            var bounds = GetSettingsButtonBounds(i);
             var fill = selected ? MenuTheme.ButtonFocusFill : MenuTheme.ButtonIdleFill;
             var border = selected ? MenuTheme.ButtonFocusBorder : MenuTheme.ButtonIdleBorder;
             spriteBatch.Draw(pixel, bounds, fill);
@@ -375,73 +388,4 @@ public sealed class UiRenderer
             0f);
     }
 
-    private List<string> BuildStatusLines(in RenderContext context)
-    {
-        var textLines = new List<string>
-        {
-            context.PlayerDisplayName ?? "Player",
-            context.LoadedCityName ?? "Unknown City",
-            $"Buildings: {context.BuildingCount}",
-        };
-
-        if (context.PlayerHealth.HasValue
-            && context.PlayerMaxHealth.HasValue
-            && !context.PlayerRespawnSeconds.HasValue)
-        {
-            textLines.Add($"HP: {context.PlayerHealth}/{context.PlayerMaxHealth}");
-        }
-
-        if (context.PlayerInventory.HasValue)
-        {
-            textLines.Add("D-drop placeables  [ ]-cycle");
-            textLines.Add("C-cloak  H-medkit  Shift-fire");
-        }
-
-        textLines.Add(context.ShowMiniMap ? "Minimap: ON (M)" : "Minimap: OFF (M)");
-        textLines.Add("F1 - hide/show this info");
-        textLines.Add("F11 / Alt+Enter - fullscreen");
-        textLines.Add("Build: right-click map");
-
-        if (context.BuildModeSlot != 0)
-        {
-            var label = context.BuildModeSlot == -1
-                ? "Demolish: left-click building"
-                : $"Building {GetBuildModeLabel(context.BuildModeSlot)}: left-click map";
-            textLines.Add(label);
-        }
-
-        if (context.CityBuild?.IsOrbable == true)
-        {
-            textLines.Add("City is orbable");
-        }
-
-        textLines.Add("Menu - hamburger / Esc");
-        return textLines;
-    }
-
-    private void DrawLine(SpriteBatch spriteBatch, int x, ref int y, string text)
-    {
-        if (_font is null)
-        {
-            y += ModernHudLayout.StatusLineHeight;
-            return;
-        }
-
-        var scale = new Vector2(0.95f, 0.95f);
-        var position = new Vector2(x, y);
-        spriteBatch.DrawString(_font, text, position + new Vector2(1f, 1f), TextShadowColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-        spriteBatch.DrawString(_font, text, position, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-        y += ModernHudLayout.StatusLineHeight;
-    }
-
-    private static string GetBuildModeLabel(int buildModeSlot)
-    {
-        var menuIndex = buildModeSlot - 1;
-        if (menuIndex < 0 || menuIndex >= BuildingCatalog.MenuNames.Count)
-        {
-            return "selected";
-        }
-
-        return BuildingCatalog.MenuNames[menuIndex];
-    }
 }

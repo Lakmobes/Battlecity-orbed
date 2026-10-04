@@ -238,6 +238,20 @@ public sealed class InGameScene : IScene
 
     private void HandleBuildInput(UiInputState ui, Vector2 playerCenter, int worldWidth)
     {
+        if (ui.MouseLeftClicked
+            && ModernHudLayout.TryHandleChromeClick(
+                (int)ui.MouseLogicalPosition.X,
+                (int)ui.MouseLogicalPosition.Y,
+                out var toggleMiniMap))
+        {
+            if (toggleMiniMap)
+            {
+                _showMiniMap = !_showMiniMap;
+            }
+
+            return;
+        }
+
         if (ui.MouseRightClicked && ui.PointerOverWorld)
         {
             _showBuildMenu = true;
@@ -349,6 +363,19 @@ public sealed class InGameScene : IScene
             out _buildPreviewTypeCode,
             out _buildPreviewIsDemolish);
         _showBuildPreview = true;
+    }
+
+    private TeamRosterLine[] BuildOfflineTeamRoster()
+    {
+        var dead = _simulation.TryGetPlayerLifeState(out var life) && life.IsDead;
+        var name = string.IsNullOrWhiteSpace(_context.PlayerName) ? "You" : _context.PlayerName;
+        return
+        [
+            new TeamRosterLine("Mayor", Heading: true, Dead: false),
+            new TeamRosterLine(name, Heading: false, dead),
+            new TeamRosterLine("Soldiers", Heading: true, Dead: false),
+            new TeamRosterLine("-", Heading: false, Dead: false),
+        ];
     }
 
     private RenderContext CreateRenderContext()
@@ -482,6 +509,7 @@ public sealed class InGameScene : IScene
             LoadedCityName = _cityLayout.CityName,
             BuildingCount = cityBuild?.CurrentBuildingCount ?? _cityLayout.Buildings.Count,
             CityTeamCount = 1,
+            TeamRoster = BuildOfflineTeamRoster(),
             CityTeamCapacity = GameConstants.MaxPlayersPerCity,
             LocalPlayerIsMayor = true,
             MayorDisplayName = _context.PlayerName,
@@ -506,6 +534,7 @@ public sealed class InGameScene : IScene
             CityBuild = cityBuild,
             BuildModeSlot = _buildModeSlot,
             AnimationTime = _animationTime,
+            SpriteBatchTransform = Matrix.Multiply(_camera.ViewMatrix, _context.Presentation.TransformMatrix),
             ShowOrbedOverlay = showOrbedOverlay,
             OrbedOverlayIsVictim = orbedOverlayIsVictim,
             OrbedOverlayMessage = orbedOverlayMessage,
@@ -553,6 +582,14 @@ public sealed class InGameScene : IScene
         }
 
         var menu = _menuInput.Poll();
+        var mouseX = (int)ui.MouseLogicalPosition.X;
+        var mouseY = (int)ui.MouseLogicalPosition.Y;
+        var overItem = UiRenderer.TryHitSettingsItem(mouseX, mouseY, out var hoverIndex);
+        var clickedItem = ui.MouseLeftClicked && overItem;
+        if (overItem)
+        {
+            _settingsSelectedIndex = hoverIndex;
+        }
         if (menu.MoveUpPressed)
         {
             _settingsSelectedIndex =
@@ -566,7 +603,7 @@ public sealed class InGameScene : IScene
                 (_settingsSelectedIndex + 1) % UiRenderer.SettingsMenuItems.Length;
         }
 
-        if (menu.ConfirmPressed)
+        if (menu.ConfirmPressed || clickedItem)
         {
             switch (_settingsSelectedIndex)
             {

@@ -27,5 +27,5 @@ public static class ResearchVisuals
     }
 
     public static int GetAnimationFrameOffset(float animationTimeSeconds) =>
-        ((int)(animationTimeSeconds * 2f) % 3) * BuildingSprites.SpriteSize;
+        ((int)(animationTimeSeconds * 2f) % BuildingSprites.AnimationColumnCount) * BuildingSprites.SpriteSize;
 }

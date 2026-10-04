@@ -67,11 +67,7 @@ public static class WeaponActions
             weapons.RocketCooldownSeconds <= 0f &&
             weapons.LaserCooldownSeconds <= 0f)
         {
-            if (!inventory.TryConsume(ItemType.Rocket))
-            {
-                return false;
-            }
-
+            // The missile stays in inventory. Owning one makes the stopped shot a rocket.
             FireSingle(world, owner, tankTopLeft, facing.Direction, BulletKind.Rocket, audio);
             weapons.RocketCooldownSeconds = GameConstants.TimerShootRocket / 1000f;
             weapons.LaserCooldownSeconds = GameConstants.TimerShootRocket / 1000f;
@@ -127,7 +123,6 @@ public static class WeaponActions
             }
 
             ApplyLegacyShot(world, owner, request, audio);
-            inventory.Rocket--;
             weapons.RocketCooldownSeconds = GameConstants.TimerShootRocket / 1000f;
             weapons.LaserCooldownSeconds = GameConstants.TimerShootRocket / 1000f;
             return true;

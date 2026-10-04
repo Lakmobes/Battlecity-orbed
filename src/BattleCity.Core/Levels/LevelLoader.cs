@@ -150,7 +150,7 @@ public static class LevelLoader
     public static Entity SpawnBuilding(World world, CityBuildingPlacement building, int cityId = 0)
     {
         var position = BuildingPlacement.GridAnchorToWorldPosition(building.GridX, building.GridY);
-        var animationFrame = Random.Shared.Next(0, 6);
+        var animationFrame = Random.Shared.Next(0, BuildingSprites.AnimationColumnCount);
         var (sourceX, sourceY) = BuildingSprites.GetSourceOrigin(building.TypeCode, animationFrame);
 
         var (offsetX, offsetY, width, height) = BuildingCollision.GetPlayerColliderShape(building.TypeCode);

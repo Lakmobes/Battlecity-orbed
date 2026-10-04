@@ -7,6 +7,7 @@ public static class LegacySpriteNames
 {
     public const string Ground = "Sprites/Ground";
     public const string Lava = "Sprites/Lava";
+    public const string LavaFill = "Sprites/LavaFill";
     public const string Rocks = "Sprites/Rocks";
     public const string Tanks = "Sprites/Tanks";
     public const string MiniMapColors = "Sprites/MiniMapColors";
@@ -24,6 +25,7 @@ public static class LegacySpriteNames
     public const string BlackNumbers = "Sprites/BlackNumbers";
     public const string MenuFont = "Fonts/MenuFont";
     public const string UiFont = "Fonts/UiFont";
+    public const string HudFont = "Fonts/HudFont";
 
     public static string ToContentPath(string legacyBmpFileName)
     {

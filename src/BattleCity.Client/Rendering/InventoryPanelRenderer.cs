@@ -13,13 +13,9 @@ namespace BattleCity.Client.Rendering;
 public sealed class InventoryPanelRenderer
 {
     private static readonly Color CountColor = new(255, 230, 90);
-    private static readonly Color ReadyColor = new(120, 220, 255);
-    private static readonly Color RechargeFillColor = new(70, 180, 220, 200);
+    private static readonly Color ReadyColor = new(0, 229, 255);
+    private static readonly Color RechargeFillColor = new(0, 180, 220, 200);
     private static readonly Color RechargeEmptyColor = new(0, 0, 0, 140);
-    private static readonly Color HealthFillColor = new(70, 195, 95);
-    private static readonly Color HealthFillHighlight = new(140, 235, 150, 120);
-    private static readonly Color HealthEmptyColor = new(18, 20, 28, 210);
-    private static readonly Color HealthBorderColor = new(255, 255, 255, 70);
 
     private readonly AssetService _assets;
     private SpriteFont? _font;
@@ -31,7 +27,7 @@ public sealed class InventoryPanelRenderer
 
     public void LoadContent()
     {
-        _font = _assets.LoadFont(LegacySpriteNames.UiFont);
+        _font = _assets.LoadFont(LegacySpriteNames.HudFont);
     }
 
     public void Draw(
@@ -56,6 +52,24 @@ public sealed class InventoryPanelRenderer
         DrawHealthBar(spriteBatch, playerHealth, playerMaxHealth, visible.Count);
     }
 
+    private void DrawSlotBadge(SpriteBatch spriteBatch, Rectangle slotBounds, string label)
+    {
+        if (_font is null)
+        {
+            return;
+        }
+
+        var badge = new Rectangle(slotBounds.X + 2, slotBounds.Y + 2, label.Length > 1 ? 18 : 14, 12);
+        spriteBatch.Draw(_assets.Pixel, badge, HudTheme.BadgeFill);
+        HudTheme.DrawLabel(
+            spriteBatch,
+            _font,
+            label,
+            new Vector2(badge.X + 2, badge.Y - 1),
+            HudTheme.Accent,
+            scale: 0.75f);
+    }
+
     private static List<(ItemType Type, int Count)> CollectVisibleItems(in PlayerInventory inventory)
     {
         // Show gear + placeables (including count 0) so the player can see what they own.
@@ -78,8 +92,6 @@ public sealed class InventoryPanelRenderer
         bool flareRechargeUnlocked)
     {
         var items = _assets.Items;
-        var slotTexture = _assets.HudSlot;
-        var selectedTexture = _assets.HudSlotSelected;
         var slotCount = visible.Count;
         var iconSize = (int)(InventoryPanelLayout.IconSize * 0.72f);
 
@@ -89,22 +101,26 @@ public sealed class InventoryPanelRenderer
             var (drawX, drawY) = InventoryPanelLayout.GetSlotScreenPosition(slotIndex, slotCount);
             var slotBounds = new Rectangle(drawX, drawY, InventoryPanelLayout.IconSize, InventoryPanelLayout.IconSize);
             var isSelected = type == inventory.SelectedItemType;
-            var frame = isSelected && selectedTexture != _assets.Pixel
-                ? selectedTexture
-                : slotTexture;
-
-            if (frame != _assets.Pixel)
+            var slotFrame = isSelected ? _assets.HudSlotSelected : _assets.HudSlot;
+            if (slotFrame != _assets.Pixel)
             {
-                spriteBatch.Draw(frame, slotBounds, Color.White);
+                spriteBatch.Draw(slotFrame, slotBounds, Color.White);
             }
             else
             {
-                HudOverlayHelper.DrawFlatPanel(
-                    spriteBatch,
-                    _assets.Pixel,
-                    slotBounds,
-                    new Color(0, 0, 0, 90));
+                HudTheme.DrawPanel(spriteBatch, _assets.Pixel, slotBounds, active: isSelected);
             }
+
+            if (isSelected && slotFrame == _assets.Pixel)
+            {
+                var glow = new Rectangle(slotBounds.X - 2, slotBounds.Y - 2, slotBounds.Width + 4, slotBounds.Height + 4);
+                spriteBatch.Draw(_assets.Pixel, new Rectangle(glow.X, glow.Y, glow.Width, 2), HudTheme.Accent);
+                spriteBatch.Draw(_assets.Pixel, new Rectangle(glow.X, glow.Bottom - 2, glow.Width, 2), HudTheme.Accent);
+                spriteBatch.Draw(_assets.Pixel, new Rectangle(glow.X, glow.Y, 2, glow.Height), HudTheme.Accent);
+                spriteBatch.Draw(_assets.Pixel, new Rectangle(glow.Right - 2, glow.Y, 2, glow.Height), HudTheme.Accent);
+            }
+
+            DrawSlotBadge(spriteBatch, slotBounds, (slotIndex + 1).ToString());
 
             var rechargeUnlocked = type switch
             {
@@ -154,7 +170,7 @@ public sealed class InventoryPanelRenderer
                     count > 0 ? CountColor : new Color(140, 140, 150),
                     0f,
                     Vector2.Zero,
-                    new Vector2(0.9f, 0.9f),
+                    Vector2.One,
                     SpriteEffects.None,
                     0f);
             }
@@ -211,73 +227,54 @@ public sealed class InventoryPanelRenderer
         int? playerMaxHealth,
         int inventorySlotCount)
     {
-        var pixel = _assets.Pixel;
         var rowWidth = inventorySlotCount > 0
             ? inventorySlotCount * ModernHudLayout.InventorySlotSize
               + (inventorySlotCount - 1) * ModernHudLayout.InventorySlotSpacing
             : ModernHudLayout.HealthBarWidth;
-        var barWidth = Math.Max(ModernHudLayout.HealthBarWidth, rowWidth);
-        var x = (UiLayout.LogicalWidth - barWidth) / 2;
-        var y = ModernHudLayout.HealthBarY;
-        var bounds = new Rectangle(x, y, barWidth, ModernHudLayout.HealthBarHeight);
-
-        HudOverlayHelper.DrawFlatPanel(spriteBatch, pixel, bounds, HealthEmptyColor, borderThickness: 0);
-
-        if (playerHealth.HasValue && playerMaxHealth.HasValue && playerMaxHealth.Value > 0)
+        var barWidth = Math.Min(rowWidth, 720);
+        var x = ModernHudLayout.GetCenteredRowStartX(inventorySlotCount);
+        if (inventorySlotCount <= 0)
         {
-            var percent = Math.Clamp(playerHealth.Value / (float)playerMaxHealth.Value, 0f, 1f);
-            var fillWidth = Math.Max(1, (int)(bounds.Width * percent));
-            var fillBounds = new Rectangle(bounds.X, bounds.Y, fillWidth, bounds.Height);
-            spriteBatch.Draw(pixel, fillBounds, HealthFillColor);
-            spriteBatch.Draw(
-                pixel,
-                new Rectangle(fillBounds.X, fillBounds.Y, fillBounds.Width, Math.Max(1, fillBounds.Height / 3)),
-                HealthFillHighlight);
+            x = (UiLayout.LogicalWidth - barWidth) / 2;
+        }
 
-            if (_font is not null)
+        var bounds = new Rectangle(x, ModernHudLayout.HealthBarY, barWidth, ModernHudLayout.HealthBarHeight);
+        var current = playerHealth ?? 0;
+        var max = playerMaxHealth ?? 0;
+        var percent = max > 0 ? Math.Clamp(current / (float)max, 0f, 1f) : 0f;
+        var frame = _assets.LoadTexture(HudSpriteNames.HealthBar);
+        if (frame != _assets.Pixel)
+        {
+            spriteBatch.Draw(frame, bounds, Color.White);
+        }
+        else
+        {
+            spriteBatch.Draw(_assets.Pixel, bounds, HudTheme.HealthTrack);
+        }
+
+        var inner = new Rectangle(bounds.X + 4, bounds.Y + 4, Math.Max(0, bounds.Width - 8), Math.Max(0, bounds.Height - 8));
+        var fillWidth = (int)(inner.Width * percent);
+        if (fillWidth > 0)
+        {
+            var fillArt = _assets.LoadTexture(HudSpriteNames.HealthFill);
+            if (fillArt == _assets.Pixel)
             {
-                var label = $"{playerHealth}/{playerMaxHealth}";
-                var size = _font.MeasureString(label) * 0.85f;
-                var labelPos = new Vector2(bounds.Center.X - size.X / 2f, bounds.Center.Y - size.Y / 2f);
-                spriteBatch.DrawString(
-                    _font,
-                    label,
-                    labelPos + new Vector2(1f, 1f),
-                    new Color(0, 0, 0, 180),
-                    0f,
-                    Vector2.Zero,
-                    new Vector2(0.85f, 0.85f),
-                    SpriteEffects.None,
-                    0f);
-                spriteBatch.DrawString(
-                    _font,
-                    label,
-                    labelPos,
-                    Color.White,
-                    0f,
-                    Vector2.Zero,
-                    new Vector2(0.85f, 0.85f),
-                    SpriteEffects.None,
-                    0f);
+                fillArt = _assets.Health;
+            }
+
+            if (fillArt != _assets.Pixel)
+            {
+                var sourceWidth = Math.Max(1, (int)(fillArt.Width * percent));
+                spriteBatch.Draw(
+                    fillArt,
+                    new Rectangle(inner.X, inner.Y, fillWidth, inner.Height),
+                    new Rectangle(0, 0, sourceWidth, fillArt.Height),
+                    Color.White);
+            }
+            else
+            {
+                spriteBatch.Draw(_assets.Pixel, new Rectangle(inner.X, inner.Y, fillWidth, inner.Height), HudTheme.HealthFill);
             }
         }
-        else if (_font is not null)
-        {
-            spriteBatch.DrawString(
-                _font,
-                "HP",
-                new Vector2(bounds.X + 8, bounds.Y + 2),
-                new Color(200, 200, 210),
-                0f,
-                Vector2.Zero,
-                new Vector2(0.75f, 0.75f),
-                SpriteEffects.None,
-                0f);
-        }
-
-        spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Y, bounds.Width, 1), HealthBorderColor);
-        spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Bottom - 1, bounds.Width, 1), HealthBorderColor);
-        spriteBatch.Draw(pixel, new Rectangle(bounds.X, bounds.Y, 1, bounds.Height), HealthBorderColor);
-        spriteBatch.Draw(pixel, new Rectangle(bounds.Right - 1, bounds.Y, 1, bounds.Height), HealthBorderColor);
     }
 }
