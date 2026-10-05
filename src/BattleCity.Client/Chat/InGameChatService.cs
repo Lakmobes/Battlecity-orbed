@@ -60,6 +60,8 @@ public static class ChatColorResolver
 
     public static Color Promotion => ToColor(UiColors.White);
 
+    public static Color Orbed => ToColor(UiColors.Blue);
+
 
 
     public static Color Whisper => ToColor(UiColors.White);
@@ -207,6 +209,10 @@ public static class InGameChatService
     public static void AppendSystem(InGameChatLog log, string message) =>
 
         log.Append(message, ChatColorResolver.System);
+
+    public static void AppendOrbed(InGameChatLog log, string message) =>
+
+        log.Append(message, ChatColorResolver.Orbed);
 
 
 

@@ -1,5 +1,8 @@
 using BattleCity.Shared.Catalogs;
 using BattleCity.Shared.Chat;
+using BattleCity.Shared.Gameplay;
+using BattleCity.Shared.Network;
+using BattleCity.Shared.Network.Packets;
 
 using Xunit;
 
@@ -221,5 +224,49 @@ public class ChatCommandTests
         Assert.True(WhisperRecipientMatcher.TryMatch("Ali", 3, players, out var id, out var name));
         Assert.Equal((byte)1, id);
         Assert.Equal("Alice", name);
+    }
+
+    [Fact]
+    public void Parse_LoadCommand_ExtractsDesignName()
+    {
+        var named = ChatCommandParser.Parse("/load buenos1");
+        Assert.Equal(ChatCommandKind.Load, named.Kind);
+        Assert.Equal("buenos1", named.Message);
+
+        var bare = ChatCommandParser.Parse("/load");
+        Assert.Equal(ChatCommandKind.Load, bare.Kind);
+        Assert.Equal(string.Empty, bare.Message);
+
+        var other = ChatCommandParser.Parse("/loaded");
+        Assert.Equal(ChatCommandKind.Normal, other.Kind);
+    }
+
+    [Fact]
+    public void AutoBuildDesign_RejectsPathTricksAndKeepsTheFirstWord()
+    {
+        Assert.True(AutoBuildDesign.TryNormalize("buenos1 extra", out var name));
+        Assert.Equal("buenos1", name);
+
+        Assert.True(AutoBuildDesign.TryNormalize("demo.city", out var withExtension));
+        Assert.Equal("demo", withExtension);
+
+        Assert.False(AutoBuildDesign.TryNormalize("../secret", out _));
+        Assert.False(AutoBuildDesign.TryNormalize("a/b", out _));
+        Assert.False(AutoBuildDesign.TryNormalize("", out _));
+    }
+
+    [Fact]
+    public void AutoBuildPacket_RoundTripsFilenameAndOutcome()
+    {
+        Span<byte> buffer = stackalloc byte[AutoBuildPacket.Size];
+        new AutoBuildPacket(true, "buenos1", AutoBuildOutcome.Loaded, 12).Write(buffer);
+
+        var packet = AutoBuildPacket.Read(buffer);
+        Assert.True(packet.IsAllowed);
+        Assert.Equal("buenos1", packet.Filename);
+        Assert.Equal(AutoBuildOutcome.Loaded, packet.Outcome);
+        Assert.Equal(12, packet.PlacedCount);
+        Assert.Equal(47, (int)ClientMessageId.AutoBuild);
+        Assert.Equal(64, (int)ServerMessageId.AutoBuild);
     }
 }

@@ -29,9 +29,8 @@ public static class CityOrbedService
                     return;
                 }
 
-                // Remake keeps houses (overlay text); legacy also wiped houses.
-                if (!BuildingCatalog.IsHouse(building.TypeCode)
-                    && !BuildingCatalog.IsCommandCenter(building.TypeCode))
+                // Legacy deleteBuildingsByCity: every building of this city except the command center.
+                if (!BuildingCatalog.IsCommandCenter(building.TypeCode))
                 {
                     buildingsToDestroy.Add(entity);
                 }

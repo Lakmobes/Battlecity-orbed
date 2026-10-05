@@ -71,9 +71,55 @@ public sealed class OrbMineCloakFixTests
                 return build;
             }),
             out var victimCityId,
-            out var attackerCityId));
+            out var attackerCityId,
+            out _));
         Assert.Equal(1, victimCityId);
         Assert.Equal(2, attackerCityId);
+    }
+
+    [Fact]
+    public void OrbSystem_TriggersWhenOrbIsOnTheDrivePad()
+    {
+        using var simulation = new GameSimulation();
+        var victim = simulation.EnsureCityBuild(1);
+        victim.CommandCenterGridX = 40;
+        victim.CommandCenterGridY = 40;
+        victim.HadOrbFactory = true;
+
+        // South drive row: the tiles a tank can actually stand on.
+        GameplayEntityFactory.CreatePlacedItem(
+            simulation.World,
+            ItemType.Orb,
+            gridX: 39,
+            gridY: 40,
+            active: false,
+            cityId: 2);
+
+        Assert.True(OrbSystem.IsOrbOnCommandCenter(victim, 39, 40));
+        Assert.True(OrbSystem.TryTrigger(
+            simulation.World,
+            [victim],
+            out var victimCityId,
+            out var attackerCityId,
+            out _));
+        Assert.Equal(1, victimCityId);
+        Assert.Equal(2, attackerCityId);
+    }
+
+    [Fact]
+    public void OrbSystem_TriggersOnLegacyStripNorthOfTheCommandCenter()
+    {
+        var victim = new CityBuildState
+        {
+            CityId = 4,
+            CommandCenterGridX = 40,
+            CommandCenterGridY = 40,
+            HadBombFactory = true,
+        };
+
+        // CityX/Y = anchor - 2, so CalcY == 2 is two tiles north of that point.
+        Assert.True(OrbSystem.IsOrbOnCommandCenter(victim, 36, 36));
+        Assert.False(OrbSystem.IsOrbOnCommandCenter(victim, 20, 20));
     }
 
     [Fact]
@@ -94,6 +140,14 @@ public sealed class OrbMineCloakFixTests
             cityId: 3);
         LevelLoader.SpawnBuilding(
             simulation.World,
+            new CityBuildingPlacement(1, 70, 70, 300), // House
+            cityId: 3);
+        LevelLoader.SpawnBuilding(
+            simulation.World,
+            new CityBuildingPlacement(0, 40, 40, BuildingCatalog.CommandCenterTypeCode),
+            cityId: 3);
+        LevelLoader.SpawnBuilding(
+            simulation.World,
             new CityBuildingPlacement(13, 60, 60, 104),
             cityId: 7);
 
@@ -108,6 +162,8 @@ public sealed class OrbMineCloakFixTests
         Assert.Equal(0, victim.Orbs);
 
         var victimFactoryGone = true;
+        var victimHouseGone = true;
+        var victimCenterAlive = false;
         var otherFactoryAlive = false;
         var victimMineGone = true;
         var otherMineAlive = false;
@@ -119,6 +175,16 @@ public sealed class OrbMineCloakFixTests
                 if (building.CityId == 3 && building.TypeCode == 104)
                 {
                     victimFactoryGone = false;
+                }
+
+                if (building.CityId == 3 && building.TypeCode == 300)
+                {
+                    victimHouseGone = false;
+                }
+
+                if (building.CityId == 3 && BuildingCatalog.IsCommandCenter(building.TypeCode))
+                {
+                    victimCenterAlive = true;
                 }
 
                 if (building.CityId == 7 && building.TypeCode == 104)
@@ -144,9 +210,19 @@ public sealed class OrbMineCloakFixTests
             });
 
         Assert.True(victimFactoryGone);
+        Assert.True(victimHouseGone);
+        Assert.True(victimCenterAlive);
         Assert.True(otherFactoryAlive);
         Assert.True(victimMineGone);
         Assert.True(otherMineAlive);
+    }
+
+    [Fact]
+    public void OrbAwardMessages_MatchesTheLegacyChatLine()
+    {
+        Assert.Equal(
+            "Buenos Aires has orbed Balkh!  (30 Points).  Buenos Aires is now worth 35 Points!",
+            OrbAwardMessages.Format("Buenos Aires", "Balkh", 30, 35));
     }
 
     [Fact]

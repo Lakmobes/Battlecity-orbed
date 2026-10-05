@@ -19,6 +19,8 @@ internal sealed class MainForm : Form
     private readonly Label _hostingTips = new();
     private readonly ListBox _lanAddresses = new();
     private readonly ListView _players = new();
+    private readonly CheckBox _sortPlayersByCity = new();
+    private readonly Label _aiCitiesLabel = new();
     private readonly CheckedListBox _accounts = new();
     private readonly ListView _bans = new();
     private readonly Button _unbanButton = new();
@@ -44,9 +46,9 @@ internal sealed class MainForm : Form
     public MainForm()
     {
         Text = "Battle City Server";
-        Width = 960;
+        Width = 1100;
         Height = 720;
-        MinimumSize = new Size(820, 600);
+        MinimumSize = new Size(960, 600);
         StartPosition = FormStartPosition.CenterScreen;
 
         BuildLayout();
@@ -215,21 +217,39 @@ internal sealed class MainForm : Form
         };
         playersPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         playersPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        playersPanel.Controls.Add(new Label
+        var playersHeader = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            WrapContents = true,
+            Margin = new Padding(0, 8, 0, 4),
+        };
+        playersHeader.Controls.Add(new Label
         {
             Text = "Connected players",
             AutoSize = true,
-            Margin = new Padding(0, 8, 0, 4),
-        }, 0, 0);
+            Margin = new Padding(0, 6, 12, 0),
+        });
+        _sortPlayersByCity.Text = "Sort by city";
+        _sortPlayersByCity.AutoSize = true;
+        _sortPlayersByCity.Margin = new Padding(0, 4, 12, 0);
+        playersHeader.Controls.Add(_sortPlayersByCity);
+        _aiCitiesLabel.AutoSize = true;
+        _aiCitiesLabel.Text = "AI: none";
+        _aiCitiesLabel.Margin = new Padding(0, 6, 0, 0);
+        playersHeader.Controls.Add(_aiCitiesLabel);
+        playersPanel.Controls.Add(playersHeader, 0, 0);
         _players.Dock = DockStyle.Fill;
         _players.View = View.Details;
         _players.FullRowSelect = true;
         _players.GridLines = true;
-        _players.Columns.Add("Id", 40);
-        _players.Columns.Add("Name", 140);
-        _players.Columns.Add("State", 90);
-        _players.Columns.Add("City", 50);
-        _players.Columns.Add("Flags", 120);
+        _players.Columns.Add("Id", 36);
+        _players.Columns.Add("Name", 120);
+        _players.Columns.Add("State", 78);
+        _players.Columns.Add("City", 140);
+        _players.Columns.Add("Size", 48);
+        _players.Columns.Add("Pts", 56);
+        _players.Columns.Add("Flags", 100);
         playersPanel.Controls.Add(_players, 0, 1);
         left.Controls.Add(playersPanel, 0, 5);
 
@@ -349,6 +369,7 @@ internal sealed class MainForm : Form
         _aiCityCheck.CheckedChanged += (_, _) => ToggleAiCity();
         _aiCityCountInput.ValueChanged += (_, _) => ReconfigureAiCities();
         _aiCityStance.SelectedIndexChanged += (_, _) => ReconfigureAiCities();
+        _sortPlayersByCity.CheckedChanged += (_, _) => RefreshPlayers();
         _lanAddresses.SelectedIndexChanged += (_, _) => RefreshShareBox();
         _accounts.ItemCheck += OnAccountItemCheck;
         _unbanButton.Click += (_, _) => UnbanSelected();
@@ -374,6 +395,11 @@ internal sealed class MainForm : Form
             RefreshStartingCity();
             RefreshAiCityCheck();
             _banRefreshTicks++;
+            if (_banRefreshTicks % 4 == 0)
+            {
+                RefreshAccountPointLabels();
+            }
+
             if (_banRefreshTicks >= 10)
             {
                 _banRefreshTicks = 0;
@@ -588,6 +614,7 @@ internal sealed class MainForm : Form
         if (_server is null)
         {
             _players.Items.Clear();
+            _aiCitiesLabel.Text = "AI: none";
             return;
         }
 
@@ -599,6 +626,16 @@ internal sealed class MainForm : Form
         catch
         {
             return;
+        }
+
+        _aiCitiesLabel.Text = _server.AiCitiesSummary;
+
+        if (_sortPlayersByCity.Checked)
+        {
+            players = players
+                .OrderBy(player => player.CityName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(player => player.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         _players.BeginUpdate();
@@ -624,12 +661,68 @@ internal sealed class MainForm : Form
             var item = new ListViewItem(player.PlayerId.ToString());
             item.SubItems.Add(player.DisplayName);
             item.SubItems.Add(player.State);
-            item.SubItems.Add(player.CityId.ToString());
+            item.SubItems.Add(player.CityId == 0 ? "-" : $"{player.CityName} ({player.CityId})");
+            item.SubItems.Add(player.CityId == 0 ? "-" : player.CitySize.ToString());
+            item.SubItems.Add(player.Points.ToString());
             item.SubItems.Add(string.Join(", ", flags));
             _players.Items.Add(item);
         }
 
         _players.EndUpdate();
+    }
+
+    private void RefreshAccountPointLabels()
+    {
+        if (_server is null || _suppressAccountToggle)
+        {
+            return;
+        }
+
+        IReadOnlyList<AccountRecord> accounts;
+        try
+        {
+            accounts = _server.Accounts.ListAccounts();
+        }
+        catch
+        {
+            return;
+        }
+
+        if (_accounts.Items.Count != accounts.Count)
+        {
+            ReloadAccounts();
+            return;
+        }
+
+        var byName = new Dictionary<string, AccountRecord>(StringComparer.OrdinalIgnoreCase);
+        foreach (var account in accounts)
+        {
+            byName[account.Username] = account;
+        }
+
+        _suppressAccountToggle = true;
+        for (var i = 0; i < _accounts.Items.Count; i++)
+        {
+            if (_accounts.Items[i] is not AccountListItem item
+                || !byName.TryGetValue(item.Username, out var account))
+            {
+                _suppressAccountToggle = false;
+                ReloadAccounts();
+                return;
+            }
+
+            var label = $"{account.Username}  ({account.Points} pts / {account.Deaths} deaths)";
+            if (item.Display == label)
+            {
+                continue;
+            }
+
+            var check = _accounts.GetItemChecked(i);
+            _accounts.Items[i] = new AccountListItem(account.Username, label);
+            _accounts.SetItemChecked(i, check);
+        }
+
+        _suppressAccountToggle = false;
     }
 
     private void ReloadAccounts()

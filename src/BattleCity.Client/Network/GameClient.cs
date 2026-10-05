@@ -2,6 +2,7 @@ using System.Net.Sockets;
 
 using BattleCity.Shared.Constants;
 using BattleCity.Shared.Data;
+using BattleCity.Shared.Gameplay;
 using BattleCity.Shared.Network;
 using BattleCity.Shared.Network.Packets;
 
@@ -58,6 +59,7 @@ public enum GameClientEventKind
     AdminEdit,
     DestroyCity,
     Kicked,
+    AutoBuild,
     Error,
     Disconnected,
 }
@@ -148,6 +150,8 @@ public readonly struct GameClientEvent
     public byte DestroyedCityId { get; init; }
 
     public AdminEditPacket AdminEdit { get; init; }
+
+    public AutoBuildPacket AutoBuild { get; init; }
 
     public char ErrorCode { get; init; }
 }
@@ -304,6 +308,18 @@ public sealed class GameClient : IDisposable
         Span<byte> payload = stackalloc byte[ClientBuildPacket.Size];
         build.Write(payload);
         Send(ClientMessageId.Build, payload);
+    }
+
+    public void SendAutoBuild(string designName)
+    {
+        if (!IsInGame)
+        {
+            return;
+        }
+
+        Span<byte> payload = stackalloc byte[AutoBuildPacket.Size];
+        new AutoBuildPacket(isAllowed: false, designName, AutoBuildOutcome.Denied, placedCount: 0).Write(payload);
+        Send(ClientMessageId.AutoBuild, payload);
     }
 
     public void SendDemolish(in ClientDemolishPacket demolish)
@@ -814,6 +830,12 @@ public sealed class GameClient : IDisposable
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.NewBuilding)
                 {
                     Building = ServerBuildingPacket.Read(packet.Payload.Span),
+                });
+                break;
+            case ServerMessageId.AutoBuild when packet.Payload.Length >= AutoBuildPacket.LegacySize:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.AutoBuild)
+                {
+                    AutoBuild = AutoBuildPacket.Read(packet.Payload.Span),
                 });
                 break;
             case ServerMessageId.RemBuilding when packet.Payload.Length >= ServerBuildingPacket.Size:

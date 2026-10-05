@@ -44,6 +44,65 @@ public class ExplosionNetworkTests
     }
 
     [Fact]
+    public void ReportBombEventsToNetwork_QueuesEveryItemDestroyedByTheBlast()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.ReportBombEventsToNetwork = true;
+
+        GameplayEntityFactory.CreatePlacedItem(
+            simulation.World,
+            ItemType.Bomb,
+            10,
+            10,
+            active: true,
+            networkItemId: 7);
+        GameplayEntityFactory.CreatePlacedItem(
+            simulation.World,
+            ItemType.Wall,
+            11,
+            10,
+            active: true,
+            networkItemId: 8);
+        GameplayEntityFactory.CreatePlacedItem(
+            simulation.World,
+            ItemType.Wall,
+            10,
+            11,
+            active: true,
+            networkItemId: 9);
+
+        simulation.Tick(EconomyConstants.TimerBomb / 1000f + 0.1f);
+
+        var removed = new List<ushort>();
+        Assert.True(simulation.TryConsumeNetworkExplosionEvent(out var explosionEvent));
+        if (explosionEvent.RemovedItemId != 0)
+        {
+            removed.Add(explosionEvent.RemovedItemId);
+        }
+
+        while (simulation.TryConsumeDestroyedNetworkItem(out var itemId))
+        {
+            removed.Add(itemId);
+        }
+
+        Assert.Contains((ushort)7, removed);
+        Assert.Contains((ushort)8, removed);
+        Assert.Contains((ushort)9, removed);
+
+        var walls = 0;
+        var query = new QueryDescription().WithAll<PlacedItemRef>();
+        simulation.World.Query(in query, (ref PlacedItemRef item) =>
+        {
+            if (item.Type == ItemType.Wall)
+            {
+                walls++;
+            }
+        });
+        Assert.Equal(0, walls);
+    }
+
+    [Fact]
     public void SuppressLocalBombDetonation_SkipsLocalDetonation()
     {
         using var simulation = new GameSimulation();

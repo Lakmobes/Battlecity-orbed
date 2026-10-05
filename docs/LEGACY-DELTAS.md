@@ -12,7 +12,7 @@ Read this before changing combat, inventory, cities, spawn, or rankings. Playtes
 |----------------------|---------|
 | “Fix” something back to the C++ formula | Check **Do not reverse** below. If it is listed, leave it. |
 | Port a missing server packet | Check **Still open for parity**. Those are fair game. |
-| Touch cities, orbs, or leave-game | Read **How cities work now**. Orb wipe and abandoned-city wipe are different on purpose. |
+| Touch cities, orbs, or leave-game | Read **How cities work now**. An orb and an abandoned city both clear buildings; they still differ in who is booted and when the city is removed. |
 
 ---
 
@@ -50,7 +50,8 @@ Code: `FactoryProductionSystem`, `BuildingCommandService.DeleteItemsByFactory`, 
 |--------|------------------|
 | Online world | `LoadMultiplayerWorld()` — every command center from `map.dat`, **no** demo houses or factories. Players build from House / Missile research / Turret research. |
 | Offline world | Still loads that city’s `.city` demo layout. Do not make offline CC-only, and do not put demo layouts back on the online server. |
-| Orb wipe | `CityOrbedService.ApplyOrbed` destroys that city’s buildings **except houses and the command center**, deletes its placed items, and resets the build tree. Houses stay so the city overlay still has something to draw. Legacy wiped houses too. **Do not “fix” orb to delete houses unless that choice is explicitly changed.** |
+| Orb wipe | `CityOrbedService.ApplyOrbed` destroys that city’s buildings **except the command center**, including houses, deletes its placed items (walls, turrets, orbs), and resets the build tree. The command center stays; it is the map’s city marker. |
+| AI city redeploy | After an AI city is orbed, it is rebuilt about **30 seconds** later on the same command center when that pad is clear. If a player is standing within 6 tiles, the rebuild waits and retries every 5 seconds. |
 | Abandoned city | Different from an orb. See **How abandoned cities work** below. That path **does** remove houses. |
 | Orbed players | `LeaveGame(showLeftMessage: false, transferMayor: false)`. No “left the battlefield” line and no `smFired`. The `smOrbed` packet sends them to the meeting room. Do not send Fired on an orb again. |
 | Compass | Home arrow aims at the drive pad and uses the legacy **8-sector** `imgArrows` / `imgArrowsRed` frames. A second arrow aims at the **nearest** orbable city’s command center. Keep both. The original info button picked the highest orb *value*, not the nearest city; that button is still missing (see open list). |
@@ -112,8 +113,7 @@ These are real original functions the remake does not have yet. They are **not**
 | Gap | Original | Notes |
 |-----|----------|-------|
 | Finance HUD | `smFinance` | Out of scope until someone explicitly expands it. |
-| AI city buildings | Not in the original as “AI City” | Requested follow-up: a small base (house, hospital, a factory, walls) around the AI command center. Not built. |
-| Auto-build | `cmAutoBuild` / `smAutoBuild` | Mayor (or admin) could load a `.city` file when the city was not orbable. No handler. |
+| AI city buildings | Not in the original as “AI City” | When an AI city is claimed it is built out to orb size (21), including a house, hospital, bomb factory, orb factory, other factories, walls, turrets, and an orb on the bay. |
 | Account self-edit | `cmEditAccount`, `cmAccountUpdate` | Player edits password, email, name, town. Admin `/editaccount` exists. Self-service does not. |
 | Password recovery | `cmRecover` | Email lookup. Returns error `L` or `M`. Not ported. |
 | Custom tank | `cmChangeTank` | Account had Tank…Tank9 and a display tank. No tank-select UI. |
@@ -124,7 +124,6 @@ These are real original functions the remake does not have yet. They are **not**
 | Cheat-constant kick | `cmCheatCheck` | Original compared building cost, damage, timers, and speed, then kicked. The remake client does not send it. |
 | Client crash log | `cmCrash` | Original appended the text to the server log. Not handled. |
 | Rank list length | Top **20** | Remake packets carry **10** rows. |
-| Orb house wipe | `deleteBuildingsByCity` removed houses | Orb currently **keeps** houses. Abandoned-city destroy does not. Change the orb path only if that product choice is reversed. |
 
 ### Do not port these as written
 
@@ -142,6 +141,7 @@ These are real original functions the remake does not have yet. They are **not**
 - Meeting, hire, fire, comms, `/heir`, build / demolish, shoot, pickup, drop, cloak, medkit, death, respawn, warp
 - `smItemLife`, `smPromotion`, `smUnderAttack`, explosions, factory counts, population
 - Admin `/kick` `/ban` `/city` `/warp` `/summon` `/spawn` `/shutdown` `/bans` `/unban` `/news` `/setnews` `/startcity` `/account` `/editaccount`
+- Mayor `/load name` (`cmAutoBuild`) reads `cities/{city}/{name}.city` on the server and places it. Blocked once the city is orbable. Admins can load anyway. A type the city already has is skipped. The file is not taken from the client.
 - CC-only multiplayer world, meeting-room spiral, drive-pad spawn and home arrow
 - GridAnchor = footprint southeast corner (`BuildingCollisionOffset` = 2)
 - House population: two slots of 50; house pop is the sum (max 100). Populated buildings are bullet-immune. Bombs still destroy them.

@@ -1,12 +1,12 @@
 # Project Status (Handoff)
 
-**Last updated:** 2026-10-01  
+**Last updated:** 2026-10-04  
 **Repo:** C# / MonoGame rewrite of Battle City (legacy C++ remains in `legacy/`)  
 **Goal of this checkpoint:** ship a playable PC build friends can host, with docs so a new contributor can continue.
 
 ## Where things stand
 
-Phases **0–42** in [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) are complete: headless ECS sim, offline sandbox, legacy-framed TCP multiplayer (accounts, meeting/hiring, combat sync, build tree, respawn/warp, admin tools, **AI City** opposition, abandoned-city destruction, mayor handoff, points-per-death rankings).
+Phases **0–43** in [REWRITE-PROGRESS.md](REWRITE-PROGRESS.md) are complete: headless ECS sim, offline sandbox, legacy-framed TCP multiplayer (accounts, meeting/hiring, combat sync, build tree, respawn/warp, admin tools, **AI City** opposition, abandoned-city destruction, mayor handoff, points-per-death rankings, mayor `/load` of a `.city` design).
 
 On top of that, this checkpoint adds **PC polish and sharing**:
 
@@ -92,11 +92,9 @@ Share `dist/BattleCity-win-x64.zip`. Host runs `Server/BattleCity.Server.Host.ex
 
 Open parity is listed in [LEGACY-DELTAS.md](LEGACY-DELTAS.md). The cities / spawn / compass audit is finished. Sensible next items:
 
-1. AI city building template (house, hospital, a factory, walls)
-2. Auto-build from a `.city` file (`cmAutoBuild`), only while the city is not orbable
-3. Click-player and right-click city info panels
-4. Rank boards of 20, if the packet cap of 10 should match the original
-5. Optional stress harness / longer Smoke session
+1. Click-player and right-click city info panels
+2. Rank boards of 20, if the packet cap of 10 should match the original
+3. Optional stress harness / longer Smoke session
 
 `smFinance` stays out of scope until that decision is explicitly changed.
 

@@ -49,6 +49,7 @@ For the current handoff checkpoint (host UI, modern HUD, population, recharge ab
 - [x] **Phase 40 — Starting City + Account Edit** (`cmChangeStartingCity` / `cmAdminEdit`; `/startcity`, `/account`, `/editaccount`)
 - [x] **Phase 41 — AI City** (Host toggle; scripted enemy mayor + soldiers via `BotAi` + network player sync)
 - [x] **Phase 42 — Abandoned cities, mayor handoff, points per death** (`smDestroyCity`, `cmSetMayor` / `/mayor`, rankings tab 4)
+- [x] **Phase 43 — Auto-build** (`cmAutoBuild` / `/load name` — server places a `.city` design while the city is not orbable)
 
 Finance HUD (`smFinance`) is intentionally **out of scope** for this rewrite. Do not add it unless [LEGACY-DELTAS.md](LEGACY-DELTAS.md) is updated first.
 
@@ -85,14 +86,15 @@ There is **no fixed total phase count** — phases are added incrementally as le
 | 40 | `cmStartingCity` / `cmChangeStartingCity` / `cmAdminEdit` | Meeting seed city + account editor (`/startcity`, `/account`, `/editaccount`) |
 | 41 | Host AI City | Scripted enemy city (mayor + soldiers) for solo / light MP opposition |
 | 42 | `smDestroyCity`, `cmSetMayor` | Empty-city destruct (immediate if not orbable, 120s if orbable), `/mayor`, points-per-death board. Orb boot no longer sends Fired. |
+| 43 | `cmAutoBuild` / `smAutoBuild` | Mayor `/load name` places `cities/{city}/{name}.city` from the server. Not orbable, unless admin. Types already built are skipped. |
 
-Likely next targets are the open rows in [LEGACY-DELTAS.md](LEGACY-DELTAS.md) (AI city buildings, `cmAutoBuild`, player/city info panels, top-20 boards). Do not revert the locked inventory, spawn, compass, or server-authority choices in that file.
+Likely next targets are the open rows in [LEGACY-DELTAS.md](LEGACY-DELTAS.md) (player/city info panels, top-20 boards). AI cities now place a house, hospital, bomb factory, and walls when claimed. Do not revert the locked inventory, spawn, compass, or server-authority choices in that file.
 
 **Play Online (Local Server)** auto-starts an embedded `GameServer` on `127.0.0.1:5643` (or reuses an existing listener). Friend hosting still uses Server.Host.
 
 CI (`.github/workflows/build.yml`) runs unit tests then `tools/BattleCity.Smoke` (1 mayor + 3 soldiers join + move).
 
-Phases **0–42** are complete (43 numbered milestones including Phase 0).
+Phases **0–43** are complete (44 numbered milestones including Phase 0).
 
 ## Build & Run
 

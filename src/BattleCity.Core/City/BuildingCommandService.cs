@@ -51,6 +51,48 @@ public static class BuildingCommandService
         return true;
     }
 
+    /// <summary>
+    /// Legacy <c>isAutoBuild</c> placement: skip a type the city already has
+    /// (<c>canBuild == 2</c>), but allow types that are still locked. Terrain and
+    /// overlap still apply. The mayor does not have to be standing on each site.
+    /// </summary>
+    public static bool TryAutoPlaceBuilding(
+        World world,
+        CityBuildState build,
+        TileMap tileMap,
+        int menuIndex,
+        int gridAnchorX,
+        int gridAnchorY)
+    {
+        if (menuIndex < 0 || menuIndex >= CityBuildState.MenuSlotCount)
+        {
+            return false;
+        }
+
+        var typeCode = BuildingCatalog.MenuTypeCodes[menuIndex];
+        if (!BuildingCatalog.IsHouse(typeCode) && build.CanBuild[menuIndex] == 2)
+        {
+            return false;
+        }
+
+        if (!BuildingPlacementValidator.CanPlace(
+                world,
+                tileMap,
+                build,
+                gridAnchorX,
+                gridAnchorY,
+                playerCenter: null))
+        {
+            return false;
+        }
+
+        var placement = new CityBuildingPlacement(menuIndex, gridAnchorX, gridAnchorY, typeCode);
+        LevelLoader.SpawnBuilding(world, placement, build.CityId);
+        ApplyBuiltPermissions(build, menuIndex, typeCode);
+        build.RegisterBuildingPlaced(menuIndex, typeCode);
+        return true;
+    }
+
     public static bool TryDemolishAt(World world, CityBuildState build, int gridAnchorX, int gridAnchorY)
     {
         if (!BuildingPlacementValidator.TryFindBuildingAt(world, gridAnchorX, gridAnchorY, out var entity))
@@ -176,7 +218,7 @@ public static class BuildingCommandService
             });
     }
 
-    private static void ApplyBuiltPermissions(CityBuildState build, int menuIndex, int typeCode)
+    public static void ApplyBuiltPermissions(CityBuildState build, int menuIndex, int typeCode)
     {
         if (BuildingCatalog.IsHouse(typeCode)
             || menuIndex < 0

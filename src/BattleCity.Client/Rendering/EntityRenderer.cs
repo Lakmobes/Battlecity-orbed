@@ -266,13 +266,13 @@ public sealed class EntityRenderer
             return true;
         }
 
-        // Friendly city always sees its own turrets.
-        if (item.CityId == observerCityId)
+        // Sleepers stay hidden from enemies until they lock a target. Regular turrets and
+        // plasma are always drawn (legacy DrawItems).
+        if (item.Type != ItemType.Sleeper || item.CityId == observerCityId)
         {
             return true;
         }
 
-        // Enemies only see turrets once they are in firing range (HasTarget).
         return turret.HasTarget;
     }
 

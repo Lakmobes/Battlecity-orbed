@@ -1,9 +1,15 @@
 using System.Numerics;
 
+using Arch.Core;
+
+using BattleCity.Core.City;
 using BattleCity.Core.Ecs;
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Core.Maps;
 using BattleCity.Server;
+using BattleCity.Shared.Catalogs;
+using BattleCity.Shared.Constants;
+using BattleCity.Shared.Data;
 
 using Xunit;
 
@@ -66,6 +72,98 @@ public class AiCityControllerTests
         Assert.True(mayors.HasMayor(controller.CityIds[0]));
         Assert.Contains(controller.Bots, bot => bot.IsMayor && bot.Role == BotRoles.Defend);
         Assert.Contains(controller.Bots, bot => !bot.IsMayor && bot.Role == BotRoles.Attack);
+    }
+
+    [Fact]
+    public void TankBlocksRedeploy_WhenTheTankIsOnTheCommandCenter()
+    {
+        Assert.True(AiCityController.TankBlocksRedeploy(40, 40, 40, 40));
+        Assert.True(AiCityController.TankBlocksRedeploy(40, 40, 46, 40));
+        Assert.False(AiCityController.TankBlocksRedeploy(40, 40, 47, 40));
+    }
+
+    [Fact]
+    public void RetireCity_RedeploysTheSameCityAfterThirtySeconds()
+    {
+        using var simulation = CreateMpSimulation();
+        if (simulation is null)
+        {
+            return;
+        }
+
+        var cities = new CityRegistry();
+        cities.SetStartingCityForTests(27);
+        var mayors = new CityMayorRegistry();
+        var controller = new AiCityController();
+        var nextId = (byte)1;
+        var humans = new (byte PlayerId, byte CityId, bool InGame)[] { (200, 0, true) };
+
+        controller.Arm(1, AiCityStance.Balanced);
+        controller.Sync(simulation, cities, mayors, () => nextId++, _ => { }, humans);
+        var cityId = controller.CityIds[0];
+        Assert.NotEmpty(controller.RetireCity(cityId, simulation, mayors, _ => { }));
+        Assert.False(controller.IsActive);
+
+        var immediate = controller.Sync(simulation, cities, mayors, () => nextId++, _ => { }, humans);
+        Assert.Empty(immediate.Spawned);
+        Assert.False(controller.IsActive);
+
+        controller.AdvanceRedeploy(AiCityController.RedeployDelaySeconds - 0.05f);
+        var early = controller.TryRedeployDue(
+            simulation, cities, mayors, () => nextId++, _ => { }, humans, _ => false);
+        Assert.Empty(early.Spawned);
+
+        controller.AdvanceRedeploy(0.05f);
+        var redeployed = controller.TryRedeployDue(
+            simulation, cities, mayors, () => nextId++, _ => { }, humans, _ => false);
+        Assert.Equal(cityId, Assert.Single(controller.CityIds));
+        Assert.NotEmpty(redeployed.Spawned);
+        Assert.Contains("redeployed", redeployed.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RetireCity_WaitsWhileAPlayerStandsOnTheCommandCenter()
+    {
+        using var simulation = CreateMpSimulation();
+        if (simulation is null)
+        {
+            return;
+        }
+
+        var cities = new CityRegistry();
+        cities.SetStartingCityForTests(27);
+        var mayors = new CityMayorRegistry();
+        var controller = new AiCityController();
+        var nextId = (byte)1;
+        var humans = new (byte PlayerId, byte CityId, bool InGame)[] { (200, 0, true) };
+
+        controller.Arm(1, AiCityStance.Balanced);
+        controller.Sync(simulation, cities, mayors, () => nextId++, _ => { }, humans);
+        var cityId = controller.CityIds[0];
+        controller.RetireCity(cityId, simulation, mayors, _ => { });
+
+        controller.AdvanceRedeploy(AiCityController.RedeployDelaySeconds);
+        var blocked = controller.TryRedeployDue(
+            simulation,
+            cities,
+            mayors,
+            () => nextId++,
+            _ => { },
+            humans,
+            candidate => candidate == cityId);
+        Assert.False(controller.IsActive);
+        Assert.Contains("in the way", blocked.Message, StringComparison.OrdinalIgnoreCase);
+
+        var stillEarly = controller.TryRedeployDue(
+            simulation, cities, mayors, () => nextId++, _ => { }, humans, _ => false);
+        Assert.False(controller.IsActive);
+        Assert.Null(stillEarly.Message);
+
+        controller.AdvanceRedeploy(AiCityController.RedeployRetrySeconds);
+        var clear = controller.TryRedeployDue(
+            simulation, cities, mayors, () => nextId++, _ => { }, humans, _ => false);
+        Assert.Equal(cityId, Assert.Single(controller.CityIds));
+        Assert.NotEmpty(clear.Spawned);
     }
 
     [Fact]
@@ -166,6 +264,53 @@ public class AiCityControllerTests
     }
 
     [Fact]
+    public void Sync_PlacesAnOrbableBaseAroundTheCommandCenter()
+    {
+        using var simulation = CreateMpSimulation();
+        if (simulation is null)
+        {
+            return;
+        }
+
+        var cities = new CityRegistry();
+        cities.SetStartingCityForTests(27);
+        var controller = new AiCityController();
+        var nextId = (byte)1;
+        controller.Arm(1, AiCityStance.Balanced);
+        var change = controller.Sync(
+            simulation,
+            cities,
+            new CityMayorRegistry(),
+            () => nextId++,
+            _ => { },
+            [(200, 0, true)]);
+
+        var cityId = controller.CityIds[0];
+        Assert.True(simulation.TryGetCityBuild(cityId, out var build));
+        Assert.True(build.IsOrbable);
+        Assert.True(build.HadBombFactory);
+        Assert.True(build.HadOrbFactory);
+        Assert.True(build.MaxBuildingCount >= EconomyConstants.OrbableSize);
+        Assert.True(build.GetOrbValue() >= 30);
+        Assert.Contains(change.Buildings, building => building.City == cityId);
+        Assert.Contains(change.Walls, item => item.Type == (byte)ItemType.Wall);
+        Assert.Contains(change.Walls, item => item.Type == (byte)ItemType.Turret);
+        Assert.Contains(change.Walls, item => item.Type == (byte)ItemType.Orb);
+
+        var typeCodes = BuildingTypeCodes(simulation, cityId);
+        Assert.Contains(AiCityTemplate.HouseTypeCode, typeCodes);
+        Assert.Contains(AiCityTemplate.HospitalTypeCode, typeCodes);
+        Assert.Contains(AiCityTemplate.BombFactoryTypeCode, typeCodes);
+        Assert.Contains(AiCityTemplate.OrbFactoryTypeCode, typeCodes);
+
+        var buildingCount = typeCodes.Count;
+        var wallCount = CountWalls(simulation, cityId);
+        simulation.PlaceAiCityBase(cityId);
+        Assert.Equal(buildingCount, BuildingTypeCodes(simulation, cityId).Count);
+        Assert.Equal(wallCount, CountWalls(simulation, cityId));
+    }
+
+    [Fact]
     public void CreateNetworkBotPlayer_EnqueuesShotWhenFiringAtEnemy()
     {
         using var simulation = new GameSimulation
@@ -196,6 +341,38 @@ public class AiCityControllerTests
         }
 
         Assert.True(sawShot);
+    }
+
+    private static int CountWalls(GameSimulation simulation, int cityId)
+    {
+        var count = 0;
+        var query = new QueryDescription().WithAll<PlacedItemRef>();
+        simulation.World.Query(
+            in query,
+            (ref PlacedItemRef item) =>
+            {
+                if (item.CityId == cityId && item.Type == ItemType.Wall)
+                {
+                    count++;
+                }
+            });
+        return count;
+    }
+
+    private static List<int> BuildingTypeCodes(GameSimulation simulation, int cityId)
+    {
+        var typeCodes = new List<int>();
+        var query = new QueryDescription().WithAll<BuildingRef>();
+        simulation.World.Query(
+            in query,
+            (ref BuildingRef building) =>
+            {
+                if (building.CityId == cityId && !BuildingCatalog.IsCommandCenter(building.TypeCode))
+                {
+                    typeCodes.Add(building.TypeCode);
+                }
+            });
+        return typeCodes;
     }
 
     private static GameSimulation? CreateMpSimulation()

@@ -818,8 +818,18 @@ public sealed class GameSimulation : IDisposable
 
         if (!SuppressLocalOrbEffects
             && _cityBuilds.Count > 0
-            && OrbSystem.TryTrigger(_world, _cityBuilds.Values, out var victimCityId, out var attackerCityId))
+            && OrbSystem.TryTrigger(
+                _world,
+                _cityBuilds.Values,
+                out var victimCityId,
+                out var attackerCityId,
+                out var removedOrbId))
         {
+            if (removedOrbId != 0)
+            {
+                _pendingDestroyedItemIds.Add(removedOrbId);
+            }
+
             EnsureCityBuild(attackerCityId);
             var victimBuild = EnsureCityBuild(victimCityId);
             var attackerBuild = EnsureCityBuild(attackerCityId);
@@ -835,7 +845,7 @@ public sealed class GameSimulation : IDisposable
                 victimPoints,
                 attackerPoints);
 
-            ApplyOrbStrike(victimCityId, attackerCityId);
+            ApplyOrbStrike(victimCityId, attackerCityId, victimPoints, attackerPoints);
         }
     }
 
@@ -1204,7 +1214,11 @@ public sealed class GameSimulation : IDisposable
         ApplyDeathState(entity, packet.KillerCity, playEffects: true);
     }
 
-    public void ApplyNetworkOrb(byte victimCityId, byte attackerCityId)
+    public void ApplyNetworkOrb(
+        byte victimCityId,
+        byte attackerCityId,
+        uint points = 0,
+        uint orberCityPoints = 0)
     {
         if (!TryGetCityBuild(victimCityId, out _) && _cityBuilds.Count == 0)
         {
@@ -1213,7 +1227,7 @@ public sealed class GameSimulation : IDisposable
 
         var attackerBuild = EnsureCityBuild(attackerCityId);
         attackerBuild.Orbs++;
-        ApplyOrbStrike(victimCityId, attackerCityId);
+        ApplyOrbStrike(victimCityId, attackerCityId, points, orberCityPoints);
     }
 
     public bool TryDropItemForNetworkPlayer(byte playerId, ItemType type, bool active, out ServerAddItemPacket packet)
@@ -1711,6 +1725,82 @@ public sealed class GameSimulation : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Places a <c>.city</c> design on <paramref name="cityId"/>. Buildings the city already
+    /// has, and sites that are blocked, are skipped. Returns one broadcast packet per building placed.
+    /// </summary>
+    public int AutoBuildLayout(
+        int cityId,
+        IReadOnlyList<CityBuildingPlacement> buildings,
+        List<ServerBuildingPacket> placed)
+    {
+        placed.Clear();
+        var build = EnsureCityBuild(cityId);
+        foreach (var placement in buildings)
+        {
+            if (!BuildingCommandService.TryAutoPlaceBuilding(
+                    _world,
+                    build,
+                    _tileMap,
+                    placement.MenuIndex,
+                    placement.GridX,
+                    placement.GridY))
+            {
+                continue;
+            }
+
+            if (!BuildingPlacementValidator.TryFindBuildingAt(
+                    _world,
+                    placement.GridX,
+                    placement.GridY,
+                    out var entity))
+            {
+                continue;
+            }
+
+            ref var building = ref _world.Get<BuildingRef>(entity);
+            building.CityId = cityId;
+            if (building.NetworkId == 0)
+            {
+                building.NetworkId = AllocateNetworkBuildingId();
+            }
+
+            var population = _world.Has<BuildingState>(entity)
+                ? (byte)Math.Clamp(_world.Get<BuildingState>(entity).Population, 0, byte.MaxValue)
+                : (byte)0;
+            placed.Add(new ServerBuildingPacket(
+                (byte)Math.Clamp(cityId, 0, byte.MaxValue),
+                (ushort)placement.GridX,
+                (ushort)placement.GridY,
+                (byte)(placement.MenuIndex + 1),
+                count: 0,
+                building.NetworkId,
+                population));
+        }
+
+        return placed.Count;
+    }
+
+    public bool IsNetworkPlayerNearCommandCenter(byte playerId)
+    {
+        if (!TryGetNetworkPlayerEntity(playerId, out var entity))
+        {
+            return false;
+        }
+
+        var cityId = _world.Has<CityAffiliation>(entity)
+            ? _world.Get<CityAffiliation>(entity).CityId
+            : 0;
+        if (!TryGetCityBuild(cityId, out var build))
+        {
+            return false;
+        }
+
+        var center = _world.Get<Transform2D>(entity).Position
+            + new Vector2(GameConstants.TileSize / 2f, GameConstants.TileSize / 2f);
+        return BuildingPlacementValidator.IsWithinMayorBuildRange(build, center);
+    }
+
     public bool TryDemolishForNetworkPlayer(byte playerId, in ClientDemolishPacket request, out ServerBuildingPacket broadcast)
     {
         broadcast = default;
@@ -1841,6 +1931,7 @@ public sealed class GameSimulation : IDisposable
             var placement = new CityBuildingPlacement(menuIndex, packet.X, packet.Y, typeCode);
             LevelLoader.SpawnBuilding(_world, placement, cityId);
             var build = EnsureCityBuild(cityId);
+            BuildingCommandService.ApplyBuiltPermissions(build, menuIndex, typeCode);
             build.RegisterBuildingPlaced(menuIndex, typeCode);
         }
 
@@ -2349,12 +2440,16 @@ public sealed class GameSimulation : IDisposable
         }
 
         var last = _pendingExplosionEvents[^1];
-        if (last.RemovedItemId != 0)
+        if (last.RemovedItemId == 0)
         {
+            _pendingExplosionEvents[^1] = last with { RemovedItemId = itemId };
             return;
         }
 
-        _pendingExplosionEvents[^1] = last with { RemovedItemId = itemId };
+        if (itemId != 0)
+        {
+            _pendingDestroyedItemIds.Add(itemId);
+        }
     }
 
     private void ReportNetworkPlayerKilledByBomb(Entity entity, byte killerCity)
@@ -2721,7 +2816,7 @@ public sealed class GameSimulation : IDisposable
         return bestDistance != int.MaxValue;
     }
 
-    private void ApplyOrbStrike(int victimCityId, int attackerCityId)
+    private void ApplyOrbStrike(int victimCityId, int attackerCityId, uint points, uint orberCityPoints)
     {
         var victimBuild = EnsureCityBuild(victimCityId);
 
@@ -2749,7 +2844,9 @@ public sealed class GameSimulation : IDisposable
             victimCityId,
             attackerCityId,
             victimName,
-            attackerName);
+            attackerName,
+            points,
+            orberCityPoints);
         _audioBuffer.Play(SoundId.Die, ccCenter);
 
         if (attackerCityId != victimCityId)
@@ -3055,6 +3152,91 @@ public sealed class GameSimulation : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Places the AI city's house, hospital, bomb factory, and outer walls.
+    /// Safe to call again: buildings that are already standing are left in place.
+    /// </summary>
+    public AiCityBaseSpawn PlaceAiCityBase(int cityId)
+    {
+        var build = EnsureCityBuild(cityId);
+        var placed = AiCityTemplate.Apply(_world, _tileMap, build);
+        foreach (var entity in placed.Buildings)
+        {
+            if (!_world.IsAlive(entity) || !_world.Has<BuildingRef>(entity))
+            {
+                continue;
+            }
+
+            ref var building = ref _world.Get<BuildingRef>(entity);
+            if (building.NetworkId == 0)
+            {
+                building.NetworkId = AllocateNetworkBuildingId();
+            }
+        }
+
+        AiCityTemplate.Staff(_world, cityId);
+
+        var buildings = new List<ServerBuildingPacket>(placed.Buildings.Count);
+        foreach (var entity in placed.Buildings)
+        {
+            if (!_world.IsAlive(entity) || !_world.Has<BuildingRef>(entity))
+            {
+                continue;
+            }
+
+            ref var building = ref _world.Get<BuildingRef>(entity);
+            var population = _world.Has<BuildingState>(entity)
+                ? (byte)Math.Clamp(_world.Get<BuildingState>(entity).Population, 0, byte.MaxValue)
+                : (byte)0;
+            buildings.Add(new ServerBuildingPacket(
+                (byte)Math.Clamp(cityId, 0, byte.MaxValue),
+                (ushort)building.GridAnchorX,
+                (ushort)building.GridAnchorY,
+                (byte)(building.MenuIndex + 1),
+                count: 0,
+                building.NetworkId,
+                population));
+        }
+
+        var items = new List<ServerAddItemPacket>(placed.WallTiles.Count + placed.TurretTiles.Count + 1);
+        foreach (var (x, y) in placed.WallTiles)
+        {
+            items.Add(SpawnAiCityItem(cityId, ItemType.Wall, x, y, active: true));
+        }
+
+        foreach (var (x, y) in placed.TurretTiles)
+        {
+            items.Add(SpawnAiCityItem(cityId, ItemType.Turret, x, y, active: true));
+        }
+
+        if (placed.OrbBay is { } bay)
+        {
+            items.Add(SpawnAiCityItem(cityId, ItemType.Orb, bay.X, bay.Y, active: false));
+        }
+
+        return new AiCityBaseSpawn(buildings, items);
+    }
+
+    private ServerAddItemPacket SpawnAiCityItem(int cityId, ItemType type, int gridX, int gridY, bool active)
+    {
+        var itemId = AllocateNetworkItemId();
+        GameplayEntityFactory.CreatePlacedItem(
+            _world,
+            type,
+            gridX,
+            gridY,
+            active,
+            cityId,
+            itemId);
+        return new ServerAddItemPacket(
+            (ushort)gridX,
+            (ushort)gridY,
+            (byte)Math.Clamp(cityId, 0, byte.MaxValue),
+            (byte)type,
+            (byte)(active ? 1 : 0),
+            itemId);
+    }
+
     public bool TryDemolishAt(int gridAnchorX, int gridAnchorY)
     {
         if (_cityBuild is null)
@@ -3076,3 +3258,7 @@ public readonly record struct PendingExplosionEvent(ServerExplosionPacket Explos
 public readonly record struct PendingRespawnEvent(byte PlayerId, Vector2 Position, byte CityId);
 
 public readonly record struct FactoryDepositEvent(byte PlayerId, ItemType ItemType);
+
+public readonly record struct AiCityBaseSpawn(
+    IReadOnlyList<ServerBuildingPacket> Buildings,
+    IReadOnlyList<ServerAddItemPacket> Walls);

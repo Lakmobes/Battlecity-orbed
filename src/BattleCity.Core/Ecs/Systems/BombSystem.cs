@@ -96,7 +96,9 @@ public static class BombSystem
         ChainDetonateItems(world, blastAnchorX, blastAnchorY, exploded, audio, hooks);
         DamagePlacedItems(world, blastAnchorX, blastAnchorY, exploded, audio, hooks);
         DamageBuildings(world, blastAnchorX, blastAnchorY, audio, hooks);
-        DamageTanks(world, center, GameConstants.TileSize * 2f, audio, bomb.CityId, hooks);
+        // Legacy ProcessExplosion: the tank's tile must be within 1 of the bomb tile
+        // (abs(bomb.x - getTileX() - 1) <= 1, and bomb.x is the item tile + 1).
+        DamageTanks(world, bomb.GridX, bomb.GridY, audio, bomb.CityId, hooks);
     }
 
     private static void ChainDetonateItems(
@@ -118,6 +120,7 @@ public static class BombSystem
                     return;
                 }
 
+                // Legacy item blast is Chebyshev distance < 2 (the bomb tile and its neighbors).
                 if (Math.Abs(item.GridX + 1 - blastAnchorX) < 2 && Math.Abs(item.GridY + 1 - blastAnchorY) < 2)
                 {
                     pending.Add((entity, item, transform.Position));
@@ -238,14 +241,13 @@ public static class BombSystem
 
     private static void DamageTanks(
         World world,
-        Vector2 center,
-        float radius,
+        int bombGridX,
+        int bombGridY,
         SimulationAudioBuffer? audio,
         int killerCityId,
         BombSimulationHooks hooks)
     {
         var tankQuery = new QueryDescription().WithAll<Transform2D, Health, Collider, TankLifeState>();
-        var radiusSquared = radius * radius;
 
         world.Query(
             in tankQuery,
@@ -256,16 +258,18 @@ public static class BombSystem
                     return;
                 }
 
-                var bounds = AxisAlignedBox.FromCollider(transform.Position, collider);
-                var tankCenter = new Vector2(bounds.Left + bounds.Width / 2f, bounds.Top + bounds.Height / 2f);
-                if (Vector2.DistanceSquared(center, tankCenter) > radiusSquared)
+                var (tankGridX, tankGridY) = TankPlacement.GetTileFromTopLeft(transform.Position);
+                if (Math.Abs(bombGridX - tankGridX) > 1 || Math.Abs(bombGridY - tankGridY) > 1)
                 {
                     return;
                 }
 
+                var bounds = AxisAlignedBox.FromCollider(transform.Position, collider);
+                var tankCenter = new Vector2(bounds.Left + bounds.Width / 2f, bounds.Top + bounds.Height / 2f);
+
                 var previousHealth = health.Current;
                 life.KillerCityId = (byte)Math.Clamp(killerCityId, 0, byte.MaxValue);
-                health.Current = Math.Max(0, health.Current - GameConstants.DamageMine);
+                health.Current = 0;
                 hooks.ReportHpChanged?.Invoke(entity, previousHealth, health.Current);
                 audio?.Play(SoundId.Hit, tankCenter);
 

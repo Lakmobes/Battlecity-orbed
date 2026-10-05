@@ -108,7 +108,7 @@ These match the original and should stay.
 | Last mayor leaves, city is not orbable | City is destroyed immediately. Houses and factories go. The command center stays. The build tree resets. |
 | Last mayor leaves, city is orbable | The city stays for **2 minutes**. A new mayor cancels that. If nobody comes back, it is destroyed the same way. |
 | Hand the city over now | `/mayor Name` (`cmSetMayor`). You stay in the city. `/heir` is only who inherits if you leave. |
-| Orb vs abandon | An **orb** keeps houses. An **abandoned** city does not. That split is intentional. See [LEGACY-DELTAS.md](LEGACY-DELTAS.md). |
+| Orb vs abandon | An **orb** and an **abandoned** city both remove houses and factories. The command center stays. An orb also boots that city’s players and pays the orbing city. See [LEGACY-DELTAS.md](LEGACY-DELTAS.md). |
 
 ## 10. Still not done
 
@@ -116,7 +116,6 @@ The working list is [LEGACY-DELTAS.md](LEGACY-DELTAS.md) → “Still open for p
 
 - AI city building (a small template around the command center)
 - Finance HUD (`smFinance`) — out of scope until explicitly reopened
-- Auto-build from a city file (`cmAutoBuild`)
 - Account self-edit and email recovery
 - Custom tank select (`cmChangeTank`)
 - Click-player and right-click city info panels

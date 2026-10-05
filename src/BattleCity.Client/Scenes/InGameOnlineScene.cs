@@ -425,6 +425,21 @@ public sealed class InGameOnlineScene : IScene
                 case GameClientEventKind.NewBuilding:
                     _simulation.ApplyNetworkNewBuilding(networkEvent.Building);
                     break;
+                case GameClientEventKind.AutoBuild:
+                    {
+                        var cityId = GetLocalCityId();
+                        var cityName = CityCatalog.IsValidCityId(cityId)
+                            ? CityCatalog.GetName(cityId)
+                            : "city";
+                        InGameChatService.AppendSystem(
+                            _chatLog,
+                            AutoBuildDesign.Describe(
+                                networkEvent.AutoBuild.Outcome,
+                                networkEvent.AutoBuild.Filename,
+                                networkEvent.AutoBuild.PlacedCount,
+                                cityName));
+                    }
+                    break;
                 case GameClientEventKind.RemoveBuilding:
                     _simulation.ApplyNetworkRemoveBuilding(networkEvent.Building);
                     break;
@@ -627,10 +642,26 @@ public sealed class InGameOnlineScene : IScene
                     _simulation.DestroyAbandonedCity(networkEvent.DestroyedCityId);
                     break;
                 case GameClientEventKind.Orbed:
+                    var orbed = networkEvent.Orbed;
                     _simulation.ApplyNetworkOrb(
-                        networkEvent.Orbed.VictimCity,
-                        networkEvent.Orbed.OrberCity);
-                    if (GetLocalCityId() == networkEvent.Orbed.VictimCity)
+                        orbed.VictimCity,
+                        orbed.OrberCity,
+                        orbed.Points,
+                        orbed.OrberCityPoints);
+                    if (GetLocalCityId() != orbed.VictimCity
+                        && CityCatalog.IsValidCityId(orbed.OrberCity)
+                        && CityCatalog.IsValidCityId(orbed.VictimCity))
+                    {
+                        InGameChatService.AppendOrbed(
+                            _chatLog,
+                            OrbAwardMessages.Format(
+                                CityCatalog.GetName(orbed.OrberCity),
+                                CityCatalog.GetName(orbed.VictimCity),
+                                orbed.Points,
+                                orbed.OrberCityPoints));
+                    }
+
+                    if (GetLocalCityId() == orbed.VictimCity)
                     {
                         AbandonCityToLobby();
                     }
@@ -1408,6 +1439,9 @@ public sealed class InGameOnlineScene : IScene
             case ChatCommandKind.EditAccount:
                 SendAccountEdit(command.Message);
                 break;
+            case ChatCommandKind.Load:
+                RequestAutoBuild(command.Message);
+                break;
             default:
                 if (string.IsNullOrWhiteSpace(command.Message))
                 {
@@ -1430,6 +1464,29 @@ public sealed class InGameOnlineScene : IScene
                 _client.SendWalkie(command.Message);
                 break;
         }
+    }
+
+    private void RequestAutoBuild(string argument)
+    {
+        if (!AutoBuildDesign.TryNormalize(argument, out var designName))
+        {
+            InGameChatService.AppendSystem(_chatLog, "Please specify a city design name!");
+            return;
+        }
+
+        if (IsPlayerDeadForChat(_client.PlayerId) && !IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "You must be alive to load a city design!");
+            return;
+        }
+
+        if (!_client.IsMayor && !IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "You must be mayor to load a city design!");
+            return;
+        }
+
+        _client.SendAutoBuild(designName);
     }
 
     private void SetMayorHeir(string argument)

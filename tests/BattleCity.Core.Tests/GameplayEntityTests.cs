@@ -498,6 +498,26 @@ public class GameplayEntityTests
     }
 
     [Fact]
+    public void BombSystem_DamagesATankOneTileAwayAndSparesOneTwoTilesAway()
+    {
+        using var simulation = new GameSimulation();
+        var adjacent = simulation.CreateBotEntity(new Vector2(11 * 48f, 10 * 48f), cityId: 1);
+        var distant = simulation.CreateBotEntity(new Vector2(12 * 48f, 10 * 48f), cityId: 1);
+        GameplayEntityFactory.CreatePlacedItem(
+            simulation.World,
+            ItemType.Bomb,
+            10,
+            10,
+            active: true,
+            cityId: 0);
+
+        simulation.Tick(EconomyConstants.TimerBomb / 1000f + 0.1f);
+
+        Assert.True(simulation.World.Get<Health>(adjacent).Current < GameConstants.MaxHealth);
+        Assert.Equal(GameConstants.MaxHealth, simulation.World.Get<Health>(distant).Current);
+    }
+
+    [Fact]
     public void CreatePlayerEntity_SecondPlayerDoesNotReceiveCityOrb()
     {
         using var simulation = new GameSimulation();

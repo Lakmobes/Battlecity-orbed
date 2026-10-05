@@ -5,6 +5,9 @@ public readonly record struct ConnectedPlayerInfo(
     string DisplayName,
     string State,
     byte CityId,
+    string CityName,
+    int CitySize,
+    int Points,
     bool IsAdmin,
     bool IsMayor,
     bool IsGuest);

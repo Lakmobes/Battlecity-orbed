@@ -4,6 +4,7 @@ using System.Numerics;
 
 using BattleCity.Core.City;
 using BattleCity.Core.Ecs;
+using BattleCity.Core.Gameplay;
 using BattleCity.Core.Levels;
 using BattleCity.Core.Maps;
 using BattleCity.Core.Network;
@@ -41,6 +42,8 @@ public sealed class GameServer : IDisposable
     private bool _started;
     private bool _shutdownRequested;
     private float _aiGoalRefreshSeconds;
+    private Dictionary<byte, int> _citySizes = new();
+    private string _aiCitiesSummary = "AI: none";
 
     public GameServer(string databasePath)
     {
@@ -55,6 +58,9 @@ public sealed class GameServer : IDisposable
     }
 
     public int Port { get; private set; }
+
+    /// <summary>Cities currently staffed by AI, for the host window.</summary>
+    public string AiCitiesSummary => _aiCitiesSummary;
 
     public string BoundHost { get; private set; } = "0.0.0.0";
 
@@ -153,11 +159,43 @@ public sealed class GameServer : IDisposable
                     session.DisplayName,
                     session.State.ToString(),
                     session.CityId,
+                    CityCatalog.IsValidCityId(session.CityId) ? CityCatalog.GetName(session.CityId) : "-",
+                    GetCitySize(session.CityId),
+                    session.Points,
                     session.IsAdmin,
                     session.IsMayor,
                     session.IsGuest))
                 .ToList();
         }
+    }
+
+    private int GetCitySize(byte cityId) =>
+        _citySizes.TryGetValue(cityId, out var size) ? size : 0;
+
+    private void RefreshHostSnapshot()
+    {
+        var sizes = new Dictionary<byte, int>();
+        foreach (var cityId in _simulation.EnumerateCityBuildIds())
+        {
+            if (cityId is < 0 or > byte.MaxValue || !_simulation.TryGetCityBuild(cityId, out var build))
+            {
+                continue;
+            }
+
+            sizes[(byte)cityId] = build.CurrentBuildingCount;
+        }
+
+        var aiIds = _aiCity.CityIds;
+        _aiCitiesSummary = aiIds.Count == 0
+            ? "AI: none"
+            : "AI: " + string.Join(
+                ", ",
+                aiIds.Select(id =>
+                {
+                    var size = sizes.TryGetValue(id, out var count) ? count : 0;
+                    return $"{CityCatalog.GetName(id)} ({id}, {size} bldgs)";
+                }));
+        _citySizes = sizes;
     }
 
     public void Update(float deltaSeconds)
@@ -183,6 +221,7 @@ public sealed class GameServer : IDisposable
         BroadcastAiCityUpdates(deltaSeconds);
         TickAbandonedCities(deltaSeconds);
         RemoveDisconnectedSessions();
+        RefreshHostSnapshot();
 
         if (_shutdownRequested)
         {
@@ -379,6 +418,47 @@ public sealed class GameServer : IDisposable
 
     private void ReleaseBotPlayerId(byte playerId) => _botPlayerIds.Remove(playerId);
 
+    private bool HumanBlocksAiRedeploy(byte cityId)
+    {
+        if (!TryGetCityAnchor(cityId, out var anchorX, out var anchorY))
+        {
+            return false;
+        }
+
+        foreach (var session in GetInGameSessions())
+        {
+            if (!_simulation.TryGetNetworkPlayerPosition(session.PlayerId, out var position))
+            {
+                continue;
+            }
+
+            var (gridX, gridY) = TankPlacement.GetTileFromTopLeft(position);
+            if (AiCityController.TankBlocksRedeploy(anchorX, anchorY, gridX, gridY))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetCityAnchor(byte cityId, out int anchorX, out int anchorY)
+    {
+        if (_simulation.TryGetCityBuild(cityId, out var build)
+            && (build.CommandCenterGridX != 0 || build.CommandCenterGridY != 0))
+        {
+            anchorX = build.CommandCenterGridX;
+            anchorY = build.CommandCenterGridY;
+            return true;
+        }
+
+        return CityBuildInitializer.TryGetCommandCenterGridForCity(
+            cityId,
+            _simulation.TileMap,
+            out anchorX,
+            out anchorY);
+    }
+
     private List<(byte PlayerId, byte CityId, bool InGame)> SnapshotHumanPlayers()
     {
         lock (_sync)
@@ -414,9 +494,28 @@ public sealed class GameServer : IDisposable
             BroadcastBotJoins(change.Spawned);
         }
 
+        BroadcastAiCityBase(change);
+
         if (change.Removed.Count > 0 || change.Spawned.Count > 0)
         {
             BroadcastCityListToMeetingClients();
+        }
+    }
+
+    private void BroadcastAiCityBase(AiCityPresenceChange change)
+    {
+        Span<byte> buildingPayload = stackalloc byte[ServerBuildingPacket.Size];
+        foreach (var building in change.Buildings)
+        {
+            building.Write(buildingPayload);
+            BroadcastAll(ServerMessageId.NewBuilding, buildingPayload);
+        }
+
+        Span<byte> itemPayload = stackalloc byte[ServerAddItemPacket.Size];
+        foreach (var wall in change.Walls)
+        {
+            wall.Write(itemPayload);
+            BroadcastAll(ServerMessageId.AddItem, itemPayload);
         }
     }
 
@@ -467,6 +566,25 @@ public sealed class GameServer : IDisposable
         if (!string.IsNullOrWhiteSpace(change.Message))
         {
             Console.WriteLine(change.Message);
+        }
+
+        _aiCity.AdvanceRedeploy(deltaSeconds);
+        var redeploy = _aiCity.TryRedeployDue(
+            _simulation,
+            _cities,
+            _mayors,
+            AllocateBotPlayerId,
+            ReleaseBotPlayerId,
+            SnapshotHumanPlayers(),
+            HumanBlocksAiRedeploy);
+        if (redeploy.Spawned.Count > 0 || !string.IsNullOrWhiteSpace(redeploy.Message))
+        {
+            if (!string.IsNullOrWhiteSpace(redeploy.Message))
+            {
+                Console.WriteLine(redeploy.Message);
+            }
+
+            ApplyAiPresenceChange(redeploy);
         }
 
         if (!_aiCity.IsActive)
@@ -626,6 +744,9 @@ public sealed class GameServer : IDisposable
                 break;
             case ClientMessageId.Build:
                 HandleBuild(session, packet.Payload.Span);
+                break;
+            case ClientMessageId.AutoBuild:
+                HandleAutoBuild(session, packet.Payload.Span);
                 break;
             case ClientMessageId.Demolish:
                 HandleDemolish(session, packet.Payload.Span);
@@ -1880,6 +2001,74 @@ public sealed class GameServer : IDisposable
         BroadcastAll(ServerMessageId.NewBuilding, broadcast);
     }
 
+    private void HandleAutoBuild(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsInGame || payload.Length < AutoBuildPacket.LegacySize)
+        {
+            return;
+        }
+
+        var request = AutoBuildPacket.Read(payload);
+        if (!AutoBuildDesign.TryNormalize(request.Filename, out var designName))
+        {
+            ReplyAutoBuild(session, AutoBuildOutcome.Denied, request.Filename, 0);
+            return;
+        }
+
+        var cityId = session.CityId;
+        var isOrbable = _simulation.TryGetCityBuild(cityId, out var build) && build.IsOrbable;
+        var isDead = _simulation.IsNetworkPlayerDead(session.PlayerId);
+        if (!AutoBuildRules.MayLoad(session.IsAdmin, session.IsMayor, isDead, isOrbable)
+            || (!session.IsAdmin && !_simulation.IsNetworkPlayerNearCommandCenter(session.PlayerId)))
+        {
+            ReplyAutoBuild(session, AutoBuildOutcome.Denied, designName, 0);
+            return;
+        }
+
+        if (!CityCatalog.IsValidCityId(cityId))
+        {
+            ReplyAutoBuild(session, AutoBuildOutcome.MissingFile, designName, 0);
+            return;
+        }
+
+        var path = CityLayoutPaths.FindLegacyCityLayout(CityCatalog.GetName(cityId), designName);
+        if (path is null)
+        {
+            ReplyAutoBuild(session, AutoBuildOutcome.MissingFile, designName, 0);
+            return;
+        }
+
+        CityLayout layout;
+        try
+        {
+            layout = CityLayoutParser.ParseFile(path);
+        }
+        catch (IOException)
+        {
+            ReplyAutoBuild(session, AutoBuildOutcome.MissingFile, designName, 0);
+            return;
+        }
+
+        var placed = new List<ServerBuildingPacket>();
+        _simulation.AutoBuildLayout(cityId, layout.Buildings, placed);
+
+        Span<byte> broadcast = stackalloc byte[ServerBuildingPacket.Size];
+        foreach (var building in placed)
+        {
+            building.Write(broadcast);
+            BroadcastAll(ServerMessageId.NewBuilding, broadcast);
+        }
+
+        ReplyAutoBuild(session, AutoBuildOutcome.Loaded, designName, (byte)Math.Min(placed.Count, byte.MaxValue));
+    }
+
+    private static void ReplyAutoBuild(ClientSession session, AutoBuildOutcome outcome, string designName, byte placedCount)
+    {
+        Span<byte> payload = stackalloc byte[AutoBuildPacket.Size];
+        new AutoBuildPacket(outcome == AutoBuildOutcome.Loaded, designName, outcome, placedCount).Write(payload);
+        session.SendServer(ServerMessageId.AutoBuild, payload);
+    }
+
     private void HandleDemolish(ClientSession session, ReadOnlySpan<byte> payload)
     {
         if (!session.IsInGame || payload.Length < ClientDemolishPacket.Size)
@@ -2612,6 +2801,7 @@ public sealed class GameServer : IDisposable
             ApplyOrbPointAwards(orbEvent);
             _cityDestruct.Cancel((byte)orbEvent.VictimCityId);
             BootOrbedVictims((byte)orbEvent.VictimCityId);
+            KillOrbedAiCity((byte)orbEvent.VictimCityId, (byte)orbEvent.AttackerCityId);
 
             Console.WriteLine(
                 $"City {orbEvent.VictimCityId} orbed by city {orbEvent.AttackerCityId} ({orbEvent.VictimPoints} points)");
@@ -2636,6 +2826,25 @@ public sealed class GameServer : IDisposable
 
             AdjustSessionPoints(session, points);
         }
+    }
+
+    /// <summary>Legacy <c>wasOrbed</c> removes every tank in the city. AI tanks are not sessions.</summary>
+    private void KillOrbedAiCity(byte victimCityId, byte attackerCityId)
+    {
+        var bots = _aiCity.RetireCity(victimCityId, _simulation, _mayors, ReleaseBotPlayerId);
+        if (bots.Count == 0)
+        {
+            return;
+        }
+
+        Span<byte> death = stackalloc byte[ServerDeathPacket.Size];
+        foreach (var bot in bots)
+        {
+            new ServerDeathPacket(bot.PlayerId, deathType: 0, attackerCityId).Write(death);
+            BroadcastAll(ServerMessageId.Death, death);
+        }
+
+        BroadcastBotClears(bots);
     }
 
     /// <summary>Legacy <c>CCity::wasOrbed</c> — boot victims to the meeting room.</summary>

@@ -213,6 +213,60 @@ public sealed class CityBuildTests
     }
 
     [Fact]
+    public void AutoBuildLayout_PlacesLockedTypesAndSkipsOnesTheCityAlreadyHas()
+    {
+        using var simulation = new GameSimulation();
+        simulation.TileMap = TileMap.CreateEmpty();
+        simulation.LoadCityLayout(new CityLayout
+        {
+            CityName = "Test",
+            SourcePath = "test.city",
+            Buildings = [],
+        });
+
+        Assert.True(simulation.TryGetCityBuild(0, out var build));
+        Assert.Equal(0, build.CanBuild[17]);
+
+        var layout = new[]
+        {
+            new CityBuildingPlacement(1, 40, 40, 300),
+            new CityBuildingPlacement(17, 44, 44, 101),
+            new CityBuildingPlacement(17, 48, 48, 101),
+            new CityBuildingPlacement(1, 40, 40, 300),
+        };
+
+        var placed = new List<ServerBuildingPacket>();
+        Assert.Equal(2, simulation.AutoBuildLayout(0, layout, placed));
+        Assert.Equal(2, build.CanBuild[17]);
+        Assert.True(build.HadBombFactory);
+        Assert.True(BuildingPlacementValidator.TryFindBuildingAt(simulation.World, 40, 40, out _));
+        Assert.True(BuildingPlacementValidator.TryFindBuildingAt(simulation.World, 44, 44, out _));
+        Assert.False(BuildingPlacementValidator.TryFindBuildingAt(simulation.World, 48, 48, out _));
+
+        using var client = new GameSimulation();
+        client.TileMap = TileMap.CreateEmpty();
+        client.LoadCityLayout(new CityLayout
+        {
+            CityName = "Test",
+            SourcePath = "test.city",
+            Buildings = [],
+        });
+        client.ApplyNetworkNewBuilding(placed[1]);
+        Assert.True(client.TryGetCityBuild(0, out var clientBuild));
+        Assert.Equal(2, clientBuild.CanBuild[17]);
+    }
+
+    [Fact]
+    public void AutoBuildRules_MayorCannotLoadAnOrbableOrDeadCity()
+    {
+        Assert.True(AutoBuildRules.MayLoad(isAdmin: false, isMayor: true, isDead: false, cityIsOrbable: false));
+        Assert.False(AutoBuildRules.MayLoad(isAdmin: false, isMayor: true, isDead: false, cityIsOrbable: true));
+        Assert.False(AutoBuildRules.MayLoad(isAdmin: false, isMayor: true, isDead: true, cityIsOrbable: false));
+        Assert.False(AutoBuildRules.MayLoad(isAdmin: false, isMayor: false, isDead: false, cityIsOrbable: false));
+        Assert.True(AutoBuildRules.MayLoad(isAdmin: true, isMayor: false, isDead: true, cityIsOrbable: true));
+    }
+
+    [Fact]
     public void CollectJoinSnapshot_IncludesAuthoritativeItemsAndBuildings()
     {
         using var simulation = new GameSimulation();

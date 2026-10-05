@@ -1,5 +1,6 @@
 using Arch.Core;
 
+using BattleCity.Core.City;
 using BattleCity.Core.Ecs.Components;
 
 namespace BattleCity.Core.Ecs.Systems;
@@ -37,7 +38,9 @@ public static class CityOrbedNotificationSystem
         int victimCityId,
         int attackerCityId,
         string? victimCityName,
-        string? attackerCityName)
+        string? attackerCityName,
+        uint points = 0,
+        uint orberCityPoints = 0)
     {
         var victimLabel = string.IsNullOrWhiteSpace(victimCityName) ? "Your city" : victimCityName;
         var attackerLabel = string.IsNullOrWhiteSpace(attackerCityName) ? "An enemy" : attackerCityName;
@@ -51,8 +54,7 @@ public static class CityOrbedNotificationSystem
                     orbed.ShowOverlay = true;
                     orbed.RemainingSeconds = OverlayDurationSeconds;
                     orbed.IsVictim = true;
-                    orbed.Message =
-                        "Your city has been destroyed by an orb!\nAll buildings except houses have been demolished.";
+                    orbed.Message = "Your city has been destroyed by an orb!";
                     return;
                 }
 
@@ -61,7 +63,11 @@ public static class CityOrbedNotificationSystem
                     orbed.ShowOverlay = true;
                     orbed.RemainingSeconds = OverlayDurationSeconds;
                     orbed.IsVictim = false;
-                    orbed.Message = $"{attackerLabel} has orbed {victimLabel}!";
+                    orbed.Message = OrbAwardMessages.Format(
+                        attackerLabel,
+                        victimLabel,
+                        points,
+                        orberCityPoints);
                 }
             });
     }

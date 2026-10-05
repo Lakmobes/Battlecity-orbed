@@ -21,6 +21,7 @@ public enum ChatCommandKind
     StartingCity,
     Account,
     EditAccount,
+    Load,
 }
 
 public readonly struct ParsedChatCommand
@@ -175,6 +176,13 @@ public static class ChatCommandParser
         if (line.StartsWith("/editaccount ", StringComparison.OrdinalIgnoreCase))
         {
             return new ParsedChatCommand(ChatCommandKind.EditAccount, line[13..].Trim());
+        }
+
+        if (line.Equals("/load", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("/load ", StringComparison.OrdinalIgnoreCase))
+        {
+            var arg = line.Length <= 5 ? string.Empty : line[5..].Trim();
+            return new ParsedChatCommand(ChatCommandKind.Load, arg);
         }
 
         return new ParsedChatCommand(ChatCommandKind.Normal, line);

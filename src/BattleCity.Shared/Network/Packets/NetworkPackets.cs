@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 
 using BattleCity.Shared.Constants;
+using BattleCity.Shared.Gameplay;
 
 namespace BattleCity.Shared.Network.Packets;
 
@@ -840,6 +841,74 @@ public readonly struct ClientBuildPacket
         BinaryPrimitives.WriteUInt16LittleEndian(buffer.Slice(2), Y);
         buffer[4] = BuildSlot;
         buffer[5] = (byte)(IsAutoBuild ? 1 : 0);
+    }
+}
+
+/// <summary>
+/// Legacy <c>sCMAutoBuild</c> / <c>sSMAutoBuild</c>: a bool then a 64-byte filename.
+/// The remake appends an outcome byte and a placed-count byte. A legacy reader that
+/// only consumes the first 65 bytes still sees <c>isAllowed</c> and the filename.
+/// </summary>
+public readonly struct AutoBuildPacket
+{
+    public const int NameLength = AutoBuildDesign.NameCapacity;
+
+    public const int LegacySize = 1 + NameLength;
+
+    public const int Size = LegacySize + 2;
+
+    public AutoBuildPacket(bool isAllowed, string filename, AutoBuildOutcome outcome, byte placedCount)
+    {
+        IsAllowed = isAllowed;
+        Filename = filename ?? string.Empty;
+        Outcome = outcome;
+        PlacedCount = placedCount;
+    }
+
+    public bool IsAllowed { get; }
+
+    public string Filename { get; }
+
+    public AutoBuildOutcome Outcome { get; }
+
+    public byte PlacedCount { get; }
+
+    public static AutoBuildPacket Read(ReadOnlySpan<byte> buffer)
+    {
+        var isAllowed = buffer[0] != 0;
+        var filename = ReadFixedAscii(buffer.Slice(1, Math.Min(NameLength, buffer.Length - 1)));
+        var outcome = buffer.Length > LegacySize
+            ? (AutoBuildOutcome)buffer[LegacySize]
+            : isAllowed ? AutoBuildOutcome.Loaded : AutoBuildOutcome.Denied;
+        var placedCount = buffer.Length > LegacySize + 1 ? buffer[LegacySize + 1] : (byte)0;
+        return new AutoBuildPacket(isAllowed, filename, outcome, placedCount);
+    }
+
+    public void Write(Span<byte> buffer)
+    {
+        buffer.Clear();
+        buffer[0] = (byte)(IsAllowed ? 1 : 0);
+        WriteFixedAscii(buffer.Slice(1, NameLength), Filename);
+        buffer[LegacySize] = (byte)Outcome;
+        buffer[LegacySize + 1] = PlacedCount;
+    }
+
+    private static string ReadFixedAscii(ReadOnlySpan<byte> source)
+    {
+        var length = source.IndexOf((byte)0);
+        if (length < 0)
+        {
+            length = source.Length;
+        }
+
+        return Encoding.ASCII.GetString(source.Slice(0, length));
+    }
+
+    private static void WriteFixedAscii(Span<byte> destination, string value)
+    {
+        destination.Clear();
+        var bytes = Encoding.ASCII.GetBytes(value);
+        bytes.AsSpan(0, Math.Min(bytes.Length, destination.Length)).CopyTo(destination);
     }
 }
 
