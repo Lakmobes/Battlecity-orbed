@@ -1613,17 +1613,28 @@ public readonly struct AdminEditPacket
 
 public static class RankBoardPacket
 {
-    public const int HeaderSize = 26;
-    public const int RowSize = 20;
-    public const int MaxRows = 10;
+    /// <summary>Board, start index, row count, then a 24-byte season name.</summary>
+    public const int HeaderSize = 27;
 
-    public static byte[] Create(byte board, string seasonName, IReadOnlyList<(string Name, int Points)> rows)
+    public const int RowSize = 20;
+
+    /// <summary>Original boards listed 20. One legacy frame holds 10 rows, so the rest follows in a second packet.</summary>
+    public const int MaxRows = 20;
+
+    public const int RowsPerPacket = 10;
+
+    public static byte[] Create(
+        byte board,
+        byte startIndex,
+        string seasonName,
+        IReadOnlyList<(string Name, int Points)> rows)
     {
-        var count = (byte)Math.Min(rows.Count, MaxRows);
+        var count = (byte)Math.Min(rows.Count, RowsPerPacket);
         var buffer = new byte[HeaderSize + (count * RowSize)];
         buffer[0] = board;
-        buffer[1] = count;
-        WriteFixed(buffer.AsSpan(2, 24), seasonName);
+        buffer[1] = startIndex;
+        buffer[2] = count;
+        WriteFixed(buffer.AsSpan(3, 24), seasonName);
         for (var i = 0; i < count; i++)
         {
             var offset = HeaderSize + (i * RowSize);
@@ -1634,13 +1645,42 @@ public static class RankBoardPacket
         return buffer;
     }
 
+    public static IReadOnlyList<byte[]> CreateChunks(
+        byte board,
+        string seasonName,
+        IReadOnlyList<(string Name, int Points)> rows)
+    {
+        var total = Math.Min(rows.Count, MaxRows);
+        if (total == 0)
+        {
+            return [Create(board, 0, seasonName, [])];
+        }
+
+        var packets = new List<byte[]>();
+        for (var start = 0; start < total; start += RowsPerPacket)
+        {
+            var count = Math.Min(RowsPerPacket, total - start);
+            var slice = new (string Name, int Points)[count];
+            for (var i = 0; i < count; i++)
+            {
+                slice[i] = rows[start + i];
+            }
+
+            packets.Add(Create(board, (byte)start, seasonName, slice));
+        }
+
+        return packets;
+    }
+
     public static bool TryRead(
         ReadOnlySpan<byte> payload,
         out byte board,
+        out byte startIndex,
         out string seasonName,
         out (string Name, int Points)[] rows)
     {
         board = 0;
+        startIndex = 0;
         seasonName = string.Empty;
         rows = [];
         if (payload.Length < HeaderSize)
@@ -1649,13 +1689,14 @@ public static class RankBoardPacket
         }
 
         board = payload[0];
-        var count = Math.Min((int)payload[1], MaxRows);
+        startIndex = payload[1];
+        var count = Math.Min((int)payload[2], RowsPerPacket);
         if (payload.Length < HeaderSize + (count * RowSize))
         {
             return false;
         }
 
-        seasonName = ReadFixed(payload.Slice(2, 24));
+        seasonName = ReadFixed(payload.Slice(3, 24));
         rows = new (string Name, int Points)[count];
         for (var i = 0; i < count; i++)
         {

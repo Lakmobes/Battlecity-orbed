@@ -92,9 +92,7 @@ Share `dist/BattleCity-win-x64.zip`. Host runs `Server/BattleCity.Server.Host.ex
 
 Open parity is listed in [LEGACY-DELTAS.md](LEGACY-DELTAS.md). The cities / spawn / compass audit is finished. Sensible next items:
 
-1. Click-player and right-click city info panels
-2. Rank boards of 20, if the packet cap of 10 should match the original
-3. Optional stress harness / longer Smoke session
+1. Optional stress harness / longer Smoke session
 
 `smFinance` stays out of scope until that decision is explicitly changed.
 

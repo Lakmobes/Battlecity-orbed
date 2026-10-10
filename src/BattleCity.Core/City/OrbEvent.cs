@@ -7,4 +7,5 @@ public readonly record struct OrbEvent(
     int VictimCityId,
     int AttackerCityId,
     uint VictimPoints,
-    uint AttackerPoints);
+    uint AttackerPoints,
+    byte OrberPlayerId = 255);

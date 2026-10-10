@@ -1,5 +1,7 @@
 using BattleCity.Client.Assets;
 using BattleCity.Client.Chat;
+using BattleCity.Client.Input;
+using BattleCity.Shared.Chat;
 using BattleCity.Shared.Constants;
 
 using Microsoft.Xna.Framework;
@@ -12,18 +14,8 @@ public sealed class ChatOverlayRenderer
     private const int LineHeight = 26;
     private const float TextScale = 1f;
     private static readonly string[] TabNames = ["All", "Team", "System", "Commands"];
-    private static readonly string[] Commands =
-    [
-        "[D] DROP",
-        "[C] CLOAK",
-        "[H] MEDKIT",
-        "[B] BOMB",
-        "[O] ORB",
-        "[U] PICK UP",
-        "[ ] CYCLE",
-        "[M] MAP",
-        "[Shift] FIRE",
-    ];
+    private static string KeyLabel(GameAction action) =>
+        KeyBindings.FormatKey(KeyBindings.Current.Primary(action));
 
     private readonly AssetService _assets;
     private SpriteFont? _font;
@@ -41,7 +33,8 @@ public sealed class ChatOverlayRenderer
         int viewportHeight,
         IReadOnlyCollection<ChatLine> lines,
         bool isChatting,
-        string? chatDraft)
+        string? chatDraft,
+        bool showAdminCommands = false)
     {
         if (_font is null)
         {
@@ -71,7 +64,7 @@ public sealed class ChatOverlayRenderer
         var listTop = panel.Y + 40;
         if (ModernHudLayout.ChatTab == 3)
         {
-            DrawCommands(spriteBatch, panel, listTop);
+            DrawCommands(spriteBatch, panel, listTop, showAdminCommands);
         }
         else
         {
@@ -96,14 +89,45 @@ public sealed class ChatOverlayRenderer
         HudTheme.DrawLabel(spriteBatch, _font, prompt, new Vector2(input.X + 8, input.Y + 2), promptColor, 1f);
     }
 
-    private void DrawCommands(SpriteBatch spriteBatch, Rectangle panel, int top)
+    private void DrawCommands(SpriteBatch spriteBatch, Rectangle panel, int top, bool showAdminCommands)
     {
         if (_font is null)
         {
             return;
         }
 
-        for (var i = 0; i < Commands.Length; i++)
+        if (showAdminCommands)
+        {
+            var y = top;
+            foreach (var line in AdminCommandHelp.Lines)
+            {
+                HudTheme.DrawLabel(spriteBatch, _font, line, new Vector2(panel.X + 12, y), HudTheme.Text, 1f);
+                y += 22;
+            }
+
+            HudTheme.DrawLabel(
+                spriteBatch,
+                _font,
+                $"Keys: {KeyLabel(GameAction.DropItem)} drop  {KeyLabel(GameAction.UseCloak)} cloak  {KeyLabel(GameAction.UseMedKit)} medkit  {KeyLabel(GameAction.DropBomb)} bomb  {KeyLabel(GameAction.DropOrb)} orb  {KeyLabel(GameAction.PickUp)} pickup",
+                new Vector2(panel.X + 12, y + 4),
+                HudTheme.TextMuted,
+                1f);
+            return;
+        }
+
+        var commands = new[]
+        {
+            $"[{KeyLabel(GameAction.DropItem)}] DROP",
+            $"[{KeyLabel(GameAction.UseCloak)}] CLOAK",
+            $"[{KeyLabel(GameAction.UseMedKit)}] MEDKIT",
+            $"[{KeyLabel(GameAction.DropBomb)}] BOMB",
+            $"[{KeyLabel(GameAction.DropOrb)}] ORB",
+            $"[{KeyLabel(GameAction.PickUp)}] PICK UP",
+            $"[{KeyLabel(GameAction.InventoryPrevious)}] CYCLE",
+            $"[{KeyLabel(GameAction.ToggleMiniMap)}] MAP",
+            $"[{KeyLabel(GameAction.Fire)}] FIRE",
+        };
+        for (var i = 0; i < commands.Length; i++)
         {
             var cell = new Rectangle(panel.X + 12 + ((i % 3) * 204), top + ((i / 3) * 44), 192, 36);
             var actionArt = _assets.LoadTexture(HudSpriteNames.ActionButton);
@@ -116,7 +140,7 @@ public sealed class ChatOverlayRenderer
                 HudTheme.DrawPanel(spriteBatch, _assets.Pixel, cell, active: false);
             }
 
-            HudTheme.DrawLabel(spriteBatch, _font, Commands[i], new Vector2(cell.X + 10, cell.Y + 6), HudTheme.Accent, 1f);
+            HudTheme.DrawLabel(spriteBatch, _font, commands[i], new Vector2(cell.X + 10, cell.Y + 6), HudTheme.Accent, 1f);
         }
     }
 

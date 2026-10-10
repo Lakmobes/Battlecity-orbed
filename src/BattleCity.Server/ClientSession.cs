@@ -43,6 +43,12 @@ public sealed class ClientSession : IDisposable
 
     public int Deaths { get; set; }
 
+    public int Orbs { get; set; }
+
+    public int Assists { get; set; }
+
+    public int MonthlyPoints { get; set; }
+
     public bool IsInGame => State == PlayerSessionState.InGame;
 
     public PacketReceiveBuffer ReceiveBuffer => _receiveBuffer;

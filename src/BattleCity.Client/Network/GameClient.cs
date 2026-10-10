@@ -60,6 +60,8 @@ public enum GameClientEventKind
     DestroyCity,
     Kicked,
     AutoBuild,
+    ClickPlayer,
+    RightClickCity,
     Error,
     Disconnected,
 }
@@ -138,6 +140,8 @@ public readonly struct GameClientEvent
 
     public byte RankBoardKind { get; init; }
 
+    public byte RankStartIndex { get; init; }
+
     public string RankSeasonName { get; init; } = string.Empty;
 
     public (string Name, int Points)[] RankRows { get; init; } = [];
@@ -152,6 +156,10 @@ public readonly struct GameClientEvent
     public AdminEditPacket AdminEdit { get; init; }
 
     public AutoBuildPacket AutoBuild { get; init; }
+
+    public ServerClickPlayerPacket ClickPlayer { get; init; }
+
+    public ServerRightClickCityPacket RightClickCity { get; init; }
 
     public char ErrorCode { get; init; }
 }
@@ -320,6 +328,30 @@ public sealed class GameClient : IDisposable
         Span<byte> payload = stackalloc byte[AutoBuildPacket.Size];
         new AutoBuildPacket(isAllowed: false, designName, AutoBuildOutcome.Denied, placedCount: 0).Write(payload);
         Send(ClientMessageId.AutoBuild, payload);
+    }
+
+    public void SendClickPlayer(byte playerId)
+    {
+        if (!IsInGame)
+        {
+            return;
+        }
+
+        Span<byte> payload = stackalloc byte[1];
+        payload[0] = playerId;
+        Send(ClientMessageId.ClickPlayer, payload);
+    }
+
+    public void SendRightClickCity(byte cityId)
+    {
+        if (!IsInGame)
+        {
+            return;
+        }
+
+        Span<byte> payload = stackalloc byte[1];
+        payload[0] = cityId;
+        Send(ClientMessageId.RightClickCity, payload);
     }
 
     public void SendDemolish(in ClientDemolishPacket demolish)
@@ -1005,11 +1037,13 @@ public sealed class GameClient : IDisposable
             case ServerMessageId.RankBoard when RankBoardPacket.TryRead(
                 packet.Payload.Span,
                 out var rankBoard,
+                out var rankStart,
                 out var rankSeason,
                 out var rankRows):
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.RankBoard)
                 {
                     RankBoardKind = rankBoard,
+                    RankStartIndex = rankStart,
                     RankSeasonName = rankSeason,
                     RankRows = rankRows,
                 });
@@ -1060,6 +1094,18 @@ public sealed class GameClient : IDisposable
                 _events.Enqueue(new GameClientEvent(GameClientEventKind.DestroyCity)
                 {
                     DestroyedCityId = packet.Payload.Span[0],
+                });
+                break;
+            case ServerMessageId.ClickPlayer when packet.Payload.Length >= ServerClickPlayerPacket.Size:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.ClickPlayer)
+                {
+                    ClickPlayer = ServerClickPlayerPacket.Read(packet.Payload.Span),
+                });
+                break;
+            case ServerMessageId.RightClickCity when packet.Payload.Length >= ServerRightClickCityPacket.Size:
+                _events.Enqueue(new GameClientEvent(GameClientEventKind.RightClickCity)
+                {
+                    RightClickCity = ServerRightClickCityPacket.Read(packet.Payload.Span),
                 });
                 break;
             case ServerMessageId.Orbed when packet.Payload.Length >= ServerOrbedCityPacket.Size:

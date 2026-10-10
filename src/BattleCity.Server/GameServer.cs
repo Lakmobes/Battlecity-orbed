@@ -817,6 +817,12 @@ public sealed class GameServer : IDisposable
             case ClientMessageId.TcpPing:
                 session.SendServer(ServerMessageId.TcpPong, " "u8);
                 break;
+            case ClientMessageId.ClickPlayer:
+                HandleClickPlayer(session, packet.Payload.Span);
+                break;
+            case ClientMessageId.RightClickCity:
+                HandleRightClickCity(session, packet.Payload.Span);
+                break;
         }
     }
 
@@ -903,6 +909,9 @@ public sealed class GameServer : IDisposable
             session.RegisteredUsername = account.Username;
             session.Points = account.Points;
             session.Deaths = account.Deaths;
+            session.MonthlyPoints = account.MonthlyPoints;
+            session.Orbs = account.Orbs;
+            session.Assists = account.Assists;
         }
 
         session.DisplayName = displayName;
@@ -1194,7 +1203,10 @@ public sealed class GameServer : IDisposable
             }
         }
 
-        session.SendServer(ServerMessageId.RankBoard, RankBoardPacket.Create(board, _accounts.SeasonName, rows));
+        foreach (var chunk in RankBoardPacket.CreateChunks(board, _accounts.SeasonName, rows))
+        {
+            session.SendServer(ServerMessageId.RankBoard, chunk);
+        }
     }
 
     private struct CityOccupancy
@@ -1889,7 +1901,8 @@ public sealed class GameServer : IDisposable
                 session.PlayerId,
                 (ItemType)request.ItemType,
                 request.Active != 0,
-                out var addItem))
+                out var addItem,
+                session.CityId))
         {
             return;
         }
@@ -2705,10 +2718,14 @@ public sealed class GameServer : IDisposable
 
     private void AdjustSessionPoints(ClientSession session, int delta)
     {
-        if (delta != 0)
-        {
-            var oldRank = PlayerRankCatalog.GetRank(session.Points);
-            session.Points += delta;
+            if (delta != 0)
+            {
+                var oldRank = PlayerRankCatalog.GetRank(session.Points);
+                session.Points += delta;
+                if (delta > 0)
+                {
+                    session.MonthlyPoints += delta;
+                }
             var newRank = PlayerRankCatalog.GetRank(session.Points);
             if (oldRank != newRank)
             {
@@ -2756,7 +2773,10 @@ public sealed class GameServer : IDisposable
         new(
             session.PlayerId,
             (uint)Math.Max(0, session.Points),
-            (uint)Math.Max(0, session.Deaths));
+            (uint)Math.Max(0, session.Deaths),
+            (uint)Math.Max(0, session.Orbs),
+            (uint)Math.Max(0, session.Assists),
+            (uint)Math.Max(0, session.MonthlyPoints));
 
     private void BroadcastPendingDeathEvents()
     {
@@ -2812,11 +2832,7 @@ public sealed class GameServer : IDisposable
     private void ApplyOrbPointAwards(in OrbEvent orbEvent)
     {
         var points = (int)orbEvent.VictimPoints;
-        if (points <= 0)
-        {
-            return;
-        }
-
+        var awarded = false;
         foreach (var session in GetInGameSessions())
         {
             if (session.CityId != orbEvent.AttackerCityId)
@@ -2824,8 +2840,100 @@ public sealed class GameServer : IDisposable
                 continue;
             }
 
+            if (session.PlayerId == orbEvent.OrberPlayerId)
+            {
+                IncrementSessionOrbs(session);
+            }
+            else
+            {
+                IncrementSessionAssists(session);
+            }
+
+            if (points <= 0)
+            {
+                BroadcastPointsUpdate(session);
+                continue;
+            }
+
+            var before = session.Points;
             AdjustSessionPoints(session, points);
+            Console.WriteLine($"Points::{session.DisplayName}::{before}->{session.Points} (+{points})");
+            awarded = true;
         }
+
+        if (!awarded && points > 0)
+        {
+            Console.WriteLine(
+                $"Points::none city {orbEvent.AttackerCityId} worth {points} (no in-game player in that city)");
+        }
+    }
+
+    private void IncrementSessionOrbs(ClientSession session)
+    {
+        session.Orbs++;
+        if (!session.IsGuest && session.RegisteredUsername is not null)
+        {
+            _accounts.IncrementOrbs(session.RegisteredUsername);
+        }
+    }
+
+    private void IncrementSessionAssists(ClientSession session)
+    {
+        session.Assists++;
+        if (!session.IsGuest && session.RegisteredUsername is not null)
+        {
+            _accounts.IncrementAssists(session.RegisteredUsername);
+        }
+    }
+
+    private void HandleClickPlayer(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsInGame || payload.Length < 1)
+        {
+            return;
+        }
+
+        var clicked = payload[0];
+        var points = 0;
+        var monthly = 0;
+        var orbs = 0;
+        var assists = 0;
+        var deaths = 0;
+        if (TryGetSession(clicked, out var target))
+        {
+            points = target.Points;
+            monthly = target.MonthlyPoints;
+            orbs = target.Orbs;
+            assists = target.Assists;
+            deaths = target.Deaths;
+        }
+
+        var packet = new ServerClickPlayerPacket(clicked, points, monthly, orbs, assists, deaths);
+        Span<byte> buffer = stackalloc byte[ServerClickPlayerPacket.Size];
+        packet.Write(buffer);
+        session.SendServer(ServerMessageId.ClickPlayer, buffer);
+    }
+
+    private void HandleRightClickCity(ClientSession session, ReadOnlySpan<byte> payload)
+    {
+        if (!session.IsInGame || payload.Length < 1 || !CityCatalog.IsValidCityId(payload[0]))
+        {
+            return;
+        }
+
+        var cityId = payload[0];
+        var build = _simulation.EnsureCityBuild(cityId);
+        build.NoteOrbableClock();
+        var packet = new ServerRightClickCityPacket(
+            cityId,
+            build.CurrentBuildingCount,
+            build.IsOrbable,
+            build.Orbs,
+            build.GetOrbValue(),
+            build.GetUptimeMinutes());
+        Span<byte> buffer = stackalloc byte[ServerRightClickCityPacket.Size];
+        packet.Write(buffer);
+        session.SendServer(ServerMessageId.RightClickCity, buffer);
     }
 
     /// <summary>Legacy <c>wasOrbed</c> removes every tank in the city. AI tanks are not sessions.</summary>

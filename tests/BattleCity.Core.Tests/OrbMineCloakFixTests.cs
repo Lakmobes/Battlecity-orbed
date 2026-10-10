@@ -72,6 +72,7 @@ public sealed class OrbMineCloakFixTests
             }),
             out var victimCityId,
             out var attackerCityId,
+            out _,
             out _));
         Assert.Equal(1, victimCityId);
         Assert.Equal(2, attackerCityId);
@@ -101,6 +102,7 @@ public sealed class OrbMineCloakFixTests
             [victim],
             out var victimCityId,
             out var attackerCityId,
+            out _,
             out _));
         Assert.Equal(1, victimCityId);
         Assert.Equal(2, attackerCityId);

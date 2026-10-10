@@ -25,6 +25,7 @@ public static class CityBuildInitializer
         ResolveCommandCenter(build, layout, tileMap);
         build.CurrentBuildingCount = Math.Max(1, layout.Buildings.Count);
         build.MaxBuildingCount = build.CurrentBuildingCount;
+        build.NoteOrbableClock();
     }
 
     public static void MarkExistingBuildings(CityBuildState build, CityLayout layout)

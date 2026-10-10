@@ -13,7 +13,7 @@ public static class OrbSystem
         new QueryDescription().WithAll<PlacedItemRef>();
 
     public static bool TryTrigger(World world, CityBuildState build, out int attackerCityId) =>
-        TryTrigger(world, [build], out _, out attackerCityId, out _);
+        TryTrigger(world, [build], out _, out attackerCityId, out _, out _);
 
     /// <summary>
     /// Scans inactive orbs against every orbable enemy city CC (legacy drop-time check).
@@ -23,11 +23,13 @@ public static class OrbSystem
         IEnumerable<CityBuildState> cities,
         out int victimCityId,
         out int attackerCityId,
-        out ushort removedNetworkItemId)
+        out ushort removedNetworkItemId,
+        out byte orberPlayerId)
     {
         victimCityId = 0;
         attackerCityId = 0;
         removedNetworkItemId = 0;
+        orberPlayerId = 255;
 
         var cityList = cities as IList<CityBuildState> ?? cities.ToList();
         if (cityList.Count == 0)
@@ -39,6 +41,7 @@ public static class OrbSystem
         var capturedVictimCityId = 0;
         var capturedAttackerCityId = 0;
         var capturedItemId = (ushort)0;
+        var capturedOrber = (byte)255;
 
         world.Query(
             in OrbQuery,
@@ -63,6 +66,7 @@ public static class OrbSystem
 
                     capturedVictimCityId = build.CityId;
                     capturedAttackerCityId = item.CityId;
+                    capturedOrber = item.OwnerPlayerId;
                     if (world.Has<NetworkItemRef>(entity))
                     {
                         capturedItemId = world.Get<NetworkItemRef>(entity).ItemId;
@@ -82,6 +86,7 @@ public static class OrbSystem
         victimCityId = capturedVictimCityId;
         attackerCityId = capturedAttackerCityId;
         removedNetworkItemId = capturedItemId;
+        orberPlayerId = capturedOrber;
         return true;
     }
 

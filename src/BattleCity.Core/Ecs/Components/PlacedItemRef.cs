@@ -10,4 +10,7 @@ public struct PlacedItemRef
     public bool Active;
     public int CityId;
     public float FuseTimerSeconds;
+
+    /// <summary>Player who dropped this item. 255 means unknown (factory or map spawn).</summary>
+    public byte OwnerPlayerId;
 }

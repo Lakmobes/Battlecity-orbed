@@ -108,7 +108,7 @@ public sealed class AccountDatabase : IDisposable
         {
             using var query = _connection.CreateCommand();
             query.CommandText = """
-                SELECT id, username, password_hash, password_salt, display_name, town, points, deaths, is_admin
+                SELECT id, username, password_hash, password_salt, display_name, town, points, deaths, is_admin, monthly_points, orbs, assists
                 FROM accounts
                 WHERE username = $username
                 LIMIT 1;
@@ -137,6 +137,9 @@ public sealed class AccountDatabase : IDisposable
                 Points = reader.GetInt32(6),
                 Deaths = reader.GetInt32(7),
                 IsAdmin = reader.GetInt32(8) != 0,
+                MonthlyPoints = reader.GetInt32(9),
+                Orbs = reader.GetInt32(10),
+                Assists = reader.GetInt32(11),
             };
         }
 
@@ -325,6 +328,27 @@ public sealed class AccountDatabase : IDisposable
             update.Parameters.AddWithValue("$isAdmin", isAdmin ? 1 : 0);
             update.Parameters.AddWithValue("$username", username);
             return update.ExecuteNonQuery() > 0;
+        }
+    }
+
+    public void IncrementOrbs(string username) => IncrementColumn(username, "orbs");
+
+    public void IncrementAssists(string username) => IncrementColumn(username, "assists");
+
+    private void IncrementColumn(string username, string column)
+    {
+        username = NormalizeUsername(username);
+        if (column is not ("orbs" or "assists"))
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            using var update = _connection.CreateCommand();
+            update.CommandText = $"UPDATE accounts SET {column} = {column} + 1 WHERE username = $username;";
+            update.Parameters.AddWithValue("$username", username);
+            update.ExecuteNonQuery();
         }
     }
 
@@ -529,6 +553,8 @@ public sealed class AccountDatabase : IDisposable
         EnsureColumn("accounts", "monthly_points", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("accounts", "monthly_period", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn("accounts", "season_points", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn("accounts", "orbs", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn("accounts", "assists", "INTEGER NOT NULL DEFAULT 0");
 
         using var settings = _connection.CreateCommand();
         settings.CommandText = """

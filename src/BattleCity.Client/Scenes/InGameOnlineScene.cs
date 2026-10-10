@@ -72,6 +72,8 @@ public sealed class InGameOnlineScene : IScene
     private readonly InGameChatInput _chatInput = new();
     private bool _showSettingsMenu;
     private int _settingsSelectedIndex;
+    private readonly ControlsMenuState _controls = new();
+    private string[]? _inspectLines;
     private AdminEditPacket? _cachedAdminEdit;
 
     public InGameOnlineScene(SceneContext context, GameClient client)
@@ -641,6 +643,12 @@ public sealed class InGameOnlineScene : IScene
                 case GameClientEventKind.DestroyCity:
                     _simulation.DestroyAbandonedCity(networkEvent.DestroyedCityId);
                     break;
+                case GameClientEventKind.ClickPlayer:
+                    ShowPlayerInspect(networkEvent.ClickPlayer);
+                    break;
+                case GameClientEventKind.RightClickCity:
+                    ShowCityInspect(networkEvent.RightClickCity);
+                    break;
                 case GameClientEventKind.Orbed:
                     var orbed = networkEvent.Orbed;
                     _simulation.ApplyNetworkOrb(
@@ -786,6 +794,16 @@ public sealed class InGameOnlineScene : IScene
                 _showMiniMap = !_showMiniMap;
             }
 
+            return;
+        }
+
+        if (ui.MouseLeftClicked)
+        {
+            _inspectLines = null;
+        }
+
+        if (TryInspectWorldClick(ui, worldWidth))
+        {
             return;
         }
 
@@ -1103,6 +1121,7 @@ public sealed class InGameOnlineScene : IScene
             CityTeamCapacity = GameConstants.MaxPlayersPerCity,
             MayorDisplayName = ResolveMayorDisplayName(GetLocalCityId()),
             LocalPlayerIsMayor = _client.IsMayor,
+            LocalPlayerIsAdmin = IsLocalAdmin(),
             PlayerDisplayName = _context.PlayerName,
             LocalPlayerId = _client.PlayerId,
             ResolvePlayerDisplayName = id => _remotePlayers?.GetDisplayName(id),
@@ -1140,8 +1159,12 @@ public sealed class InGameOnlineScene : IScene
             HireApplicantName = _pendingApplicantName,
             DenyApplicants = _denyApplicants,
             ObserverCityId = observerCityId,
-            ShowSettingsMenu = _showSettingsMenu,
+            ShowSettingsMenu = _showSettingsMenu && !_controls.IsOpen,
             SettingsSelectedIndex = _settingsSelectedIndex,
+            ShowControlsMenu = _controls.IsOpen,
+            ControlsSelectedIndex = _controls.Selected,
+            ControlsWaitingForKey = _controls.WaitingForKey,
+            InspectLines = _inspectLines,
             ShowVirtualCursor = _showVirtualCursor,
             VirtualCursorLogical = _virtualCursorLogical,
         };
@@ -1151,6 +1174,12 @@ public sealed class InGameOnlineScene : IScene
     {
         leaveToMenu = false;
         abandonCity = false;
+        if (_controls.IsOpen)
+        {
+            _controls.Handle(ui);
+            return true;
+        }
+
         var hamburgerClicked = ui.MouseLeftClicked
             && ModernHudLayout.HamburgerBounds.Contains(
                 (int)ui.MouseLogicalPosition.X,
@@ -1209,9 +1238,12 @@ public sealed class InGameOnlineScene : IScene
                     _showMiniMap = !_showMiniMap;
                     break;
                 case 3:
-                    abandonCity = true;
+                    _controls.Open();
                     break;
                 case 4:
+                    abandonCity = true;
+                    break;
+                case 5:
                     leaveToMenu = true;
                     break;
             }
@@ -1250,6 +1282,63 @@ public sealed class InGameOnlineScene : IScene
         _returnToMeeting = true;
         _showSettingsMenu = false;
         _context.Audio.StopEngine();
+    }
+
+    private bool TryInspectWorldClick(UiInputState ui, int worldWidth)
+    {
+        if (!ui.MouseRightClicked || !ui.PointerOverWorld)
+        {
+            return false;
+        }
+
+        var mouseScreen = new Vector2(
+            Math.Clamp(ui.MouseLogicalPosition.X, 0, worldWidth - 1),
+            Math.Clamp(ui.MouseLogicalPosition.Y, 0, UiLayout.LogicalHeight - 1));
+        var world = _camera.ScreenToWorld(mouseScreen);
+        if (WorldClickTarget.TryFindPlayer(_simulation.World, world.X, world.Y, out var playerId, out var isLocal))
+        {
+            _client.SendClickPlayer(isLocal ? _client.PlayerId : playerId);
+            return true;
+        }
+
+        if (WorldClickTarget.TryFindBuildingCity(_simulation.World, world.X, world.Y, out var cityId)
+            && cityId is >= 0 and <= byte.MaxValue)
+        {
+            _client.SendRightClickCity((byte)cityId);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ShowPlayerInspect(ServerClickPlayerPacket packet)
+    {
+        var name = _remotePlayers.GetDisplayName(packet.PlayerId) ?? $"Player{packet.PlayerId}";
+        _inspectLines = InspectPanelText.FormatPlayer(
+            name,
+            packet.Points,
+            packet.MonthlyPoints,
+            packet.Orbs,
+            packet.Assists,
+            packet.Deaths);
+    }
+
+    private void ShowCityInspect(ServerRightClickCityPacket packet)
+    {
+        if (!CityCatalog.IsValidCityId(packet.CityId))
+        {
+            return;
+        }
+
+        _inspectLines = InspectPanelText.FormatCity(
+            CityCatalog.GetName(packet.CityId),
+            ResolveMayorDisplayName(packet.CityId),
+            CountLocalCityTeam(packet.CityId),
+            packet.BuildingCount,
+            packet.IsOrbable,
+            packet.Orbs,
+            packet.OrbPoints,
+            packet.UptimeMinutes);
     }
 
     private bool IsLocalAdmin() => _client.IsAdmin;
@@ -1442,6 +1531,9 @@ public sealed class InGameOnlineScene : IScene
             case ChatCommandKind.Load:
                 RequestAutoBuild(command.Message);
                 break;
+            case ChatCommandKind.Help:
+                ShowAdminCommandHelp();
+                break;
             default:
                 if (string.IsNullOrWhiteSpace(command.Message))
                 {
@@ -1464,6 +1556,18 @@ public sealed class InGameOnlineScene : IScene
                 _client.SendWalkie(command.Message);
                 break;
         }
+    }
+
+    private void ShowAdminCommandHelp()
+    {
+        if (!IsLocalAdmin())
+        {
+            InGameChatService.AppendSystem(_chatLog, "Only admins can list commands. Try /help as an admin.");
+            return;
+        }
+
+        ModernHudLayout.ChatTab = 3;
+        InGameChatService.AppendSystem(_chatLog, "Admin commands are on the Commands tab.");
     }
 
     private void RequestAutoBuild(string argument)

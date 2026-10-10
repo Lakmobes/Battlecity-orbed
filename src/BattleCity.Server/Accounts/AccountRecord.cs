@@ -22,5 +22,9 @@ public sealed class AccountRecord
 
     public int Deaths { get; init; }
 
+    public int Orbs { get; init; }
+
+    public int Assists { get; init; }
+
     public bool IsAdmin { get; init; }
 }

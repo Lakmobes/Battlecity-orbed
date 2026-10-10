@@ -39,7 +39,8 @@ public static class ItemDropActions
         out int gridY,
         ushort networkItemId = 0,
         CityBuildState? cityBuild = null,
-        TileMap? tileMap = null)
+        TileMap? tileMap = null,
+        int? cityIdOverride = null)
     {
         if (!ItemDropPlacement.TryFindDropTile(world, owner, tankTopLeft, type, out gridX, out gridY, cityBuild))
         {
@@ -53,15 +54,20 @@ public static class ItemDropActions
             return false;
         }
 
-        var cityId = world.Has<CityAffiliation>(owner)
-            ? world.Get<CityAffiliation>(owner).CityId
-            : 0;
+        var cityId = cityIdOverride
+            ?? (world.Has<CityAffiliation>(owner)
+                ? world.Get<CityAffiliation>(owner).CityId
+                : 0);
 
         // Inventory→map is fine; refuse if this city already has a different orb on the map.
         if (type == ItemType.Orb && OrbCityRules.CityHasPlacedOrb(world, cityId))
         {
             return false;
         }
+
+        var ownerPlayerId = world.Has<NetworkIdentity>(owner)
+            ? world.Get<NetworkIdentity>(owner).PlayerId
+            : (byte)255;
 
         GameplayEntityFactory.CreatePlacedItem(
             world,
@@ -70,7 +76,8 @@ public static class ItemDropActions
             gridY,
             active,
             cityId: cityId,
-            networkItemId: networkItemId);
+            networkItemId: networkItemId,
+            ownerPlayerId: ownerPlayerId);
 
         if (ItemDropPlacement.RequiresDedicatedTile(type) && tileMap is not null)
         {

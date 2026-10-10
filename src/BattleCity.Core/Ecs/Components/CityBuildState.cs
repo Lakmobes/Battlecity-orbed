@@ -35,6 +35,9 @@ public sealed class CityBuildState
     /// <summary>Successful orbs scored by this city (legacy <c>CCity::Orbs</c>).</summary>
     public int Orbs { get; set; }
 
+    /// <summary>When this city first became orbable (legacy <c>CCity::startTime</c>).</summary>
+    public DateTime? OrbableSinceUtc { get; set; }
+
     public bool IsOrbable =>
         HadBombFactory || HadOrbFactory || MaxBuildingCount >= EconomyConstants.OrbableSize;
 
@@ -66,6 +69,25 @@ public sealed class CityBuildState
         return points + (Orbs * 5);
     }
 
+    public void NoteOrbableClock(DateTime? utcNow = null)
+    {
+        if (IsOrbable && OrbableSinceUtc is null)
+        {
+            OrbableSinceUtc = utcNow ?? DateTime.UtcNow;
+        }
+    }
+
+    public int GetUptimeMinutes(DateTime? utcNow = null)
+    {
+        if (OrbableSinceUtc is not { } start)
+        {
+            return 0;
+        }
+
+        var minutes = (int)((utcNow ?? DateTime.UtcNow) - start).TotalMinutes;
+        return Math.Max(0, minutes);
+    }
+
     public void RegisterBuildingPlaced(int menuIndex, int typeCode)
     {
         CurrentBuildingCount++;
@@ -82,6 +104,8 @@ public sealed class CityBuildState
         {
             HadOrbFactory = true;
         }
+
+        NoteOrbableClock();
     }
 
     public void RegisterBuildingRemoved()

@@ -1,4 +1,5 @@
 using BattleCity.Client.Assets;
+using BattleCity.Client.Input;
 
 using BattleCity.Core.Ecs.Components;
 using BattleCity.Shared.Catalogs;
@@ -16,6 +17,7 @@ public sealed class UiRenderer
         "Resume",
         "Toggle Info Box (F1)",
         "Toggle Minimap (M)",
+        "Controls",
         "Abandon City",
         "Return to Menu",
     ];
@@ -77,6 +79,7 @@ public sealed class UiRenderer
         _underAttackPanel.Draw(spriteBatch, in context);
         _radar.Draw(spriteBatch, in context);
         DrawInfoCard(spriteBatch, in context);
+        DrawInspectPanel(spriteBatch, in context);
 
         if (context.ShowBuildMenu && context.CityBuild is not null)
         {
@@ -89,7 +92,11 @@ public sealed class UiRenderer
                 context.CityBuild);
         }
 
-        if (context.ShowSettingsMenu)
+        if (context.ShowControlsMenu)
+        {
+            DrawControlsMenu(spriteBatch, in context);
+        }
+        else if (context.ShowSettingsMenu)
         {
             DrawSettingsMenu(spriteBatch, in context);
         }
@@ -300,6 +307,97 @@ public sealed class UiRenderer
             panel.Y + 70 + index * (MenuTheme.MenuButtonHeight + MenuTheme.MenuButtonGap),
             buttonWidth,
             MenuTheme.MenuButtonHeight);
+    }
+
+    private void DrawInspectPanel(SpriteBatch spriteBatch, in RenderContext context)
+    {
+        if (_font is null || context.InspectLines is not { Count: > 0 } lines)
+        {
+            return;
+        }
+
+        var panel = new Rectangle(16, 88, 320, 16 + (lines.Count * 24));
+        HudTheme.DrawPanel(spriteBatch, _assets.Pixel, panel, active: true);
+        var y = panel.Y + 8;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            HudTheme.DrawLabel(
+                spriteBatch,
+                _font,
+                lines[i],
+                new Vector2(panel.X + 12, y),
+                i == 0 ? HudTheme.Accent : HudTheme.Text,
+                1f);
+            y += 24;
+        }
+    }
+
+    private void DrawControlsMenu(SpriteBatch spriteBatch, in RenderContext context)
+    {
+        if (_font is null)
+        {
+            return;
+        }
+
+        var pixel = _assets.Pixel;
+        spriteBatch.Draw(
+            pixel,
+            new Rectangle(0, 0, UiLayout.LogicalWidth, UiLayout.LogicalHeight),
+            new Color(0, 0, 0, 185));
+
+        var panel = ControlsMenuLayout.Panel;
+        HudOverlayHelper.DrawPanel(spriteBatch, _assets, panel, MenuTheme.PanelFill);
+
+        var title = "Controls";
+        var titleSize = _font.MeasureString(title);
+        spriteBatch.DrawString(
+            _font,
+            title,
+            new Vector2(panel.Center.X - titleSize.X / 2f, panel.Y + 16),
+            MenuTheme.TextPrimary);
+
+        var bindings = KeyBindings.Current;
+        for (var i = 0; i < KeyBindings.ActionCount; i++)
+        {
+            var action = KeyBindings.Actions[i];
+            var selected = i == context.ControlsSelectedIndex;
+            var bounds = ControlsMenuLayout.RowBounds(i);
+            var fill = selected ? MenuTheme.ButtonFocusFill : MenuTheme.ButtonIdleFill;
+            spriteBatch.Draw(pixel, bounds, fill);
+            var label = bindings.Title(action);
+            var keys = selected && context.ControlsWaitingForKey
+                ? "Press a key"
+                : bindings.FormatKeys(action);
+            var color = selected ? MenuTheme.TextAccent : MenuTheme.TextSecondary;
+            spriteBatch.DrawString(_font, label, new Vector2(bounds.X + 10, bounds.Y + 6), color);
+            var keySize = _font.MeasureString(keys);
+            spriteBatch.DrawString(
+                _font,
+                keys,
+                new Vector2(bounds.Right - 12 - keySize.X, bounds.Y + 6),
+                color);
+        }
+
+        DrawControlsFooter(spriteBatch, context.ControlsSelectedIndex == ControlsMenuLayout.ResetIndex, "Reset defaults", ControlsMenuLayout.ResetIndex);
+        DrawControlsFooter(spriteBatch, context.ControlsSelectedIndex == ControlsMenuLayout.BackIndex, "Back", ControlsMenuLayout.BackIndex);
+    }
+
+    private void DrawControlsFooter(SpriteBatch spriteBatch, bool selected, string label, int index)
+    {
+        if (_font is null)
+        {
+            return;
+        }
+
+        var bounds = ControlsMenuLayout.RowBounds(index);
+        var fill = selected ? MenuTheme.ButtonFocusFill : MenuTheme.ButtonIdleFill;
+        spriteBatch.Draw(_assets.Pixel, bounds, fill);
+        var size = _font.MeasureString(label);
+        spriteBatch.DrawString(
+            _font,
+            label,
+            new Vector2(bounds.Center.X - size.X / 2f, bounds.Center.Y - size.Y / 2f),
+            selected ? MenuTheme.TextAccent : MenuTheme.TextSecondary);
     }
 
     private void DrawSettingsMenu(SpriteBatch spriteBatch, in RenderContext context)

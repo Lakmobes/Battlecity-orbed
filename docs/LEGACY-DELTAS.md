@@ -93,7 +93,7 @@ Code: `GameServer.BeginCityAbandon`, `CityDestructSchedule`, `GameSimulation.Des
 
 ## How rankings work
 
-Meeting room → **L** or the Ranks button. Four boards, **top 10** each (`RankBoardPacket.MaxRows`):
+Meeting room → **L** or the Ranks button. Four boards, **top 20** each (`RankBoardPacket.MaxRows`). A legacy frame holds 10 rows, so ranks 11–20 follow in a second packet:
 
 | Tab | Key | What it sorts |
 |-----|-----|----------------|
@@ -102,7 +102,7 @@ Meeting room → **L** or the Ranks button. Four boards, **top 10** each (`RankB
 | Season | 3 | `season_points` (host can name and reset the season) |
 | Per death | 4 | `(points * 10000) / deaths`, and only accounts with **more than 100** deaths and points above 0 |
 
-The original boards were **top 20** and had no season. Top 10 is the current packet size. Raising it to 20 is a parity change, not a bugfix — see the open list.
+The original boards were top 20 and had no season. The season board is a remake addition.
 
 ---
 
@@ -117,13 +117,10 @@ These are real original functions the remake does not have yet. They are **not**
 | Account self-edit | `cmEditAccount`, `cmAccountUpdate` | Player edits password, email, name, town. Admin `/editaccount` exists. Self-service does not. |
 | Password recovery | `cmRecover` | Email lookup. Returns error `L` or `M`. Not ported. |
 | Custom tank | `cmChangeTank` | Account had Tank…Tank9 and a display tank. No tank-select UI. |
-| Click a player | `cmClickPlayer` / `smClickPlayer` | Orbs, assists, deaths of the clicked player. No panel. |
-| Right-click a city | `cmRightClickCity` / `smRightClickCity` | Building count, orbable, orbs, orb points, uptime. No panel. |
 | Info button | `cmRequestInfo` / `smInfoButton` | Picked the orbable city with the highest orb value, then the closer one. Compass uses **nearest** orbable city instead. Do not copy the original distance line: it uses XOR (`^`) instead of squaring. |
 | Map sectors | `cmMiniMap`, `cmRequestSector`, `smSectorSent` | Original streamed map sectors. The remake loads the full map. Leave this unless a legacy client must connect. |
 | Cheat-constant kick | `cmCheatCheck` | Original compared building cost, damage, timers, and speed, then kicked. The remake client does not send it. |
 | Client crash log | `cmCrash` | Original appended the text to the server log. Not handled. |
-| Rank list length | Top **20** | Remake packets carry **10** rows. |
 
 ### Do not port these as written
 
@@ -142,6 +139,8 @@ These are real original functions the remake does not have yet. They are **not**
 - `smItemLife`, `smPromotion`, `smUnderAttack`, explosions, factory counts, population
 - Admin `/kick` `/ban` `/city` `/warp` `/summon` `/spawn` `/shutdown` `/bans` `/unban` `/news` `/setnews` `/startcity` `/account` `/editaccount`
 - Mayor `/load name` (`cmAutoBuild`) reads `cities/{city}/{name}.city` on the server and places it. Blocked once the city is orbable. Admins can load anyway. A type the city already has is skipped. The file is not taken from the client.
+- Right-click a tank (`cmClickPlayer`) opens that player's points, orbs, assists, deaths, monthly points, and points per death. The player who dropped the orb gets the orb; teammates get an assist.
+- Right-click a building (`cmRightClickCity`) opens that city's mayor, player count, size, and, when it is orbable, bounty, orbs, and uptime.
 - CC-only multiplayer world, meeting-room spiral, drive-pad spawn and home arrow
 - GridAnchor = footprint southeast corner (`BuildingCollisionOffset` = 2)
 - House population: two slots of 50; house pop is the sum (max 100). Populated buildings are bullet-immune. Bombs still destroy them.

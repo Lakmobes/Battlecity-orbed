@@ -2,34 +2,33 @@ using Microsoft.Xna.Framework.Input;
 
 namespace BattleCity.Client.Input;
 
-/// <summary>Default bindings aligned with legacy/client/CInput.cpp plus WASD aliases.</summary>
+/// <summary>Keyboard bindings. Defaults match legacy/client/CInput.cpp plus the WASD aliases. Players can change them in Settings → Controls.</summary>
 public static class GameplayInputMap
 {
-    public static Keys TurnLeftPrimary => Keys.Left;
-    public static Keys TurnRightPrimary => Keys.Right;
-    public static Keys MoveForwardPrimary => Keys.Up;
-    public static Keys MoveBackwardPrimary => Keys.Down;
+    public static Keys TurnLeftPrimary => KeyBindings.Current.Primary(GameAction.TurnLeft);
+    public static Keys TurnRightPrimary => KeyBindings.Current.Primary(GameAction.TurnRight);
+    public static Keys MoveForwardPrimary => KeyBindings.Current.Primary(GameAction.MoveForward);
+    public static Keys MoveBackwardPrimary => KeyBindings.Current.Primary(GameAction.MoveBackward);
 
-    public static Keys TurnLeftAlt => Keys.A;
-    public static Keys TurnRightAlt => Keys.E;
-    public static Keys MoveForwardAlt => Keys.W;
-    public static Keys MoveBackwardAlt => Keys.S;
+    public static Keys TurnLeftAlt => KeyBindings.Current.Alt(GameAction.TurnLeft);
+    public static Keys TurnRightAlt => KeyBindings.Current.Alt(GameAction.TurnRight);
+    public static Keys MoveForwardAlt => KeyBindings.Current.Alt(GameAction.MoveForward);
+    public static Keys MoveBackwardAlt => KeyBindings.Current.Alt(GameAction.MoveBackward);
 
-    public static Keys FirePrimary => Keys.LeftShift;
-    public static Keys FireAlt => Keys.RightShift;
-    public static Keys FireFlarePrimary => Keys.LeftControl;
-    public static Keys FireFlareAlt => Keys.RightControl;
+    public static Keys FirePrimary => KeyBindings.Current.Primary(GameAction.Fire);
+    public static Keys FireAlt => KeyBindings.Current.Alt(GameAction.Fire);
+    public static Keys FireFlarePrimary => KeyBindings.Current.Primary(GameAction.FireFlare);
+    public static Keys FireFlareAlt => KeyBindings.Current.Alt(GameAction.FireFlare);
 
-    public static Keys UseCloak => Keys.C;
-    /// <summary>Legacy used D to drop the selected inventory item (CGame.cpp).</summary>
-    public static Keys DropSelectedItem => Keys.D;
+    public static Keys UseCloak => KeyBindings.Current.Primary(GameAction.UseCloak);
+    public static Keys DropSelectedItem => KeyBindings.Current.Primary(GameAction.DropItem);
 
-    public static Keys CycleInventoryPrevious => Keys.OemOpenBrackets;
-    public static Keys CycleInventoryNext => Keys.OemCloseBrackets;
-    public static Keys UseMedKit => Keys.H;
-    public static Keys DropBomb => Keys.B;
-    public static Keys DropOrb => Keys.O;
-    public static Keys PickUpItem => Keys.U;
+    public static Keys CycleInventoryPrevious => KeyBindings.Current.Primary(GameAction.InventoryPrevious);
+    public static Keys CycleInventoryNext => KeyBindings.Current.Primary(GameAction.InventoryNext);
+    public static Keys UseMedKit => KeyBindings.Current.Primary(GameAction.UseMedKit);
+    public static Keys DropBomb => KeyBindings.Current.Primary(GameAction.DropBomb);
+    public static Keys DropOrb => KeyBindings.Current.Primary(GameAction.DropOrb);
+    public static Keys PickUpItem => KeyBindings.Current.Primary(GameAction.PickUp);
 
-    public static Keys CameraPanModifier => Keys.Tab;
+    public static Keys CameraPanModifier => KeyBindings.Current.Primary(GameAction.CameraPan);
 }

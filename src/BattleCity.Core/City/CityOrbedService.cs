@@ -69,6 +69,7 @@ public static class CityOrbedService
         build.HadBombFactory = false;
         build.HadOrbFactory = false;
         build.Orbs = 0;
+        build.OrbableSinceUtc = null;
         Array.Clear(build.ResearchStatus, 0, build.ResearchStatus.Length);
         Array.Clear(build.ResearchTimers, 0, build.ResearchTimers.Length);
     }

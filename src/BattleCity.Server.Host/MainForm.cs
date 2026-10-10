@@ -244,12 +244,12 @@ internal sealed class MainForm : Form
         _players.FullRowSelect = true;
         _players.GridLines = true;
         _players.Columns.Add("Id", 36);
-        _players.Columns.Add("Name", 120);
-        _players.Columns.Add("State", 78);
-        _players.Columns.Add("City", 140);
+        _players.Columns.Add("Name", 110);
+        _players.Columns.Add("Pts", 64);
+        _players.Columns.Add("City", 130);
         _players.Columns.Add("Size", 48);
-        _players.Columns.Add("Pts", 56);
-        _players.Columns.Add("Flags", 100);
+        _players.Columns.Add("State", 72);
+        _players.Columns.Add("Flags", 90);
         playersPanel.Controls.Add(_players, 0, 1);
         left.Controls.Add(playersPanel, 0, 5);
 
@@ -660,10 +660,10 @@ internal sealed class MainForm : Form
 
             var item = new ListViewItem(player.PlayerId.ToString());
             item.SubItems.Add(player.DisplayName);
-            item.SubItems.Add(player.State);
+            item.SubItems.Add(player.Points.ToString());
             item.SubItems.Add(player.CityId == 0 ? "-" : $"{player.CityName} ({player.CityId})");
             item.SubItems.Add(player.CityId == 0 ? "-" : player.CitySize.ToString());
-            item.SubItems.Add(player.Points.ToString());
+            item.SubItems.Add(player.State);
             item.SubItems.Add(string.Join(", ", flags));
             _players.Items.Add(item);
         }
@@ -711,7 +711,7 @@ internal sealed class MainForm : Form
                 return;
             }
 
-            var label = $"{account.Username}  ({account.Points} pts / {account.Deaths} deaths)";
+            var label = FormatAccountLabel(account);
             if (item.Display == label)
             {
                 continue;
@@ -723,6 +723,32 @@ internal sealed class MainForm : Form
         }
 
         _suppressAccountToggle = false;
+        _accounts.Refresh();
+    }
+
+    private string FormatAccountLabel(AccountRecord account)
+    {
+        var points = account.Points;
+        var deaths = account.Deaths;
+        if (_server is not null)
+        {
+            foreach (var player in _server.GetConnectedPlayers())
+            {
+                if (player.IsGuest)
+                {
+                    continue;
+                }
+
+                if (string.Equals(player.DisplayName, account.Username, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(player.DisplayName, account.DisplayName, StringComparison.OrdinalIgnoreCase))
+                {
+                    points = player.Points;
+                    break;
+                }
+            }
+        }
+
+        return $"{account.Username}  ({points} pts / {deaths} deaths)";
     }
 
     private void ReloadAccounts()
@@ -751,7 +777,7 @@ internal sealed class MainForm : Form
         _accounts.Items.Clear();
         foreach (var account in accounts)
         {
-            var label = $"{account.Username}  ({account.Points} pts / {account.Deaths} deaths)";
+            var label = FormatAccountLabel(account);
             var item = new AccountListItem(account.Username, label);
             _accounts.Items.Add(item, account.IsAdmin);
         }

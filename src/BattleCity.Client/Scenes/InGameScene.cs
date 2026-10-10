@@ -42,6 +42,8 @@ public sealed class InGameScene : IScene
     private bool _showMiniMap;
     private bool _showStatusPanel = true;
     private bool _showSettingsMenu;
+    private readonly ControlsMenuState _controls = new();
+    private string[]? _inspectLines;
     private int _settingsSelectedIndex;
     private bool _showBuildMenu;
     private int _buildModeSlot;
@@ -196,7 +198,7 @@ public sealed class InGameScene : IScene
             }
         }
 
-        if (!_showSettingsMenu)
+        if (!_showSettingsMenu && !_controls.IsOpen)
         {
             _simulation.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
         }
@@ -249,6 +251,16 @@ public sealed class InGameScene : IScene
                 _showMiniMap = !_showMiniMap;
             }
 
+            return;
+        }
+
+        if (ui.MouseLeftClicked)
+        {
+            _inspectLines = null;
+        }
+
+        if (TryInspectWorldClick(ui, worldWidth))
+        {
             return;
         }
 
@@ -504,8 +516,12 @@ public sealed class InGameScene : IScene
             ScreenHeight = _camera.ViewportHeight,
             ShowMiniMap = _showMiniMap,
             ShowStatusPanel = _showStatusPanel,
-            ShowSettingsMenu = _showSettingsMenu,
+            ShowSettingsMenu = _showSettingsMenu && !_controls.IsOpen,
             SettingsSelectedIndex = _settingsSelectedIndex,
+            ShowControlsMenu = _controls.IsOpen,
+            ControlsSelectedIndex = _controls.Selected,
+            ControlsWaitingForKey = _controls.WaitingForKey,
+            InspectLines = _inspectLines,
             LoadedCityName = _cityLayout.CityName,
             BuildingCount = cityBuild?.CurrentBuildingCount ?? _cityLayout.Buildings.Count,
             CityTeamCount = 1,
@@ -559,6 +575,12 @@ public sealed class InGameScene : IScene
     private bool HandleSettingsInput(UiInputState ui, out bool leaveToMenu)
     {
         leaveToMenu = false;
+        if (_controls.IsOpen)
+        {
+            _controls.Handle(ui);
+            return true;
+        }
+
         var hamburgerClicked = ui.MouseLeftClicked
             && ModernHudLayout.HamburgerBounds.Contains(
                 (int)ui.MouseLogicalPosition.X,
@@ -617,7 +639,10 @@ public sealed class InGameScene : IScene
                     _showMiniMap = !_showMiniMap;
                     break;
                 case 3:
+                    _controls.Open();
+                    break;
                 case 4:
+                case 5:
                     leaveToMenu = true;
                     break;
             }
@@ -760,6 +785,43 @@ public sealed class InGameScene : IScene
         {
             InGameChatService.AppendSystem(_chatLog, bombFailure);
         }
+    }
+
+    private bool TryInspectWorldClick(UiInputState ui, int worldWidth)
+    {
+        if (!ui.MouseRightClicked || !ui.PointerOverWorld)
+        {
+            return false;
+        }
+
+        var mouseScreen = new Vector2(
+            Math.Clamp(ui.MouseLogicalPosition.X, 0, worldWidth - 1),
+            Math.Clamp(ui.MouseLogicalPosition.Y, 0, UiLayout.LogicalHeight - 1));
+        var world = _camera.ScreenToWorld(mouseScreen);
+        if (WorldClickTarget.TryFindPlayer(_simulation.World, world.X, world.Y, out _, out _))
+        {
+            _inspectLines = InspectPanelText.FormatPlayer(_context.PlayerName, 0, 0, 0, 0, 0);
+            return true;
+        }
+
+        if (!WorldClickTarget.TryFindBuildingCity(_simulation.World, world.X, world.Y, out var cityId)
+            || !_simulation.TryGetCityBuild(cityId, out var build))
+        {
+            return false;
+        }
+
+        build.NoteOrbableClock();
+        var mayor = _context.PlayerName;
+        _inspectLines = InspectPanelText.FormatCity(
+            CityCatalog.IsValidCityId(cityId) ? CityCatalog.GetName(cityId) : _cityLayout.CityName,
+            mayor,
+            1,
+            build.CurrentBuildingCount,
+            build.IsOrbable,
+            build.Orbs,
+            build.GetOrbValue(),
+            build.GetUptimeMinutes());
+        return true;
     }
 
     private Entity GetLocalPlayerEntity()

@@ -84,7 +84,8 @@ public static class GameplayEntityFactory
         int gridY,
         bool active = true,
         int cityId = 0,
-        ushort networkItemId = 0)
+        ushort networkItemId = 0,
+        byte ownerPlayerId = 255)
     {
         // All placeables sit on the tile grid (legacy itm->X/Y * 48). Turret muzzle flash
         // uses a separate -24 formula in TurretTargeting — do not bake it into world position.
@@ -105,6 +106,7 @@ public static class GameplayEntityFactory
                 Active = active,
                 CityId = cityId,
                 FuseTimerSeconds = fuseTimer,
+                OwnerPlayerId = ownerPlayerId,
             },
             new CityAffiliation { CityId = cityId },
             new SpriteRef

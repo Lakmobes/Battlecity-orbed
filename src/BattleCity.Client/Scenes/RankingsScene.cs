@@ -149,13 +149,17 @@ public sealed class RankingsScene : IScene
         }
         else
         {
+            var half = panel.Width / 2;
             for (var i = 0; i < _rows.Count; i++)
             {
                 var (name, points) = _rows[i];
-                var y = panel.Y + 24 + (i * 36);
+                var column = i / 10;
+                var row = i % 10;
+                var y = panel.Y + 24 + (row * 36);
                 var color = i == 0 ? MenuTheme.TextAccent : MenuTheme.TextPrimary;
-                _ui.DrawText(spriteBatch, $"{i + 1,2}.  {name}", panel.X + 28, y, color);
-                _ui.DrawText(spriteBatch, points.ToString("N0"), panel.Right - 180, y, color);
+                var x = panel.X + 28 + (column * half);
+                _ui.DrawText(spriteBatch, $"{i + 1,2}.  {name}", x, y, color);
+                _ui.DrawText(spriteBatch, points.ToString("N0"), x + half - 180, y, color);
             }
         }
 
@@ -214,10 +218,16 @@ public sealed class RankingsScene : IScene
             }
 
             _waiting = false;
-            _seasonName = string.IsNullOrWhiteSpace(networkEvent.RankSeasonName)
-                ? "Season"
-                : networkEvent.RankSeasonName;
-            _rows.Clear();
+            if (!string.IsNullOrWhiteSpace(networkEvent.RankSeasonName))
+            {
+                _seasonName = networkEvent.RankSeasonName;
+            }
+
+            if (networkEvent.RankStartIndex == 0)
+            {
+                _rows.Clear();
+            }
+
             foreach (var row in networkEvent.RankRows)
             {
                 if (!string.IsNullOrWhiteSpace(row.Name))

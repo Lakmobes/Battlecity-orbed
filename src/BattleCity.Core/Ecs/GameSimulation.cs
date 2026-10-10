@@ -823,7 +823,8 @@ public sealed class GameSimulation : IDisposable
                 _cityBuilds.Values,
                 out var victimCityId,
                 out var attackerCityId,
-                out var removedOrbId))
+                out var removedOrbId,
+                out var orberPlayerId))
         {
             if (removedOrbId != 0)
             {
@@ -843,7 +844,8 @@ public sealed class GameSimulation : IDisposable
                 victimCityId,
                 attackerCityId,
                 victimPoints,
-                attackerPoints);
+                attackerPoints,
+                orberPlayerId);
 
             ApplyOrbStrike(victimCityId, attackerCityId, victimPoints, attackerPoints);
         }
@@ -1230,7 +1232,12 @@ public sealed class GameSimulation : IDisposable
         ApplyOrbStrike(victimCityId, attackerCityId, points, orberCityPoints);
     }
 
-    public bool TryDropItemForNetworkPlayer(byte playerId, ItemType type, bool active, out ServerAddItemPacket packet)
+    public bool TryDropItemForNetworkPlayer(
+        byte playerId,
+        ItemType type,
+        bool active,
+        out ServerAddItemPacket packet,
+        int? cityIdOverride = null)
     {
         packet = default;
 
@@ -1259,7 +1266,8 @@ public sealed class GameSimulation : IDisposable
                 out var gridY,
                 itemId,
                 _cityBuild,
-                _tileMap))
+                _tileMap,
+                cityIdOverride))
         {
             return false;
         }
@@ -1271,9 +1279,10 @@ public sealed class GameSimulation : IDisposable
 
         inventory.SelectNextAvailablePlaceable();
 
-        var cityId = _world.Has<CityAffiliation>(entity)
-            ? _world.Get<CityAffiliation>(entity).CityId
-            : 0;
+        var cityId = cityIdOverride
+            ?? (_world.Has<CityAffiliation>(entity)
+                ? _world.Get<CityAffiliation>(entity).CityId
+                : 0);
 
         packet = new ServerAddItemPacket(
             (ushort)gridX,

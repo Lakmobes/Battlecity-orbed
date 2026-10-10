@@ -242,6 +242,15 @@ public class ChatCommandTests
     }
 
     [Fact]
+    public void Parse_HelpCommand_IsAdminHelp()
+    {
+        Assert.Equal(ChatCommandKind.Help, ChatCommandParser.Parse("/help").Kind);
+        Assert.Equal(ChatCommandKind.Help, ChatCommandParser.Parse("/commands").Kind);
+        Assert.Equal(ChatCommandKind.Help, ChatCommandParser.Parse("/?").Kind);
+        Assert.NotEmpty(AdminCommandHelp.Lines);
+    }
+
+    [Fact]
     public void AutoBuildDesign_RejectsPathTricksAndKeepsTheFirstWord()
     {
         Assert.True(AutoBuildDesign.TryNormalize("buenos1 extra", out var name));

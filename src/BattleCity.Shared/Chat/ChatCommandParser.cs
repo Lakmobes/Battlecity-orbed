@@ -22,6 +22,7 @@ public enum ChatCommandKind
     Account,
     EditAccount,
     Load,
+    Help,
 }
 
 public readonly struct ParsedChatCommand
@@ -183,6 +184,13 @@ public static class ChatCommandParser
         {
             var arg = line.Length <= 5 ? string.Empty : line[5..].Trim();
             return new ParsedChatCommand(ChatCommandKind.Load, arg);
+        }
+
+        if (line.Equals("/help", StringComparison.OrdinalIgnoreCase)
+            || line.Equals("/commands", StringComparison.OrdinalIgnoreCase)
+            || line.Equals("/?", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ParsedChatCommand(ChatCommandKind.Help, string.Empty);
         }
 
         return new ParsedChatCommand(ChatCommandKind.Normal, line);

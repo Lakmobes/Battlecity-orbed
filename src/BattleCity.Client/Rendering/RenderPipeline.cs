@@ -95,7 +95,8 @@ public sealed class RenderPipeline
             UiLayout.WorldViewportHeight,
             context.ChatLines ?? Array.Empty<ChatLine>(),
             context.IsChatting,
-            context.ChatDraft);
+            context.ChatDraft,
+            context.LocalPlayerIsAdmin);
 
         _ui.Draw(spriteBatch, in context);
     }

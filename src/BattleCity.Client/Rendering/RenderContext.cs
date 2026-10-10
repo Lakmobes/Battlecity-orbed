@@ -23,12 +23,18 @@ public sealed class RenderContext
     public bool ShowStatusPanel { get; init; } = true;
     public bool ShowSettingsMenu { get; init; }
     public int SettingsSelectedIndex { get; init; }
+    public bool ShowControlsMenu { get; init; }
+    public int ControlsSelectedIndex { get; init; }
+    public bool ControlsWaitingForKey { get; init; }
+    public IReadOnlyList<string>? InspectLines { get; init; }
     public string? LoadedCityName { get; init; }
     public int BuildingCount { get; init; }
     public int CityTeamCount { get; init; }
     public int CityTeamCapacity { get; init; } = GameConstants.MaxPlayersPerCity;
     public string? MayorDisplayName { get; init; }
     public bool LocalPlayerIsMayor { get; init; }
+
+    public bool LocalPlayerIsAdmin { get; init; }
     public IReadOnlyList<TeamRosterLine> TeamRoster { get; init; } = [];
     public int? PlayerHealth { get; init; }
     public int? PlayerMaxHealth { get; init; }
